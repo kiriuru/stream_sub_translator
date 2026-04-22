@@ -1,0 +1,48 @@
+# Python
+.venv/
+.python/
+.bootstrap/
+__pycache__/
+*.pyc
+
+# Env
+.env
+
+# OS/IDE
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.codex/
+.cache/
+.tmp/
+build/
+dist/
+logs/
+user-data/
+*.log
+*.tmp
+
+# Local app data, secrets, and machine-specific state
+backend/data/config.json
+backend/data/install_profile.txt
+backend/data/dictionary_overrides.json
+backend/data/profiles/*.json
+!backend/data/config.example.json
+!backend/data/dictionary_overrides.example.json
+!backend/data/profiles/.gitkeep
+
+# Runtime artifacts
+backend/data/logs/*
+backend/data/exports/*
+backend/data/cache/*
+backend/data/models/*
+!backend/data/logs/.gitkeep
+!backend/data/exports/.gitkeep
+!backend/data/cache/.gitkeep
+!backend/data/models/.gitkeep
+!backend/data/models/README.txt
+
+# Local ad-hoc diagnostics
+tmp_google_asr_inline_check.js
+.tmp-google-asr-inline-check.js

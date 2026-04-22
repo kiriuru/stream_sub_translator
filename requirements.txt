@@ -1,0 +1,14 @@
+fastapi==0.135.3
+uvicorn[standard]==0.44.0
+pydantic==2.12.5
+pywebview==6.2.1
+websockets==16.0
+sounddevice==0.5.5
+numpy==2.2.6
+pyrnnoise==0.4.3
+webrtcvad-wheels==2.0.14
+onnxruntime==1.23.2
+httpx==0.28.1
+python-dotenv==1.2.2
+fsspec==2024.12.0
+nemo_toolkit[asr]==2.7.2

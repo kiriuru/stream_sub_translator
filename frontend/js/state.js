@@ -1,0 +1,30 @@
+window.AppState = {
+  runtime: {
+    is_running: false,
+    status: "idle",
+    status_message: null,
+    asr_diagnostics: null,
+    obs_caption_diagnostics: null,
+    metrics: null,
+  },
+  wsConnected: false,
+  config: null,
+  uiLanguage: "en",
+  audioDevices: [],
+  selectedAudioInputId: null,
+  transcript: {
+    partial: "",
+    finals: [],
+  },
+  selectedTranslationLanguage: null,
+  currentTranslationEntry: null,
+  selectedSubtitleOrderItem: null,
+  subtitlePayload: null,
+  subtitleStylePresets: {},
+  fontCatalog: { project_local: [], fallback: [], system: [] },
+  selectedStyleLineSlot: "source",
+  desktop: {
+    desktop_mode: false,
+  },
+  runtimeLogSignature: null,
+};
