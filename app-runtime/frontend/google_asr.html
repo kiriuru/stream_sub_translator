@@ -1,0 +1,1298 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Browser Speech Worker</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #09111b;
+        --panel: rgba(14, 24, 40, 0.84);
+        --panel-strong: rgba(7, 14, 24, 0.82);
+        --line: rgba(160, 193, 255, 0.14);
+        --line-strong: rgba(160, 193, 255, 0.24);
+        --text: #f5f7fb;
+        --muted: #9cb0d0;
+        --accent: #6cc7ff;
+        --accent-strong: #ff6ce6;
+        --danger: #e26d6d;
+        --shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(108, 199, 255, 0.2), transparent 34%),
+          radial-gradient(circle at top right, rgba(255, 108, 230, 0.18), transparent 30%),
+          radial-gradient(circle at center, rgba(124, 227, 173, 0.08), transparent 44%),
+          linear-gradient(180deg, #0b1422 0%, var(--bg) 100%);
+        color: var(--text);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      main {
+        width: min(1080px, calc(100vw - 32px));
+        margin: 24px auto;
+        display: grid;
+        gap: 20px;
+        flex: 1 0 auto;
+      }
+
+      .panel {
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01)),
+          var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        box-shadow: var(--shadow);
+        padding: 22px;
+        backdrop-filter: blur(16px);
+      }
+
+      .hero {
+        display: grid;
+        gap: 10px;
+      }
+
+      .notice {
+        margin-top: 6px;
+        padding: 14px 16px;
+        border-radius: 16px;
+        border: 1px solid rgba(108, 199, 255, 0.18);
+        background:
+          linear-gradient(135deg, rgba(108, 199, 255, 0.09), rgba(255, 108, 230, 0.08)),
+          rgba(7, 14, 24, 0.76);
+      }
+
+      .notice strong {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--text);
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .notice p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.55;
+        font-size: 14px;
+      }
+
+      .eyebrow {
+        margin: 0;
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2 {
+        margin: 0;
+      }
+
+      .muted {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1.05fr 0.95fr;
+        gap: 20px;
+      }
+
+      .stack {
+        display: grid;
+        gap: 14px;
+      }
+
+      .toggle {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 600;
+      }
+
+      label span {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--accent);
+      }
+
+      input[type="text"],
+      textarea,
+      .metric,
+      .status-card {
+        width: 100%;
+        border-radius: 16px;
+        border: 1px solid var(--line);
+        background: var(--panel-strong);
+        color: var(--text);
+      }
+
+      .status-card,
+      .metric {
+        padding: 14px 16px;
+      }
+
+      .status-value {
+        font-weight: 700;
+        color: var(--accent);
+      }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .metric-title {
+        margin: 0 0 8px;
+        font-size: 12px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .metric-value {
+        font-size: 24px;
+        font-weight: 800;
+      }
+
+      .actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      button {
+        appearance: none;
+        border: 0;
+        border-radius: 14px;
+        min-height: 48px;
+        padding: 0 16px;
+        cursor: pointer;
+        font-weight: 800;
+        font-size: 16px;
+        transition: transform 120ms ease, opacity 120ms ease, background 120ms ease;
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+        transform: none;
+      }
+
+      .primary {
+        background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+        color: #07111c;
+        box-shadow: 0 16px 34px rgba(108, 199, 255, 0.22);
+      }
+
+      .primary:hover {
+        filter: brightness(1.04);
+      }
+
+      .secondary {
+        background: rgba(7, 14, 24, 0.74);
+        color: var(--text);
+        border: 1px solid var(--line-strong);
+      }
+
+      textarea {
+        min-height: 112px;
+        resize: vertical;
+        padding: 14px 16px;
+        font: inherit;
+      }
+
+      .status-row {
+        display: grid;
+        gap: 12px;
+      }
+
+      .app-footer {
+        width: min(1080px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 0 0 24px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        opacity: 0.88;
+      }
+
+      @media (max-width: 860px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+
+        .metrics,
+        .actions {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="panel hero">
+        <p class="eyebrow" data-i18n="worker.eyebrow">Browser Speech Worker</p>
+        <h1 data-i18n="worker.title">Browser Recognition Window</h1>
+        <p class="muted" data-i18n="worker.description">
+          This worker captures microphone audio with the browser Speech Recognition API and forwards
+          partial/final text to the local subtitle app over WebSocket.
+        </p>
+        <div class="notice">
+          <strong data-i18n="worker.warning.title">Keep This Window Visible</strong>
+          <p id="visibility-warning-text" data-i18n="worker.warning.body">
+            Browser Speech can become unstable if this window is minimized, fully hidden, or left in a throttled background state for too long. For the most reliable recognition, keep this window open and visible while it is listening.
+          </p>
+        </div>
+      </section>
+
+      <section class="grid">
+        <section class="panel stack">
+          <div>
+            <p class="eyebrow" data-i18n="worker.settings.eyebrow">Worker Settings</p>
+            <h2 data-i18n="worker.settings.title">Recognition Controls</h2>
+          </div>
+          <div class="status-card">
+            <div class="metric-title" data-i18n="worker.configured_language">Configured recognition language</div>
+            <div id="configured-language" class="status-value" data-i18n="common.loading">loading...</div>
+          </div>
+          <div class="status-card stack">
+            <div>
+              <div class="metric-title" data-i18n="worker.microphone.eyebrow">Browser microphone access</div>
+              <p id="microphone-status" class="muted" data-i18n="worker.microphone.status.waiting">
+                No microphone access requested yet.
+              </p>
+            </div>
+            <label>
+              <span data-i18n="worker.microphone.detected">Detected browser microphones</span>
+              <select id="microphone-device-select"></select>
+            </label>
+            <p class="muted" data-i18n="worker.microphone.note">
+              Browser Speech follows the microphone selected in browser/site permissions. Use this panel to request access, inspect visible devices, and confirm which microphone label the browser exposes.
+            </p>
+            <div class="actions">
+              <button id="refresh-microphones" class="secondary" type="button" data-i18n="worker.microphone.refresh">Refresh Microphones</button>
+              <button id="request-microphone-access" class="secondary" type="button" data-i18n="worker.microphone.request_access">Request Microphone Access</button>
+            </div>
+          </div>
+          <label class="toggle">
+            <input id="interim-results" type="checkbox" checked />
+            <span data-i18n="worker.interim">Return interim results</span>
+          </label>
+          <label class="toggle">
+            <input id="continuous-results" type="checkbox" />
+            <span data-i18n="worker.continuous">Return continuous results</span>
+          </label>
+          <label class="toggle">
+            <input id="force-finalization" type="checkbox" checked />
+            <span data-i18n="worker.force_finalization">Force-finalize the current interim if the browser never emits a final result</span>
+          </label>
+          <p class="muted" data-i18n="worker.force_finalization.note">
+            Forced finalization uses a short idle timeout and sends the current interim text to the main app as a final segment.
+          </p>
+          <div class="actions">
+            <button id="start-recognition" class="primary" type="button" data-i18n="worker.start">Start Recognition</button>
+            <button id="stop-recognition" class="secondary" type="button" data-i18n="common.stop">Stop</button>
+          </div>
+        </section>
+
+        <section class="panel status-row">
+          <div>
+            <p class="eyebrow" data-i18n="worker.status.eyebrow">Runtime Status</p>
+            <h2 data-i18n="worker.status.title">Live Diagnostics</h2>
+          </div>
+          <div class="status-card">
+            <div class="metric-title" data-i18n="worker.status.label">Status</div>
+            <div id="worker-status" class="status-value">idle</div>
+          </div>
+          <div class="status-card">
+            <div class="metric-title" data-i18n="worker.on_sound">onSound</div>
+            <div id="on-sound-status" class="status-value">no</div>
+          </div>
+          <div class="metrics">
+            <div class="metric">
+              <p class="metric-title" data-i18n="worker.metric.approx">Approx sentence count</p>
+              <div id="approx-count" class="metric-value">0</div>
+            </div>
+            <div class="metric">
+              <p class="metric-title" data-i18n="worker.metric.final">Final sentence count</p>
+              <div id="final-count" class="metric-value">0</div>
+            </div>
+            <div class="metric">
+              <p class="metric-title" data-i18n="worker.metric.missing">Final missing count</p>
+              <div id="missing-final-count" class="metric-value">0</div>
+            </div>
+            <div class="metric">
+              <p class="metric-title" data-i18n="worker.metric.forced">Forced confirmations</p>
+              <div id="forced-count" class="metric-value">0</div>
+            </div>
+            <div class="metric">
+              <p class="metric-title" data-i18n="worker.metric.app_sends">Updates sent to app</p>
+              <div id="app-send-count" class="metric-value">0</div>
+            </div>
+            <div class="metric">
+              <p class="metric-title" data-i18n="worker.metric.websocket">WebSocket</p>
+              <div id="socket-status" class="metric-value">connecting</div>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="grid">
+        <section class="panel stack">
+          <div>
+            <p class="eyebrow" data-i18n="worker.partial.eyebrow">Interim</p>
+            <h2 data-i18n="worker.partial.title">Live Partial Text</h2>
+          </div>
+          <textarea id="partial-box" readonly></textarea>
+        </section>
+        <section class="panel stack">
+          <div>
+            <p class="eyebrow" data-i18n="worker.final.eyebrow">Final</p>
+            <h2 data-i18n="worker.final.title">Last Final Text</h2>
+          </div>
+          <textarea id="final-box" readonly></textarea>
+        </section>
+      </section>
+
+    </main>
+
+    <footer class="app-footer">
+      <span>Powered by Kiriuru</span>
+    </footer>
+
+    <script src="/static/js/i18n.js?v=20260421a"></script>
+    <script>
+      (() => {
+        const t = (key, variables) => (window.I18n?.t ? window.I18n.t(key, variables) : key);
+        const locale = () => window.I18n?.getLocale?.() || "en";
+        const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const statusEl = document.getElementById("worker-status");
+        const onSoundEl = document.getElementById("on-sound-status");
+        const approxCountEl = document.getElementById("approx-count");
+        const finalCountEl = document.getElementById("final-count");
+        const missingFinalCountEl = document.getElementById("missing-final-count");
+        const forcedCountEl = document.getElementById("forced-count");
+        const appSendCountEl = document.getElementById("app-send-count");
+        const socketStatusEl = document.getElementById("socket-status");
+        const configuredLanguageEl = document.getElementById("configured-language");
+        const visibilityWarningText = document.getElementById("visibility-warning-text");
+        const microphoneStatusEl = document.getElementById("microphone-status");
+        const microphoneDeviceSelect = document.getElementById("microphone-device-select");
+        const refreshMicrophonesButton = document.getElementById("refresh-microphones");
+        const requestMicrophoneAccessButton = document.getElementById("request-microphone-access");
+        const partialBox = document.getElementById("partial-box");
+        const finalBox = document.getElementById("final-box");
+        const interimResultsToggle = document.getElementById("interim-results");
+        const continuousResultsToggle = document.getElementById("continuous-results");
+        const forceFinalizationToggle = document.getElementById("force-finalization");
+        const startButton = document.getElementById("start-recognition");
+        const stopButton = document.getElementById("stop-recognition");
+
+        const state = {
+          configuredLanguage: "ru-RU",
+          sourceLang: "ru",
+          desiredRunning: false,
+          socket: null,
+          recognition: null,
+          reconnectTimer: null,
+          forceFinalizeTimer: null,
+          currentPartial: "",
+          approxCount: 0,
+          finalCount: 0,
+          missingFinalCount: 0,
+          forcedCount: 0,
+          appSendCount: 0,
+          onSound: false,
+          hasOpenSentence: false,
+          websocketReady: false,
+          forceFinalizationTimeoutMs: 1600,
+          currentStatus: "idle",
+          restartTimer: null,
+          restartAttemptsWithoutAudio: 0,
+          microphoneDevices: [],
+          selectedMicrophoneId: "",
+          selectedMicrophoneLabel: "",
+          lastRecognitionStartAt: 0,
+          lastAudioActivityAt: 0,
+          lastErrorCode: "",
+          lastErrorMessage: "",
+          logLines: [],
+          settingsSavePromise: Promise.resolve(),
+        };
+
+        const workerDefaults = Object.freeze({
+          recognitionLanguage: "ru-RU",
+          interimResults: true,
+          continuousResults: false,
+          forceFinalizationEnabled: true,
+          forceFinalizationTimeoutMs: 1600,
+        });
+
+        function formatNow() {
+          return new Date().toLocaleTimeString([], { hour12: false });
+        }
+
+        function sendClientLogPayload(payload) {
+          const body = JSON.stringify(payload);
+          fetch("/api/logs/client-event", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body,
+          }).catch(() => {
+            if (typeof navigator?.sendBeacon === "function") {
+              try {
+                navigator.sendBeacon(
+                  "/api/logs/client-event",
+                  new Blob([body], { type: "application/json" })
+                );
+              } catch (_error) {
+                // best-effort fallback
+              }
+            }
+          });
+        }
+
+        function postClientLog(message, details) {
+          const payload = {
+            channel: "browser_worker",
+            source: "browser-worker",
+            message: String(message || "").trim(),
+          };
+          if (!payload.message) {
+            return;
+          }
+          if (details && typeof details === "object") {
+            payload.details = details;
+          }
+          sendClientLogPayload(payload);
+        }
+
+        function shouldPersistWorkerLog(message) {
+          const normalized = String(message || "").trim().toLowerCase();
+          if (!normalized) {
+            return false;
+          }
+          return [
+            "worker initialized",
+            "worker ready",
+            "settings loaded",
+            "settings load failed",
+            "document visibility changed",
+            "window blur",
+            "window focus",
+            "requesting microphone permission",
+            "microphone permission granted",
+            "microphone permission failed",
+            "browser microphone list updated",
+            "browser microphone selected",
+            "recognition.start",
+            "recognition.start failed",
+            "recognition.onstart",
+            "recognition.onsoundstart",
+            "recognition.onsoundend",
+            "recognition.onerror",
+            "recognition.onend",
+            "websocket connected",
+            "websocket closed",
+            "websocket error",
+            "restart scheduled",
+            "restart cancelled",
+            "auto-restart stopped",
+            "stop requested by user",
+          ].some((token) => normalized.includes(token));
+        }
+
+        function appendLog(message) {
+          const line = `[${formatNow()}] ${String(message || "").trim()}`;
+          state.logLines.push(line);
+          if (state.logLines.length > 160) {
+            state.logLines = state.logLines.slice(-160);
+          }
+          if (shouldPersistWorkerLog(message)) {
+            postClientLog(message);
+          }
+        }
+
+        function ensureSettingsPayloadShape(payload) {
+          const normalized = payload && typeof payload === "object" ? payload : {};
+          normalized.asr = normalized.asr && typeof normalized.asr === "object" ? normalized.asr : {};
+          normalized.asr.browser =
+            normalized.asr.browser && typeof normalized.asr.browser === "object" ? normalized.asr.browser : {};
+          return normalized;
+        }
+
+        function readWorkerSettingsFromControls() {
+          return {
+            recognition_language: String(state.configuredLanguage || workerDefaults.recognitionLanguage),
+            interim_results: interimResultsToggle.checked,
+            continuous_results: continuousResultsToggle.checked,
+            force_finalization_enabled: forceFinalizationToggle.checked,
+            force_finalization_timeout_ms: state.forceFinalizationTimeoutMs,
+          };
+        }
+
+        function applyRecognitionSettingsToRuntime() {
+          if (!state.recognition) {
+            return;
+          }
+          state.recognition.lang = state.configuredLanguage;
+          state.recognition.interimResults = interimResultsToggle.checked;
+          state.recognition.continuous = continuousResultsToggle.checked;
+        }
+
+        function maybeRestartRecognitionAfterSettingsChange() {
+          if (!state.desiredRunning || !state.recognition) {
+            return;
+          }
+          appendLog("worker settings changed; restarting recognition to apply them immediately");
+          state.restartAttemptsWithoutAudio = 0;
+          clearForceFinalizeTimer();
+          clearRestartTimer();
+          setStatus("restarting");
+          try {
+            state.recognition.stop();
+          } catch (_error) {
+            window.setTimeout(() => {
+              tryStartRecognition();
+            }, 120);
+          }
+        }
+
+        function queueBrowserSettingsSave(reason) {
+          const nextWorkerSettings = readWorkerSettingsFromControls();
+          state.settingsSavePromise = state.settingsSavePromise
+            .catch(() => undefined)
+            .then(async () => {
+              const response = await fetch("/api/settings/load");
+              const data = await response.json();
+              const payload = ensureSettingsPayloadShape(data?.payload);
+              payload.asr.browser = {
+                ...payload.asr.browser,
+                ...nextWorkerSettings,
+              };
+              const saveResponse = await fetch("/api/settings/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ payload }),
+              });
+              const savedData = await saveResponse.json();
+              const savedBrowser =
+                savedData?.payload?.asr?.browser && typeof savedData.payload.asr.browser === "object"
+                  ? savedData.payload.asr.browser
+                  : payload.asr.browser;
+              state.configuredLanguage = String(
+                savedBrowser.recognition_language || workerDefaults.recognitionLanguage
+              );
+              state.sourceLang = String(
+                state.configuredLanguage.split("-", 1)[0] || "ru"
+              ).toLowerCase();
+              interimResultsToggle.checked = savedBrowser.interim_results !== false;
+              continuousResultsToggle.checked = savedBrowser.continuous_results === true;
+              forceFinalizationToggle.checked = savedBrowser.force_finalization_enabled !== false;
+              state.forceFinalizationTimeoutMs = Math.max(
+                300,
+                Number.parseInt(
+                  String(savedBrowser.force_finalization_timeout_ms || workerDefaults.forceFinalizationTimeoutMs),
+                  10
+                ) || workerDefaults.forceFinalizationTimeoutMs
+              );
+              applyRecognitionSettingsToRuntime();
+              if (!forceFinalizationToggle.checked) {
+                clearForceFinalizeTimer();
+              } else if (state.currentPartial) {
+                scheduleForceFinalize();
+              }
+              updateCounters();
+              appendLog(
+                `worker settings autosaved (${reason}): interim=${interimResultsToggle.checked}, continuous=${continuousResultsToggle.checked}, force_finalization=${forceFinalizationToggle.checked}`
+              );
+            })
+            .catch((error) => {
+              const message = error instanceof Error ? error.message : String(error || "");
+              appendLog(`worker settings autosave failed (${reason}): ${message}`);
+            });
+          return state.settingsSavePromise;
+        }
+
+        function updateVisibilityWarning() {
+          if (!visibilityWarningText) {
+            return;
+          }
+          if (document.hidden) {
+            visibilityWarningText.textContent = locale() === "ru"
+              ? "Окно browser speech сейчас скрыто или свернуто. В таком состоянии браузерное распознавание может подвисать, завершаться через onend или переставать выдавать partial/final результаты."
+              : "The browser speech window is currently hidden or minimized. In this state, browser recognition can stall, end via onend, or stop producing partial/final results.";
+            return;
+          }
+          visibilityWarningText.textContent = t("worker.warning.body");
+        }
+
+        function localizeStatus(value) {
+          const map = {
+            idle: locale() === "ru" ? "ожидание" : "idle",
+            ready: locale() === "ru" ? "готово" : "ready",
+            listening: locale() === "ru" ? "слушает" : "listening",
+            "capturing-audio": locale() === "ru" ? "идёт захват аудио" : "capturing-audio",
+            "forced-finalized": locale() === "ru" ? "принудительно завершено" : "forced-finalized",
+            "waiting-for-websocket": locale() === "ru" ? "ожидание websocket" : "waiting-for-websocket",
+            "socket-reconnecting": locale() === "ru" ? "переподключение websocket" : "socket-reconnecting",
+            "socket-error": locale() === "ru" ? "ошибка websocket" : "socket-error",
+            restarting: locale() === "ru" ? "перезапуск" : "restarting",
+            stopped: locale() === "ru" ? "остановлено" : "stopped",
+            stopping: locale() === "ru" ? "остановка" : "stopping",
+            interim: locale() === "ru" ? "получен partial" : "interim",
+            final: locale() === "ru" ? "получен final" : "final",
+            "unsupported-browser": locale() === "ru" ? "браузер не поддерживается" : "unsupported-browser",
+          };
+          return map[value] || value;
+        }
+
+        function setStatus(value) {
+          state.currentStatus = value;
+          statusEl.textContent = localizeStatus(value);
+        }
+
+        function updateCounters() {
+          approxCountEl.textContent = String(state.approxCount);
+          finalCountEl.textContent = String(state.finalCount);
+          missingFinalCountEl.textContent = String(state.missingFinalCount);
+          forcedCountEl.textContent = String(state.forcedCount);
+          appSendCountEl.textContent = String(state.appSendCount);
+          onSoundEl.textContent = state.onSound ? t("common.yes") : t("common.no");
+          socketStatusEl.textContent = state.websocketReady ? t("common.connected") : t("common.disconnected");
+          configuredLanguageEl.textContent = locale() === "ru"
+            ? `${state.configuredLanguage} -> источник ${state.sourceLang}`
+            : `${state.configuredLanguage} -> source ${state.sourceLang}`;
+        }
+
+        function setMicrophoneStatus(message) {
+          if (microphoneStatusEl) {
+            microphoneStatusEl.textContent = message;
+          }
+        }
+
+        function renderMicrophoneDevices() {
+          if (!microphoneDeviceSelect) {
+            return;
+          }
+          microphoneDeviceSelect.innerHTML = "";
+          const devices = Array.isArray(state.microphoneDevices) ? state.microphoneDevices : [];
+          if (!devices.length) {
+            const option = document.createElement("option");
+            option.value = "";
+            option.textContent = locale() === "ru" ? "Браузер пока не раскрыл микрофоны" : "No browser microphones available yet";
+            microphoneDeviceSelect.appendChild(option);
+            microphoneDeviceSelect.disabled = true;
+            return;
+          }
+          microphoneDeviceSelect.disabled = false;
+          devices.forEach((device, index) => {
+            const option = document.createElement("option");
+            option.value = device.deviceId;
+            option.textContent = device.label || (locale() === "ru"
+              ? `Микрофон ${index + 1}`
+              : `Microphone ${index + 1}`);
+            microphoneDeviceSelect.appendChild(option);
+          });
+          const selectedId = devices.some((device) => device.deviceId === state.selectedMicrophoneId)
+            ? state.selectedMicrophoneId
+            : devices[0]?.deviceId || "";
+          microphoneDeviceSelect.value = selectedId;
+          state.selectedMicrophoneId = selectedId;
+          state.selectedMicrophoneLabel = devices.find((device) => device.deviceId === selectedId)?.label || "";
+        }
+
+        async function refreshMicrophoneDevices() {
+          if (!navigator.mediaDevices?.enumerateDevices) {
+            setMicrophoneStatus(locale() === "ru"
+              ? "Браузер не предоставляет список микрофонов через MediaDevices."
+              : "This browser does not expose a microphone list through MediaDevices.");
+            return;
+          }
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          state.microphoneDevices = devices.filter((device) => device.kind === "audioinput");
+          renderMicrophoneDevices();
+          appendLog(`browser microphone list updated: ${state.microphoneDevices.length} device(s)`);
+          if (!state.microphoneDevices.length) {
+            setMicrophoneStatus(locale() === "ru"
+              ? "После выдачи доступа браузер покажет доступные микрофоны здесь."
+              : "Available microphones will appear here after browser access is granted.");
+            return;
+          }
+          if (state.selectedMicrophoneLabel) {
+            setMicrophoneStatus(locale() === "ru"
+              ? `Выбранный браузером микрофон: ${state.selectedMicrophoneLabel}`
+              : `Browser-visible microphone: ${state.selectedMicrophoneLabel}`);
+            return;
+          }
+          setMicrophoneStatus(locale() === "ru"
+            ? "Выберите микрофон ниже и при необходимости заново запросите доступ."
+            : "Choose a microphone below and request access again if needed.");
+        }
+
+        function clearForceFinalizeTimer() {
+          if (state.forceFinalizeTimer) {
+            clearTimeout(state.forceFinalizeTimer);
+            state.forceFinalizeTimer = null;
+          }
+        }
+
+        function clearRestartTimer() {
+          if (state.restartTimer) {
+            clearTimeout(state.restartTimer);
+            state.restartTimer = null;
+          }
+        }
+
+        function hasRecentAudioActivity() {
+          return state.lastAudioActivityAt > 0 && (Date.now() - state.lastAudioActivityAt) < 10000;
+        }
+
+        function isTerminalRecognitionError(errorCode) {
+          return ["not-allowed", "service-not-allowed", "audio-capture", "language-not-supported"].includes(
+            String(errorCode || "").trim().toLowerCase()
+          );
+        }
+
+        function markAudioActivity(label) {
+          state.lastAudioActivityAt = Date.now();
+          state.restartAttemptsWithoutAudio = 0;
+          appendLog(`audio activity: ${label}`);
+        }
+
+        function scheduleRecognitionRestart(reason) {
+          clearRestartTimer();
+          if (!state.desiredRunning) {
+            appendLog(`restart skipped: desiredRunning=false (${reason})`);
+            return;
+          }
+          if (isTerminalRecognitionError(state.lastErrorCode)) {
+            state.desiredRunning = false;
+            appendLog(`restart cancelled due to terminal error: ${state.lastErrorCode}`);
+            setStatus(
+              locale() === "ru"
+                ? `остановлено: ошибка ${state.lastErrorCode}`
+                : `stopped: ${state.lastErrorCode}`
+            );
+            return;
+          }
+          if (!hasRecentAudioActivity()) {
+            state.restartAttemptsWithoutAudio += 1;
+          } else {
+            state.restartAttemptsWithoutAudio = 0;
+          }
+          if (state.restartAttemptsWithoutAudio >= 4) {
+            state.desiredRunning = false;
+            appendLog("auto-restart stopped after repeated starts without audio activity");
+            setStatus(
+              locale() === "ru"
+                ? "остановлено: браузер не получает звук с микрофона"
+                : "stopped: browser never received microphone audio"
+            );
+            return;
+          }
+          const delayMs = 400 + Math.max(0, state.restartAttemptsWithoutAudio - 1) * 450;
+          appendLog(`restart scheduled in ${delayMs} ms (${reason})`);
+          setStatus("restarting");
+          state.restartTimer = window.setTimeout(() => {
+            tryStartRecognition();
+          }, delayMs);
+        }
+
+        function scheduleForceFinalize() {
+          clearForceFinalizeTimer();
+          if (!forceFinalizationToggle.checked || !state.currentPartial) {
+            return;
+          }
+          state.forceFinalizeTimer = window.setTimeout(() => {
+            if (!state.currentPartial) {
+              return;
+            }
+            state.missingFinalCount += 1;
+            state.forcedCount += 1;
+            sendUpdate({
+              partial: state.currentPartial,
+              final: state.currentPartial,
+              is_final: true,
+              source_lang: state.sourceLang,
+            });
+            finalBox.value = state.currentPartial;
+            partialBox.value = "";
+            state.currentPartial = "";
+            state.hasOpenSentence = false;
+            updateCounters();
+            setStatus("forced-finalized");
+          }, state.forceFinalizationTimeoutMs);
+        }
+
+        function sendUpdate(payload) {
+          if (!state.socket || state.socket.readyState !== WebSocket.OPEN) {
+            setStatus("waiting-for-websocket");
+            appendLog("partial/final skipped: websocket is not open");
+            return;
+          }
+          state.socket.send(
+            JSON.stringify({
+              type: "external_asr_update",
+              partial: payload.partial || "",
+              final: payload.final || "",
+              is_final: Boolean(payload.is_final),
+              source_lang: payload.source_lang || state.sourceLang,
+            })
+          );
+          state.appSendCount += 1;
+          updateCounters();
+        }
+
+        function connectSocket() {
+          clearTimeout(state.reconnectTimer);
+          const protocol = location.protocol === "https:" ? "wss" : "ws";
+          const socket = new WebSocket(`${protocol}://${location.host}/ws/asr_worker`);
+          state.socket = socket;
+          socket.addEventListener("open", () => {
+            state.websocketReady = true;
+            updateCounters();
+            appendLog("websocket connected");
+            setStatus(state.desiredRunning ? "ready" : "idle");
+          });
+          socket.addEventListener("close", () => {
+            state.websocketReady = false;
+            updateCounters();
+            appendLog("websocket closed");
+            if (state.desiredRunning) {
+              setStatus("socket-reconnecting");
+              state.reconnectTimer = window.setTimeout(connectSocket, 1000);
+            }
+          });
+          socket.addEventListener("error", () => {
+            state.websocketReady = false;
+            updateCounters();
+            appendLog("websocket error");
+            setStatus("socket-error");
+          });
+        }
+
+        async function loadSettings() {
+          try {
+            const response = await fetch("/api/settings/load");
+            const data = await response.json();
+            const browserConfig = data?.payload?.asr?.browser || {};
+            state.configuredLanguage = String(
+              browserConfig.recognition_language || workerDefaults.recognitionLanguage
+            );
+            state.sourceLang = String(state.configuredLanguage.split("-", 1)[0] || "ru").toLowerCase();
+            interimResultsToggle.checked = browserConfig.interim_results !== false;
+            continuousResultsToggle.checked = browserConfig.continuous_results === true;
+            forceFinalizationToggle.checked = browserConfig.force_finalization_enabled !== false;
+            state.forceFinalizationTimeoutMs = Math.max(
+              300,
+              Number.parseInt(
+                String(browserConfig.force_finalization_timeout_ms || workerDefaults.forceFinalizationTimeoutMs),
+                10
+              ) || workerDefaults.forceFinalizationTimeoutMs
+            );
+            appendLog(
+              `settings loaded: lang=${state.configuredLanguage}, interim=${interimResultsToggle.checked}, continuous=${continuousResultsToggle.checked}, force_finalization=${forceFinalizationToggle.checked}`
+            );
+            updateCounters();
+          } catch (_error) {
+            state.configuredLanguage = workerDefaults.recognitionLanguage;
+            state.sourceLang = "ru";
+            interimResultsToggle.checked = workerDefaults.interimResults;
+            continuousResultsToggle.checked = workerDefaults.continuousResults;
+            forceFinalizationToggle.checked = workerDefaults.forceFinalizationEnabled;
+            state.forceFinalizationTimeoutMs = workerDefaults.forceFinalizationTimeoutMs;
+            configuredLanguageEl.textContent = locale() === "ru" ? "ru-RU -> источник ru" : "ru-RU -> source ru";
+            appendLog("settings load failed; using defaults");
+          }
+        }
+
+        function ensureRecognition() {
+          if (!SpeechRecognitionCtor) {
+            throw new Error(locale() === "ru"
+              ? "Этот браузер не предоставляет SpeechRecognition / webkitSpeechRecognition."
+              : "This browser does not expose SpeechRecognition / webkitSpeechRecognition.");
+          }
+          if (!state.recognition) {
+            state.recognition = new SpeechRecognitionCtor();
+            state.recognition.maxAlternatives = 1;
+            state.recognition.onstart = () => {
+              state.lastErrorCode = "";
+              state.lastErrorMessage = "";
+              appendLog("recognition.onstart");
+              setStatus("listening");
+            };
+            state.recognition.onaudiostart = () => {
+              appendLog("recognition.onaudiostart");
+              setStatus("capturing-audio");
+            };
+            state.recognition.onaudioend = () => {
+              appendLog("recognition.onaudioend");
+            };
+            state.recognition.onsoundstart = () => {
+              state.onSound = true;
+              markAudioActivity("onsoundstart");
+              appendLog("recognition.onsoundstart");
+              updateCounters();
+            };
+            state.recognition.onsoundend = () => {
+              state.onSound = false;
+              appendLog("recognition.onsoundend");
+              updateCounters();
+            };
+            state.recognition.onspeechstart = () => {
+              markAudioActivity("onspeechstart");
+              appendLog("recognition.onspeechstart");
+            };
+            state.recognition.onspeechend = () => {
+              appendLog("recognition.onspeechend");
+              updateCounters();
+            };
+            state.recognition.onnomatch = () => {
+              appendLog("recognition.onnomatch");
+            };
+            state.recognition.onerror = (event) => {
+              state.lastErrorCode = String(event?.error || "").trim().toLowerCase();
+              state.lastErrorMessage = String(event?.message || "");
+              appendLog(`recognition.onerror: ${state.lastErrorCode || "unknown"} ${state.lastErrorMessage}`.trim());
+              setStatus(locale() === "ru" ? `ошибка: ${event.error || "неизвестно"}` : `error: ${event.error || "unknown"}`);
+            };
+            state.recognition.onend = () => {
+              state.onSound = false;
+              updateCounters();
+              appendLog(
+                `recognition.onend (desiredRunning=${state.desiredRunning}, lastError=${state.lastErrorCode || "none"}, noAudioRestarts=${state.restartAttemptsWithoutAudio})`
+              );
+              if (state.desiredRunning) {
+                scheduleRecognitionRestart("onend");
+              } else {
+                setStatus("stopped");
+              }
+            };
+            state.recognition.onresult = (event) => {
+              let interimText = "";
+              let finalText = "";
+              for (let index = event.resultIndex; index < event.results.length; index += 1) {
+                const result = event.results[index];
+                const transcript = String(result?.[0]?.transcript || "").trim();
+                if (!transcript) {
+                  continue;
+                }
+                if (result.isFinal) {
+                  finalText = `${finalText} ${transcript}`.trim();
+                } else {
+                  interimText = `${interimText} ${transcript}`.trim();
+                }
+              }
+              if (interimText) {
+                markAudioActivity("onresult:interim");
+                if (!state.hasOpenSentence) {
+                  state.approxCount += 1;
+                  state.hasOpenSentence = true;
+                }
+                state.currentPartial = interimText;
+                partialBox.value = interimText;
+                sendUpdate({
+                  partial: interimText,
+                  final: "",
+                  is_final: false,
+                  source_lang: state.sourceLang,
+                });
+                scheduleForceFinalize();
+                setStatus("interim");
+              }
+              if (finalText) {
+                markAudioActivity("onresult:final");
+                clearForceFinalizeTimer();
+                state.finalCount += 1;
+                state.currentPartial = "";
+                state.hasOpenSentence = false;
+                finalBox.value = finalText;
+                partialBox.value = "";
+                sendUpdate({
+                  partial: "",
+                  final: finalText,
+                  is_final: true,
+                  source_lang: state.sourceLang,
+                });
+                updateCounters();
+                setStatus("final");
+              }
+            };
+          }
+          applyRecognitionSettingsToRuntime();
+          return state.recognition;
+        }
+
+        async function ensureMicrophonePermission() {
+          const selectedDeviceId = String(state.selectedMicrophoneId || "").trim();
+          appendLog("requesting microphone permission via getUserMedia");
+          const preferredAudioConstraints = selectedDeviceId
+            ? { deviceId: { exact: selectedDeviceId } }
+            : true;
+          let stream;
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: preferredAudioConstraints });
+          } catch (error) {
+            if (!selectedDeviceId) {
+              throw error;
+            }
+            appendLog("microphone permission failed for selected device; retrying with browser default microphone");
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          }
+          const [track] = stream.getAudioTracks();
+          appendLog(
+            `microphone permission granted${track?.label ? `: ${track.label}` : ""}`
+          );
+          state.selectedMicrophoneLabel = track?.label || state.selectedMicrophoneLabel || "";
+          setMicrophoneStatus(
+            state.selectedMicrophoneLabel
+              ? (locale() === "ru"
+                ? `Доступ к микрофону получен: ${state.selectedMicrophoneLabel}`
+                : `Microphone access granted: ${state.selectedMicrophoneLabel}`)
+              : (locale() === "ru"
+                ? "Доступ к микрофону получен."
+                : "Microphone access granted.")
+          );
+          await refreshMicrophoneDevices();
+          stream.getTracks().forEach((track) => track.stop());
+        }
+
+        async function tryStartRecognition() {
+          if (!state.desiredRunning) {
+            return;
+          }
+          try {
+            const recognition = ensureRecognition();
+            state.lastRecognitionStartAt = Date.now();
+            appendLog(
+              `recognition.start lang=${state.configuredLanguage}, interim=${recognition.interimResults}, continuous=${recognition.continuous}`
+            );
+            recognition.start();
+          } catch (error) {
+            const message = error instanceof Error ? error.message : (locale() === "ru" ? "Не удалось запустить браузерное распознавание." : "Could not start browser speech recognition.");
+            appendLog(`recognition.start failed: ${message}`);
+            setStatus(message);
+          }
+        }
+
+        async function startRecognition() {
+          if (!SpeechRecognitionCtor) {
+            setStatus("unsupported-browser");
+            return;
+          }
+          state.desiredRunning = true;
+          state.lastErrorCode = "";
+          state.lastErrorMessage = "";
+          state.restartAttemptsWithoutAudio = 0;
+          clearRestartTimer();
+          try {
+            await ensureMicrophonePermission();
+          } catch (error) {
+            const message = error instanceof Error ? error.message : (locale() === "ru" ? "Доступ к микрофону не был выдан." : "Microphone permission was denied.");
+            appendLog(`microphone permission failed: ${message}`);
+            setStatus(locale() === "ru" ? `ошибка микрофона: ${message}` : `mic-error: ${message}`);
+            state.desiredRunning = false;
+            return;
+          }
+          if (!state.socket || state.socket.readyState > WebSocket.OPEN) {
+            connectSocket();
+          }
+          await tryStartRecognition();
+        }
+
+        function stopRecognition() {
+          appendLog("stop requested by user");
+          state.desiredRunning = false;
+          clearForceFinalizeTimer();
+          clearRestartTimer();
+          state.currentPartial = "";
+          state.hasOpenSentence = false;
+          if (state.recognition) {
+            try {
+              state.recognition.stop();
+            } catch (_error) {
+              // no-op
+            }
+          }
+          setStatus("stopping");
+        }
+
+        startButton.addEventListener("click", async () => {
+          await startRecognition();
+        });
+
+        stopButton.addEventListener("click", () => {
+          stopRecognition();
+        });
+
+        if (microphoneDeviceSelect) {
+          microphoneDeviceSelect.addEventListener("change", () => {
+            state.selectedMicrophoneId = String(microphoneDeviceSelect.value || "");
+            state.selectedMicrophoneLabel = state.microphoneDevices.find(
+              (device) => device.deviceId === state.selectedMicrophoneId
+            )?.label || "";
+            appendLog(
+              `browser microphone selected: ${state.selectedMicrophoneLabel || state.selectedMicrophoneId || "default"}`
+            );
+            setMicrophoneStatus(
+              state.selectedMicrophoneLabel
+                ? (locale() === "ru"
+                  ? `Выбран браузерный микрофон: ${state.selectedMicrophoneLabel}`
+                  : `Selected browser microphone: ${state.selectedMicrophoneLabel}`)
+                : (locale() === "ru"
+                  ? "Выбран браузерный микрофон. При необходимости заново запросите доступ."
+                  : "Browser microphone selected. Request access again if needed.")
+            );
+          });
+        }
+
+        if (refreshMicrophonesButton) {
+          refreshMicrophonesButton.addEventListener("click", () => {
+            refreshMicrophoneDevices().catch((error) => {
+              const message = error instanceof Error ? error.message : String(error || "");
+              appendLog(`microphone list refresh failed: ${message}`);
+              setMicrophoneStatus(
+                locale() === "ru"
+                  ? `Не удалось обновить список микрофонов: ${message}`
+                  : `Could not refresh microphone list: ${message}`
+              );
+            });
+          });
+        }
+
+        if (requestMicrophoneAccessButton) {
+          requestMicrophoneAccessButton.addEventListener("click", async () => {
+            try {
+              await ensureMicrophonePermission();
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error || "");
+              appendLog(`microphone permission failed: ${message}`);
+              setMicrophoneStatus(
+                locale() === "ru"
+                  ? `Ошибка доступа к микрофону: ${message}`
+                  : `Microphone access failed: ${message}`
+              );
+            }
+          });
+        }
+
+        if (interimResultsToggle) {
+          interimResultsToggle.addEventListener("change", () => {
+            applyRecognitionSettingsToRuntime();
+            queueBrowserSettingsSave("interim_results");
+            maybeRestartRecognitionAfterSettingsChange();
+          });
+        }
+
+        if (continuousResultsToggle) {
+          continuousResultsToggle.addEventListener("change", () => {
+            applyRecognitionSettingsToRuntime();
+            queueBrowserSettingsSave("continuous_results");
+            maybeRestartRecognitionAfterSettingsChange();
+          });
+        }
+
+        if (forceFinalizationToggle) {
+          forceFinalizationToggle.addEventListener("change", () => {
+            if (!forceFinalizationToggle.checked) {
+              clearForceFinalizeTimer();
+            } else if (state.currentPartial) {
+              scheduleForceFinalize();
+            }
+            queueBrowserSettingsSave("force_finalization");
+          });
+        }
+
+        window.addEventListener("beforeunload", () => {
+          stopRecognition();
+          if (state.socket && state.socket.readyState <= WebSocket.OPEN) {
+            state.socket.close();
+          }
+        });
+
+        document.addEventListener("visibilitychange", () => {
+          appendLog(`document visibility changed: ${document.hidden ? "hidden" : "visible"}`);
+          updateVisibilityWarning();
+        });
+
+        window.addEventListener("blur", () => {
+          appendLog("window blur");
+        });
+
+        window.addEventListener("focus", () => {
+          appendLog("window focus");
+        });
+
+        if (window.I18n) {
+          const requestedLocale = new URLSearchParams(window.location.search).get("locale");
+          if (requestedLocale) {
+            window.I18n.setLocale(requestedLocale);
+          }
+          window.I18n.apply(document);
+          document.title = t("document.title.worker");
+          setStatus("idle");
+          updateCounters();
+          appendLog("worker initialized");
+          window.addEventListener("sst:locale-changed", () => {
+            window.I18n.apply(document);
+            document.title = t("document.title.worker");
+            setStatus(state.currentStatus);
+            updateCounters();
+            updateVisibilityWarning();
+            startButton.textContent = t("worker.start");
+            stopButton.textContent = t("common.stop");
+          });
+        }
+
+        loadSettings().finally(() => {
+          connectSocket();
+          updateCounters();
+          updateVisibilityWarning();
+          refreshMicrophoneDevices().catch(() => {
+            setMicrophoneStatus(locale() === "ru"
+              ? "Откройте доступ к микрофону, чтобы увидеть список устройств."
+              : "Grant microphone access to see available devices.");
+          });
+          const params = new URLSearchParams(location.search);
+          appendLog(`worker ready; autostart=${params.get("autostart") === "1" ? "yes" : "no"}`);
+          if (params.get("autostart") === "1") {
+            window.setTimeout(() => {
+              startRecognition();
+            }, 150);
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>

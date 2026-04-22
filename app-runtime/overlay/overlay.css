@@ -1,0 +1,43 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.overlay {
+  padding: 16px;
+}
+
+.overlay-debug {
+  margin-top: 12px;
+  max-width: 900px;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-shadow: none;
+}
+
+.overlay-debug-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  opacity: 0.9;
+}
+
+.overlay-debug-log {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  max-height: 220px;
+  overflow: auto;
+  color: #d8f6e1;
+}
+
+.compact {
+  padding: 10px 12px;
+}
