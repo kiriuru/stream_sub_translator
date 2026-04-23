@@ -7,6 +7,9 @@ This release README is focused on the desktop product only.
 ## Language
 - Russian version: [README.ru.md](./README.ru.md)
 
+## Technical Documentation
+- Full technical architecture document: [docs/TECHNICAL_ARCHITECTURE.md](./docs/TECHNICAL_ARCHITECTURE.md)
+
 ## Release Package
 This clean release contains only:
 - `Stream Subtitle Translator.exe`
