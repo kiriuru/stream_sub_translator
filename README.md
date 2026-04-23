@@ -140,7 +140,7 @@ The main window includes:
 - CPU fallback is available when needed.
 
 ### Browser Speech
-- Uses a separate browser worker window (`/google-asr`).
+- Uses a separate Chrome/Chromium/Edge worker window (`/google-asr`) with the normal address bar available for microphone permission and device selection.
 - Requires browser microphone permission.
 - For stable operation, keep the worker window visible while active.
 

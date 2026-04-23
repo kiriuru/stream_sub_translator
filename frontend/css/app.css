@@ -548,6 +548,13 @@ a {
   flex: 1 1 240px;
 }
 
+.secret-toggle {
+  width: auto;
+  flex: 0 0 auto;
+  align-self: flex-end;
+  min-width: 120px;
+}
+
 .stack-field,
 .inline-field {
   width: 100%;

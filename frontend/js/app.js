@@ -445,6 +445,7 @@
   const translationEnabled = document.getElementById("translation-enabled");
   const translationProvider = document.getElementById("translation-provider");
   const translationApiKey = document.getElementById("translation-api-key");
+  const translationApiKeyToggleBtn = document.getElementById("translation-api-key-toggle");
   const translationApiKeyRow = document.getElementById("translation-api-key-row");
   const translationBaseUrl = document.getElementById("translation-base-url");
   const translationGasUrl = document.getElementById("translation-gas-url");
@@ -481,6 +482,7 @@
   const obsCcHost = document.getElementById("obs-cc-host");
   const obsCcPort = document.getElementById("obs-cc-port");
   const obsCcPassword = document.getElementById("obs-cc-password");
+  const obsCcPasswordToggleBtn = document.getElementById("obs-cc-password-toggle");
   const obsCcOutputMode = document.getElementById("obs-cc-output-mode");
   const obsCcDebugEnabled = document.getElementById("obs-cc-debug-enabled");
   const obsCcDebugInputName = document.getElementById("obs-cc-debug-input-name");
@@ -961,6 +963,7 @@
     syncTranslationFormFromConfig();
     syncSimpleTuningControlsFromConfig();
     syncFontCatalogUi();
+    syncSecretToggleLabels();
     if (window.AppState.config) {
       syncSubtitleStyleControlsFromConfig();
     }
@@ -1107,7 +1110,7 @@
   }
 
   function openBrowserAsrWindowPlaceholder() {
-    if (isDesktopMode()) {
+    if (isForcedDesktopPage() || isDesktopMode() || window.pywebview?.api) {
       return null;
     }
     const popup = window.open("", "browser_asr_worker");
@@ -1764,6 +1767,32 @@
   function parseFloatOr(value, fallback) {
     const parsed = Number.parseFloat(String(value));
     return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  function setSecretToggleLabel(button, input) {
+    if (!button || !input) {
+      return;
+    }
+    const hidden = input.type === "password";
+    button.textContent = hidden ? t("security.show") : t("security.hide");
+    button.setAttribute("aria-label", hidden ? t("security.show") : t("security.hide"));
+    button.setAttribute("aria-pressed", hidden ? "false" : "true");
+  }
+
+  function bindSecretToggle(button, input) {
+    if (!button || !input) {
+      return;
+    }
+    setSecretToggleLabel(button, input);
+    button.addEventListener("click", () => {
+      input.type = input.type === "password" ? "text" : "password";
+      setSecretToggleLabel(button, input);
+    });
+  }
+
+  function syncSecretToggleLabels() {
+    setSecretToggleLabel(translationApiKeyToggleBtn, translationApiKey);
+    setSecretToggleLabel(obsCcPasswordToggleBtn, obsCcPassword);
   }
 
   function formatSecondsFromMs(value, fallbackMs) {
@@ -2937,11 +2966,23 @@
         font_weight: Math.max(300, Math.min(900, parseIntegerOr(styleFontWeight?.value ?? currentStyle.base.font_weight, currentStyle.base.font_weight))),
         fill_color: styleFillColor?.value || currentStyle.base.fill_color,
         stroke_color: styleStrokeColor?.value || currentStyle.base.stroke_color,
-        stroke_width_px: Math.max(0, parseIntegerOr(styleStrokeWidth?.value ?? currentStyle.base.stroke_width_px, currentStyle.base.stroke_width_px)),
+        stroke_width_px: Math.max(
+          0,
+          Math.min(8, parseFloatOr(styleStrokeWidth?.value ?? currentStyle.base.stroke_width_px, currentStyle.base.stroke_width_px))
+        ),
         shadow_color: styleShadowColor?.value || currentStyle.base.shadow_color,
-        shadow_blur_px: Math.max(0, parseIntegerOr(styleShadowBlur?.value ?? currentStyle.base.shadow_blur_px, currentStyle.base.shadow_blur_px)),
-        shadow_offset_x_px: parseIntegerOr(styleShadowOffsetX?.value ?? currentStyle.base.shadow_offset_x_px, currentStyle.base.shadow_offset_x_px),
-        shadow_offset_y_px: parseIntegerOr(styleShadowOffsetY?.value ?? currentStyle.base.shadow_offset_y_px, currentStyle.base.shadow_offset_y_px),
+        shadow_blur_px: Math.max(
+          0,
+          Math.min(32, parseFloatOr(styleShadowBlur?.value ?? currentStyle.base.shadow_blur_px, currentStyle.base.shadow_blur_px))
+        ),
+        shadow_offset_x_px: Math.max(
+          -24,
+          Math.min(24, parseFloatOr(styleShadowOffsetX?.value ?? currentStyle.base.shadow_offset_x_px, currentStyle.base.shadow_offset_x_px))
+        ),
+        shadow_offset_y_px: Math.max(
+          -24,
+          Math.min(24, parseFloatOr(styleShadowOffsetY?.value ?? currentStyle.base.shadow_offset_y_px, currentStyle.base.shadow_offset_y_px))
+        ),
         background_color: styleBackgroundColor?.value || currentStyle.base.background_color,
         background_opacity: Math.max(0, Math.min(100, parseIntegerOr(styleBackgroundOpacity?.value ?? currentStyle.base.background_opacity, currentStyle.base.background_opacity))),
         background_padding_x_px: Math.max(0, parseIntegerOr(styleBackgroundPaddingX?.value ?? currentStyle.base.background_padding_x_px, currentStyle.base.background_padding_x_px)),
@@ -2974,20 +3015,38 @@
           stroke_color: styleLineSlotStrokeColor?.value || currentStyle.base.stroke_color,
           stroke_width_px: Math.max(
             0,
-            parseIntegerOr(styleLineSlotStrokeWidth?.value ?? currentStyle.base.stroke_width_px, currentStyle.base.stroke_width_px)
+            Math.min(
+              8,
+              parseFloatOr(styleLineSlotStrokeWidth?.value ?? currentStyle.base.stroke_width_px, currentStyle.base.stroke_width_px)
+            )
           ),
           shadow_color: styleLineSlotShadowColor?.value || currentStyle.base.shadow_color,
           shadow_blur_px: Math.max(
             0,
-            parseIntegerOr(styleLineSlotShadowBlur?.value ?? currentStyle.base.shadow_blur_px, currentStyle.base.shadow_blur_px)
+            Math.min(
+              32,
+              parseFloatOr(styleLineSlotShadowBlur?.value ?? currentStyle.base.shadow_blur_px, currentStyle.base.shadow_blur_px)
+            )
           ),
-          shadow_offset_x_px: parseIntegerOr(
-            styleLineSlotShadowOffsetX?.value ?? currentStyle.base.shadow_offset_x_px,
-            currentStyle.base.shadow_offset_x_px
+          shadow_offset_x_px: Math.max(
+            -24,
+            Math.min(
+              24,
+              parseFloatOr(
+                styleLineSlotShadowOffsetX?.value ?? currentStyle.base.shadow_offset_x_px,
+                currentStyle.base.shadow_offset_x_px
+              )
+            )
           ),
-          shadow_offset_y_px: parseIntegerOr(
-            styleLineSlotShadowOffsetY?.value ?? currentStyle.base.shadow_offset_y_px,
-            currentStyle.base.shadow_offset_y_px
+          shadow_offset_y_px: Math.max(
+            -24,
+            Math.min(
+              24,
+              parseFloatOr(
+                styleLineSlotShadowOffsetY?.value ?? currentStyle.base.shadow_offset_y_px,
+                currentStyle.base.shadow_offset_y_px
+              )
+            )
           ),
           background_color: styleLineSlotBackgroundColor?.value || currentStyle.base.background_color,
           background_opacity: Math.max(
@@ -3040,8 +3099,8 @@
     renderSubtitlePreview();
   }
 
-  function saveCurrentStyleAsCustomPreset() {
-    if (!window.AppState.config) return;
+  async function saveCurrentStyleAsCustomPreset() {
+    if (!window.AppState.config) return false;
     const rawName = subtitleStyleCustomName?.value || "";
     const presetKey = normalizeCustomPresetKey(rawName);
     if (!presetKey) {
@@ -3050,7 +3109,7 @@
           ? "Сначала введите имя пользовательского пресета."
           : "Enter a custom preset name first.";
       }
-      return;
+      return false;
     }
     const currentStyle = normalizeSubtitleStyleConfig(window.AppState.config.subtitle_style || {});
     const customPresets = {
@@ -3079,15 +3138,18 @@
     syncSubtitleStyleControlsFromConfig();
     syncConfigText();
     renderSubtitlePreview();
+    const saveResponse = await saveCurrentConfig();
+    const savedAndApplied = Boolean(saveResponse?.live_applied);
     if (subtitleStyleCustomStatus) {
       subtitleStyleCustomStatus.textContent = getCurrentLocale() === "ru"
-        ? `Пользовательский пресет "${rawName.trim() || presetKey}" сохранён.`
-        : `Saved custom preset "${rawName.trim() || presetKey}".`;
+        ? `Пользовательский пресет "${rawName.trim() || presetKey}" сохранён${savedAndApplied ? " и применён." : "."}`
+        : `Saved custom preset "${rawName.trim() || presetKey}"${savedAndApplied ? " and applied live." : "."}`;
     }
+    return Boolean(saveResponse);
   }
 
-  function deleteCurrentCustomStylePreset() {
-    if (!window.AppState.config) return;
+  async function deleteCurrentCustomStylePreset() {
+    if (!window.AppState.config) return false;
     const currentStyle = normalizeSubtitleStyleConfig(window.AppState.config.subtitle_style || {});
     const currentPreset = currentStyle.preset || "";
     if (!currentPreset || !currentStyle.custom_presets?.[currentPreset]) {
@@ -3096,7 +3158,7 @@
           ? "Выбран встроенный пресет, поэтому удалять нечего."
           : "Selected preset is built-in, so there is nothing custom to delete.";
       }
-      return;
+      return false;
     }
     const customPresets = { ...(currentStyle.custom_presets || {}) };
     delete customPresets[currentPreset];
@@ -3110,11 +3172,14 @@
     syncSubtitleStyleControlsFromConfig();
     syncConfigText();
     renderSubtitlePreview();
+    const saveResponse = await saveCurrentConfig();
+    const savedAndApplied = Boolean(saveResponse?.live_applied);
     if (subtitleStyleCustomStatus) {
       subtitleStyleCustomStatus.textContent = getCurrentLocale() === "ru"
-        ? `Пользовательский пресет "${currentStyle.label || currentPreset}" удалён.`
-        : `Deleted custom preset "${currentStyle.label || currentPreset}".`;
+        ? `Пользовательский пресет "${currentStyle.label || currentPreset}" удалён${savedAndApplied ? " и применён." : "."}`
+        : `Deleted custom preset "${currentStyle.label || currentPreset}"${savedAndApplied ? " and applied live." : "."}`;
     }
+    return Boolean(saveResponse);
   }
 
   function buildSubtitlePreviewPayload() {
@@ -3607,7 +3672,7 @@
     return window.AppState.config;
   }
 
-  async function saveCurrentConfig() {
+  async function saveCurrentConfig(options = {}) {
     const previousPayload = cloneConfig(window.AppState.config || {});
     let payload;
     try {
@@ -3620,6 +3685,22 @@
 
     setSaveButtonsBusy(true);
     try {
+      if (
+        options?.preserveLatestBrowserWorkerSettings
+        && (payload?.asr?.mode || "local") === "browser_google"
+      ) {
+        try {
+          const latestSettings = await window.Api.loadSettings();
+          const latestPayload = ensureConfigShape(latestSettings?.payload || {});
+          const latestBrowserConfig = latestPayload?.asr?.browser;
+          if (latestBrowserConfig && typeof latestBrowserConfig === "object") {
+            payload.asr = payload.asr && typeof payload.asr === "object" ? payload.asr : {};
+            payload.asr.browser = cloneConfig(latestBrowserConfig);
+          }
+        } catch (_error) {
+          // keep save flow operational if browser worker settings refresh fails
+        }
+      }
       const response = await window.Api.saveSettings(payload);
       const savedPayload = response.payload || payload;
       const restartReasons = getRestartRequiredReasons(previousPayload, savedPayload);
@@ -4030,6 +4111,9 @@
       });
     });
 
+  bindSecretToggle(translationApiKeyToggleBtn, translationApiKey);
+  bindSecretToggle(obsCcPasswordToggleBtn, obsCcPassword);
+
   if (subtitleOrderUpBtn) {
     subtitleOrderUpBtn.addEventListener("click", () => {
       if (!window.AppState.config || !window.AppState.selectedSubtitleOrderItem) return;
@@ -4080,16 +4164,20 @@
   }
 
   if (subtitleStyleSaveCustomBtn) {
-    subtitleStyleSaveCustomBtn.addEventListener("click", () => {
-      saveCurrentStyleAsCustomPreset();
-      log("[subtitle-style] custom preset saved locally");
+    subtitleStyleSaveCustomBtn.addEventListener("click", async () => {
+      const saved = await saveCurrentStyleAsCustomPreset();
+      if (saved) {
+        log("[subtitle-style] custom preset saved and persisted");
+      }
     });
   }
 
   if (subtitleStyleDeleteCustomBtn) {
-    subtitleStyleDeleteCustomBtn.addEventListener("click", () => {
-      deleteCurrentCustomStylePreset();
-      log("[subtitle-style] custom preset deleted locally");
+    subtitleStyleDeleteCustomBtn.addEventListener("click", async () => {
+      const saved = await deleteCurrentCustomStylePreset();
+      if (saved) {
+        log("[subtitle-style] custom preset deleted and persisted");
+      }
     });
   }
 
@@ -4310,11 +4398,17 @@
 
   if (startBtn) {
     startBtn.addEventListener("click", async () => {
+      const activeModeBeforeSave = window.AppState.config?.asr?.mode || "local";
       const pendingBrowserPopup =
-        (window.AppState.config?.asr?.mode || "local") === "browser_google" && !isDesktopMode()
+        activeModeBeforeSave === "browser_google"
+        && !isForcedDesktopPage()
+        && !isDesktopMode()
+        && !window.pywebview?.api
           ? openBrowserAsrWindowPlaceholder()
           : null;
-      const saveResponse = await saveCurrentConfig();
+      const saveResponse = await saveCurrentConfig({
+        preserveLatestBrowserWorkerSettings: activeModeBeforeSave === "browser_google",
+      });
       if (!saveResponse) {
         if (pendingBrowserPopup && !pendingBrowserPopup.closed) {
           pendingBrowserPopup.close();

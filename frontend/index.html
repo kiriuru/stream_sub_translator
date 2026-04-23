@@ -177,6 +177,7 @@
               <span data-i18n="translation.api_key">API key</span>
               <input id="translation-api-key" type="password" placeholder="API key" data-i18n-placeholder="translation.api_key" />
             </label>
+            <button id="translation-api-key-toggle" class="secondary secret-toggle" type="button" data-i18n="security.show">Show</button>
           </div>
           <div class="actions" id="translation-base-url-row">
             <label class="stack-field grow">
@@ -433,7 +434,7 @@
             </label>
             <label class="stack-field">
               <span data-i18n="style.field.outline_width">Outline width</span>
-              <input id="style-stroke-width" type="number" min="0" max="8" step="1" />
+              <input id="style-stroke-width" type="number" min="0" max="8" step="0.01" />
             </label>
             <label class="stack-field">
               <span data-i18n="style.field.shadow_color">Shadow color</span>
@@ -441,11 +442,11 @@
             </label>
             <label class="stack-field">
               <span data-i18n="style.field.shadow_blur">Shadow blur</span>
-              <input id="style-shadow-blur" type="number" min="0" max="32" step="1" />
+              <input id="style-shadow-blur" type="number" min="0" max="32" step="0.01" />
             </label>
             <label class="stack-field">
               <span data-i18n="style.field.shadow_offset_y">Shadow offset Y</span>
-              <input id="style-shadow-offset-y" type="number" min="-24" max="24" step="1" />
+              <input id="style-shadow-offset-y" type="number" min="-24" max="24" step="0.01" />
             </label>
             <label class="stack-field">
               <span data-i18n="style.field.background_color">Background color</span>
@@ -490,7 +491,7 @@
             <div class="style-grid">
               <label class="stack-field">
                 <span data-i18n="style.field.shadow_offset_x">Shadow offset X</span>
-                <input id="style-shadow-offset-x" type="number" min="-24" max="24" step="1" />
+                <input id="style-shadow-offset-x" type="number" min="-24" max="24" step="0.01" />
               </label>
               <label class="stack-field">
                 <span data-i18n="style.field.background_padding_x">Background padding X</span>
@@ -545,7 +546,7 @@
             </label>
             <label class="stack-field">
               <span>Outline width</span>
-              <input id="style-line-slot-stroke-width" type="number" min="0" max="8" step="1" />
+              <input id="style-line-slot-stroke-width" type="number" min="0" max="8" step="0.01" />
             </label>
             <label class="stack-field">
               <span>Shadow color</span>
@@ -553,7 +554,7 @@
             </label>
             <label class="stack-field">
               <span>Shadow blur</span>
-              <input id="style-line-slot-shadow-blur" type="number" min="0" max="32" step="1" />
+              <input id="style-line-slot-shadow-blur" type="number" min="0" max="32" step="0.01" />
             </label>
             <label class="stack-field">
               <span>Background color</span>
@@ -594,11 +595,11 @@
             <div class="style-grid">
               <label class="stack-field">
                 <span data-i18n="style.field.shadow_offset_x">Shadow offset X</span>
-                <input id="style-line-slot-shadow-offset-x" type="number" min="-24" max="24" step="1" />
+                <input id="style-line-slot-shadow-offset-x" type="number" min="-24" max="24" step="0.01" />
               </label>
               <label class="stack-field">
                 <span data-i18n="style.field.shadow_offset_y">Shadow offset Y</span>
-                <input id="style-line-slot-shadow-offset-y" type="number" min="-24" max="24" step="1" />
+                <input id="style-line-slot-shadow-offset-y" type="number" min="-24" max="24" step="0.01" />
               </label>
               <label class="stack-field">
                 <span data-i18n="style.field.background_padding_x">Background padding X</span>
@@ -650,6 +651,7 @@
               <span data-i18n="obs.password">Password</span>
               <input id="obs-cc-password" type="password" placeholder="OBS websocket password" data-i18n-placeholder="obs.password.placeholder" />
             </label>
+            <button id="obs-cc-password-toggle" class="secondary secret-toggle" type="button" data-i18n="security.show">Show</button>
           </div>
           <div class="actions">
             <label class="stack-field grow">
@@ -1065,6 +1067,7 @@
     <script src="/static/js/ws.js?v=20260422a"></script>
     <script src="/static/js/remote.js?v=20260422e"></script>
     <script src="/static/js/subtitle-style.js?v=20260422a"></script>
+    <script src="/static/js/desktop.js?v=20260423a"></script>
     <script src="/static/js/i18n.js?v=20260422b"></script>
     <script src="/static/js/app.js?v=20260423a"></script>
   </body>

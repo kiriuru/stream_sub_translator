@@ -322,11 +322,43 @@ def _normalize_base_style(payload: Any) -> dict[str, Any]:
         "font_weight": _clamp_int(current.get("font_weight", defaults["font_weight"]), defaults["font_weight"], 300, 900),
         "fill_color": _normalize_color(current.get("fill_color"), defaults["fill_color"]),
         "stroke_color": _normalize_color(current.get("stroke_color"), defaults["stroke_color"]),
-        "stroke_width_px": _clamp_int(current.get("stroke_width_px", defaults["stroke_width_px"]), defaults["stroke_width_px"], 0, 8),
+        "stroke_width_px": round(
+            _clamp_float(
+                current.get("stroke_width_px", defaults["stroke_width_px"]),
+                defaults["stroke_width_px"],
+                0,
+                8,
+            ),
+            2,
+        ),
         "shadow_color": _normalize_color(current.get("shadow_color"), defaults["shadow_color"]),
-        "shadow_blur_px": _clamp_int(current.get("shadow_blur_px", defaults["shadow_blur_px"]), defaults["shadow_blur_px"], 0, 32),
-        "shadow_offset_x_px": _clamp_int(current.get("shadow_offset_x_px", defaults["shadow_offset_x_px"]), defaults["shadow_offset_x_px"], -24, 24),
-        "shadow_offset_y_px": _clamp_int(current.get("shadow_offset_y_px", defaults["shadow_offset_y_px"]), defaults["shadow_offset_y_px"], -24, 24),
+        "shadow_blur_px": round(
+            _clamp_float(
+                current.get("shadow_blur_px", defaults["shadow_blur_px"]),
+                defaults["shadow_blur_px"],
+                0,
+                32,
+            ),
+            2,
+        ),
+        "shadow_offset_x_px": round(
+            _clamp_float(
+                current.get("shadow_offset_x_px", defaults["shadow_offset_x_px"]),
+                defaults["shadow_offset_x_px"],
+                -24,
+                24,
+            ),
+            2,
+        ),
+        "shadow_offset_y_px": round(
+            _clamp_float(
+                current.get("shadow_offset_y_px", defaults["shadow_offset_y_px"]),
+                defaults["shadow_offset_y_px"],
+                -24,
+                24,
+            ),
+            2,
+        ),
         "background_color": _normalize_color(current.get("background_color"), defaults["background_color"]),
         "background_opacity": _clamp_int(current.get("background_opacity", defaults["background_opacity"]), defaults["background_opacity"], 0, 100),
         "background_padding_x_px": _clamp_int(current.get("background_padding_x_px", defaults["background_padding_x_px"]), defaults["background_padding_x_px"], 0, 40),

@@ -56,6 +56,7 @@ class SubtitleRouter:
         self._records: dict[int, dict] = {}
         self._active_partial: dict | None = None
         self._completed_sequence: int | None = None
+        self._latest_final_sequence: int | None = None
         self._completed_expires_at_utc: str | None = None
         self._completed_expires_at_monotonic: float | None = None
         self._completed_source_expires_at_monotonic: float | None = None
@@ -115,6 +116,7 @@ class SubtitleRouter:
         self._records.clear()
         self._active_partial = None
         self._completed_sequence = None
+        self._latest_final_sequence = None
         self._completed_expires_at_utc = None
         self._completed_expires_at_monotonic = None
         self._completed_source_expires_at_monotonic = None
@@ -160,6 +162,8 @@ class SubtitleRouter:
             "provider": segment.provider if segment is not None else None,
         }
         self._pending_final_sequence = event.sequence
+        if self._latest_final_sequence is None or event.sequence > self._latest_final_sequence:
+            self._latest_final_sequence = event.sequence
         self._promote_or_defer(event.sequence)
         await self._publish_current()
 
@@ -192,10 +196,19 @@ class SubtitleRouter:
             for item in event.translations
         }
         was_exported = event.sequence in self._exported_sequences
-        if self._pending_final_sequence == event.sequence or self._completed_sequence == event.sequence:
+        should_promote = (
+            self._pending_final_sequence == event.sequence
+            or self._completed_sequence == event.sequence
+            or (
+                self._pending_final_sequence is None
+                and self._completed_sequence is None
+                and self._latest_final_sequence == event.sequence
+            )
+        )
+        if should_promote:
             self._promote_or_defer(event.sequence)
         if was_exported and self._completed_sequence == event.sequence and self.completed_callback is not None:
-            payload = self._build_payload(event.sequence)
+            payload = self._promotion_payload(event.sequence)
             if payload is not None and payload.visible_items:
                 export_record = self._build_export_record(event.sequence, payload)
                 if export_record is not None:
@@ -305,6 +318,55 @@ class SubtitleRouter:
         current = now_monotonic if now_monotonic is not None else time.perf_counter()
         return current < self._completed_translation_expires_at_monotonic
 
+    def _source_ttl_expired_for_sequence(self, sequence: int, now_monotonic: float | None = None) -> bool:
+        record = self._records.get(sequence)
+        if record is None:
+            return False
+        finalized_at_monotonic = record.get("finalized_at_monotonic")
+        if not isinstance(finalized_at_monotonic, (int, float)):
+            return False
+        lifecycle = self._subtitle_lifecycle_config()
+        current = now_monotonic if now_monotonic is not None else time.perf_counter()
+        source_expiry_monotonic = float(finalized_at_monotonic) + (int(lifecycle["completed_source_ttl_ms"]) / 1000.0)
+        return current >= source_expiry_monotonic
+
+    def _promotion_payload(self, sequence: int) -> SubtitlePayloadEvent | None:
+        payload = self._build_payload(sequence)
+        if payload is None:
+            return None
+        if (
+            self._completed_sequence is None
+            and self._pending_final_sequence is None
+            and self._latest_final_sequence == sequence
+            and self._source_ttl_expired_for_sequence(sequence)
+        ):
+            remapped_items: list[SubtitleLineItem] = []
+            remapped_visible: list[SubtitleLineItem] = []
+            for item in payload.items:
+                should_show = item.visible and bool(item.text) and item.kind != "source"
+                updated_item = item.model_copy(
+                    update={
+                        "visible": should_show,
+                        "style_slot": item.style_slot if should_show else None,
+                    }
+                )
+                remapped_items.append(updated_item)
+                if updated_item.visible and updated_item.text:
+                    remapped_visible.append(updated_item)
+            if not remapped_visible:
+                return None
+            line1 = remapped_visible[0].text if remapped_visible else ""
+            line2 = "\n".join(item.text for item in remapped_visible[1:]) if len(remapped_visible) > 1 else ""
+            return payload.model_copy(
+                update={
+                    "items": remapped_items,
+                    "visible_items": remapped_visible,
+                    "line1": line1,
+                    "line2": line2,
+                }
+            )
+        return payload
+
     def _current_completed_payload(self, *, hide_source: bool = False) -> SubtitlePayloadEvent | None:
         if self._completed_sequence is None:
             return None
@@ -353,7 +415,7 @@ class SubtitleRouter:
         record = self._records.get(sequence)
         if record is None:
             return None
-        payload = self._build_payload(sequence)
+        payload = self._promotion_payload(sequence)
         if payload is None or not payload.visible_items:
             return None
         return payload
@@ -434,10 +496,10 @@ class SubtitleRouter:
             source_ttl_ms = max(source_ttl_ms, translation_ttl_ms)
 
         self._completed_source_expires_at_monotonic = (
-            now_monotonic + (source_ttl_ms / 1000.0) if has_visible_source else None
+            now_monotonic + (source_ttl_ms / 1000.0) if has_visible_source else now_monotonic - 0.001
         )
         self._completed_translation_expires_at_monotonic = (
-            now_monotonic + (translation_ttl_ms / 1000.0) if has_visible_translation else None
+            now_monotonic + (translation_ttl_ms / 1000.0) if has_visible_translation else now_monotonic - 0.001
         )
         self._schedule_next_expiry_check(now_monotonic=now_monotonic, now_utc=now_utc)
 

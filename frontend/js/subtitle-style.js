@@ -107,11 +107,11 @@
       font_weight: clampInt(current.font_weight, defaults.font_weight, 300, 900),
       fill_color: normalizeColor(current.fill_color, defaults.fill_color),
       stroke_color: normalizeColor(current.stroke_color, defaults.stroke_color),
-      stroke_width_px: clampInt(current.stroke_width_px, defaults.stroke_width_px, 0, 8),
+      stroke_width_px: Number(clampFloat(current.stroke_width_px, defaults.stroke_width_px, 0, 8).toFixed(2)),
       shadow_color: normalizeColor(current.shadow_color, defaults.shadow_color),
-      shadow_blur_px: clampInt(current.shadow_blur_px, defaults.shadow_blur_px, 0, 32),
-      shadow_offset_x_px: clampInt(current.shadow_offset_x_px, defaults.shadow_offset_x_px, -24, 24),
-      shadow_offset_y_px: clampInt(current.shadow_offset_y_px, defaults.shadow_offset_y_px, -24, 24),
+      shadow_blur_px: Number(clampFloat(current.shadow_blur_px, defaults.shadow_blur_px, 0, 32).toFixed(2)),
+      shadow_offset_x_px: Number(clampFloat(current.shadow_offset_x_px, defaults.shadow_offset_x_px, -24, 24).toFixed(2)),
+      shadow_offset_y_px: Number(clampFloat(current.shadow_offset_y_px, defaults.shadow_offset_y_px, -24, 24).toFixed(2)),
       background_color: normalizeColor(current.background_color, defaults.background_color),
       background_opacity: clampInt(current.background_opacity, defaults.background_opacity, 0, 100),
       background_padding_x_px: clampInt(current.background_padding_x_px, defaults.background_padding_x_px, 0, 40),
@@ -331,6 +331,9 @@
 
   function buildCssVariables(roleStyle, scale) {
     const styleScale = Number.isFinite(scale) ? scale : 1;
+    const scaledStrokeWidth = Number(
+      Math.max(0, Number(roleStyle.stroke_width_px || 0) * styleScale).toFixed(2)
+    );
     const shadow = roleStyle.shadow_blur_px > 0
       ? `${roleStyle.shadow_offset_x_px}px ${roleStyle.shadow_offset_y_px}px ${roleStyle.shadow_blur_px}px ${colorToRgba(
           roleStyle.shadow_color,
@@ -343,7 +346,7 @@
       "--subtitle-font-weight": String(roleStyle.font_weight),
       "--subtitle-fill": roleStyle.fill_color,
       "--subtitle-stroke": roleStyle.stroke_color,
-      "--subtitle-stroke-width": `${Math.max(0, Math.round(roleStyle.stroke_width_px * styleScale))}px`,
+      "--subtitle-stroke-width": `${scaledStrokeWidth}px`,
       "--subtitle-shadow": shadow,
       "--subtitle-background": colorToRgba(roleStyle.background_color, roleStyle.background_opacity),
       "--subtitle-radius": `${Math.max(0, Math.round(roleStyle.background_radius_px * styleScale))}px`,

@@ -184,7 +184,16 @@
         gap: 12px;
       }
       .actions.actions-three {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 0.9fr));
+      }
+      .actions.actions-three button {
+        min-height: 56px;
+        padding: 10px 12px;
+        line-height: 1.15;
+        font-size: 14px;
+        text-align: center;
+        white-space: normal;
+        overflow-wrap: anywhere;
       }
       .settings-save-status {
         margin-top: 2px;
@@ -386,7 +395,7 @@
       <span>Powered by Kiriuru</span>
     </footer>
 
-    <script src="/static/js/i18n.js?v=20260421a"></script>
+    <script src="/static/js/i18n.js?v=20260423c"></script>
     <script>
       (() => {
         const t = (key, variables) => (window.I18n?.t ? window.I18n.t(key, variables) : key);
@@ -411,6 +420,7 @@
         const stopButton = document.getElementById("stop-recognition");
         const saveSettingsButton = document.getElementById("save-worker-settings");
         const settingsSaveStatusEl = document.getElementById("settings-save-status");
+        const WORKER_SETTINGS_STORAGE_KEY = "sst.browser_worker.settings.v1";
 
         const state = {
           configuredLanguage: "ru-RU",
@@ -532,14 +542,6 @@
           }
         }
 
-        function ensureSettingsPayloadShape(payload) {
-          const normalized = payload && typeof payload === "object" ? payload : {};
-          normalized.asr = normalized.asr && typeof normalized.asr === "object" ? normalized.asr : {};
-          normalized.asr.browser =
-            normalized.asr.browser && typeof normalized.asr.browser === "object" ? normalized.asr.browser : {};
-          return normalized;
-        }
-
         function readWorkerSettingsFromControls() {
           return {
             recognition_language: String(state.configuredLanguage || workerDefaults.recognitionLanguage),
@@ -552,8 +554,8 @@
 
         function defaultSettingsSaveStatusText() {
           return locale() === "ru"
-            ? "Изменения сохраняются автоматически. Можно нажать «Сохранить» вручную."
-            : "Changes are autosaved. You can also press Save manually.";
+            ? "Настройки этого окна сохраняются локально в браузере. Можно нажать «Сохранить» вручную."
+            : "This window stores its settings in local browser storage. You can also press Save manually.";
         }
 
         function setSettingsSaveStatus(message, isError = false) {
@@ -562,6 +564,53 @@
           }
           settingsSaveStatusEl.textContent = String(message || "").trim();
           settingsSaveStatusEl.style.color = isError ? "var(--danger)" : "var(--muted)";
+        }
+
+        function readWorkerSettingsFromLocalStorage() {
+          try {
+            const raw = window.localStorage.getItem(WORKER_SETTINGS_STORAGE_KEY);
+            if (!raw) {
+              return null;
+            }
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === "object" ? parsed : null;
+          } catch (_error) {
+            return null;
+          }
+        }
+
+        function resolveWorkerSettings(backendBrowserConfig, storedWorkerSettings) {
+          const backend = backendBrowserConfig && typeof backendBrowserConfig === "object" ? backendBrowserConfig : {};
+          const stored = storedWorkerSettings && typeof storedWorkerSettings === "object" ? storedWorkerSettings : {};
+          const hasStoredInterim = Object.prototype.hasOwnProperty.call(stored, "interim_results");
+          const hasStoredContinuous = Object.prototype.hasOwnProperty.call(stored, "continuous_results");
+          const hasStoredForceFinalization = Object.prototype.hasOwnProperty.call(stored, "force_finalization_enabled");
+          const hasStoredForceTimeout = Object.prototype.hasOwnProperty.call(stored, "force_finalization_timeout_ms");
+          return {
+            recognition_language: String(
+              backend.recognition_language || stored.recognition_language || workerDefaults.recognitionLanguage
+            ),
+            interim_results: hasStoredInterim
+              ? stored.interim_results !== false
+              : backend.interim_results !== false,
+            continuous_results: hasStoredContinuous
+              ? stored.continuous_results === true
+              : backend.continuous_results === true,
+            force_finalization_enabled: hasStoredForceFinalization
+              ? stored.force_finalization_enabled !== false
+              : backend.force_finalization_enabled !== false,
+            force_finalization_timeout_ms: Math.max(
+              300,
+              Number.parseInt(
+                String(
+                  hasStoredForceTimeout
+                    ? stored.force_finalization_timeout_ms
+                    : backend.force_finalization_timeout_ms || workerDefaults.forceFinalizationTimeoutMs
+                ),
+                10
+              ) || workerDefaults.forceFinalizationTimeoutMs
+            ),
+          };
         }
 
         function applyRecognitionSettingsToRuntime() {
@@ -603,23 +652,11 @@
           state.settingsSavePromise = state.settingsSavePromise
             .catch(() => undefined)
             .then(async () => {
-              const response = await fetch("/api/settings/load");
-              const data = await response.json();
-              const payload = ensureSettingsPayloadShape(data?.payload);
-              payload.asr.browser = {
-                ...payload.asr.browser,
-                ...nextWorkerSettings,
-              };
-              const saveResponse = await fetch("/api/settings/save", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ payload }),
-              });
-              const savedData = await saveResponse.json();
-              const savedBrowser =
-                savedData?.payload?.asr?.browser && typeof savedData.payload.asr.browser === "object"
-                  ? savedData.payload.asr.browser
-                  : payload.asr.browser;
+              window.localStorage.setItem(
+                WORKER_SETTINGS_STORAGE_KEY,
+                JSON.stringify(nextWorkerSettings)
+              );
+              const savedBrowser = resolveWorkerSettings(null, nextWorkerSettings);
               state.configuredLanguage = String(
                 savedBrowser.recognition_language || workerDefaults.recognitionLanguage
               );
@@ -644,12 +681,12 @@
               }
               updateCounters();
               appendLog(
-                `worker settings saved (${reason}): interim=${interimResultsToggle.checked}, continuous=${continuousResultsToggle.checked}, force_finalization=${forceFinalizationToggle.checked}`
+                `worker settings saved to localStorage (${reason}): interim=${interimResultsToggle.checked}, continuous=${continuousResultsToggle.checked}, force_finalization=${forceFinalizationToggle.checked}`
               );
               setSettingsSaveStatus(
                 locale() === "ru"
-                  ? `Сохранено в ${formatNow()}`
-                  : `Saved at ${formatNow()}`,
+                  ? `Сохранено локально в ${formatNow()}`
+                  : `Saved locally at ${formatNow()}`,
                 false
               );
             })
@@ -865,38 +902,44 @@
         }
 
         async function loadSettings() {
+          const storedWorkerSettings = readWorkerSettingsFromLocalStorage();
           try {
             const response = await fetch("/api/settings/load");
             const data = await response.json();
             const browserConfig = data?.payload?.asr?.browser || {};
+            const effectiveBrowserConfig = resolveWorkerSettings(browserConfig, storedWorkerSettings);
             state.configuredLanguage = String(
-              browserConfig.recognition_language || workerDefaults.recognitionLanguage
+              effectiveBrowserConfig.recognition_language || workerDefaults.recognitionLanguage
             );
             state.sourceLang = String(state.configuredLanguage.split("-", 1)[0] || "ru").toLowerCase();
-            interimResultsToggle.checked = browserConfig.interim_results !== false;
-            continuousResultsToggle.checked = browserConfig.continuous_results === true;
-            forceFinalizationToggle.checked = browserConfig.force_finalization_enabled !== false;
+            interimResultsToggle.checked = effectiveBrowserConfig.interim_results !== false;
+            continuousResultsToggle.checked = effectiveBrowserConfig.continuous_results === true;
+            forceFinalizationToggle.checked = effectiveBrowserConfig.force_finalization_enabled !== false;
             state.forceFinalizationTimeoutMs = Math.max(
               300,
               Number.parseInt(
-                String(browserConfig.force_finalization_timeout_ms || workerDefaults.forceFinalizationTimeoutMs),
+                String(
+                  effectiveBrowserConfig.force_finalization_timeout_ms || workerDefaults.forceFinalizationTimeoutMs
+                ),
                 10
               ) || workerDefaults.forceFinalizationTimeoutMs
             );
             appendLog(
-              `settings loaded: lang=${state.configuredLanguage}, interim=${interimResultsToggle.checked}, continuous=${continuousResultsToggle.checked}, force_finalization=${forceFinalizationToggle.checked}`
+              `settings loaded: lang=${state.configuredLanguage}, interim=${interimResultsToggle.checked}, continuous=${continuousResultsToggle.checked}, force_finalization=${forceFinalizationToggle.checked}, storage=${storedWorkerSettings ? "local+backend" : "backend"}`
             );
             updateCounters();
           } catch (_error) {
-            state.configuredLanguage = workerDefaults.recognitionLanguage;
-            state.sourceLang = "ru";
-            interimResultsToggle.checked = workerDefaults.interimResults;
-            continuousResultsToggle.checked = workerDefaults.continuousResults;
-            forceFinalizationToggle.checked = workerDefaults.forceFinalizationEnabled;
-            state.forceFinalizationTimeoutMs = workerDefaults.forceFinalizationTimeoutMs;
-            configuredLanguageEl.textContent = locale() === "ru" ? "ru-RU -> источник ru" : "ru-RU -> source ru";
-            appendLog("settings load failed; using defaults");
+            const effectiveBrowserConfig = resolveWorkerSettings(null, storedWorkerSettings);
+            state.configuredLanguage = effectiveBrowserConfig.recognition_language || workerDefaults.recognitionLanguage;
+            state.sourceLang = String(state.configuredLanguage.split("-", 1)[0] || "ru").toLowerCase();
+            interimResultsToggle.checked = effectiveBrowserConfig.interim_results !== false;
+            continuousResultsToggle.checked = effectiveBrowserConfig.continuous_results === true;
+            forceFinalizationToggle.checked = effectiveBrowserConfig.force_finalization_enabled !== false;
+            state.forceFinalizationTimeoutMs = effectiveBrowserConfig.force_finalization_timeout_ms;
+            updateCounters();
+            appendLog(`settings load failed; using ${storedWorkerSettings ? "local storage fallback" : "defaults"}`);
           }
+          setSettingsSaveStatus(defaultSettingsSaveStatusText(), false);
         }
 
         function ensureRecognition() {
