@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import audioop
 import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -13,6 +14,12 @@ from backend.core.exporter import Exporter
 from backend.core.obs_caption_output import ObsCaptionOutput
 from backend.core.overlay_broadcaster import OverlayBroadcaster
 from backend.core.parakeet_provider import AsrProviderStatus
+from backend.core.remote_mode import (
+    REMOTE_ROLE_CONTROLLER,
+    REMOTE_ROLE_WORKER,
+    resolve_configured_remote_state,
+    resolve_effective_remote_role,
+)
 from backend.core.segment_queue import AsrWorkItem, SegmentQueue
 from backend.core.subtitle_style import resolve_effective_subtitle_style
 from backend.core.translation_engine import TranslationEngine
@@ -762,7 +769,8 @@ class RuntimeOrchestrator:
         self._capture_task: asyncio.Task | None = None
         self._asr_task: asyncio.Task | None = None
         self._translation_task: asyncio.Task | None = None
-        self._translation_queue: asyncio.Queue[tuple[int, str, str, float, float]] = asyncio.Queue()
+        self._translation_queue: asyncio.Queue[tuple[int, str, str, float, float]] | None = None
+        self._remote_audio_queue: asyncio.Queue[bytes] | None = None
         self._device_id: str | None = None
         self._sequence = 0
         self._segment_counter = 0
@@ -788,6 +796,9 @@ class RuntimeOrchestrator:
         self._last_partial_emit_monotonic_by_segment: dict[str, float] = {}
         self._external_worker_connected = False
         self._active_runtime_mode: str | None = None
+        self._remote_audio_connected = False
+        self._remote_audio_session_id: str | None = None
+        self._remote_audio_last_chunk_monotonic: float | None = None
         self._apply_vad_tuning()
         self._apply_recognition_processing_settings()
         self._translation_engine.apply_live_settings(self.config_getter().get("translation", {}))
@@ -832,6 +843,26 @@ class RuntimeOrchestrator:
         language = str(self._browser_asr_config().get("recognition_language", "ru-RU") or "ru-RU").strip()
         primary = language.split("-", 1)[0].strip().lower()
         return primary or "auto"
+
+    def _current_remote_role(self) -> str:
+        try:
+            return resolve_effective_remote_role(self.config_getter())
+        except Exception:
+            return "disabled"
+
+    def _uses_remote_audio_source(self) -> bool:
+        return self._current_asr_mode() != "browser_google" and self._current_remote_role() == REMOTE_ROLE_WORKER
+
+    def _is_remote_enabled(self) -> bool:
+        enabled, _ = resolve_configured_remote_state(self.config_getter())
+        return enabled
+
+    def _uses_remote_event_source(self) -> bool:
+        return (
+            self._current_asr_mode() != "browser_google"
+            and self._is_remote_enabled()
+            and self._current_remote_role() == REMOTE_ROLE_CONTROLLER
+        )
 
     async def _broadcast_runtime(self) -> None:
         await self.ws_manager.broadcast({"type": "runtime_update", "payload": self._state.model_dump()})
@@ -961,6 +992,31 @@ class RuntimeOrchestrator:
     def _increment_metric(self, key: Literal["partial_updates_emitted", "finals_emitted", "suppressed_partial_updates"]) -> None:
         current = getattr(self._metrics, key, 0) or 0
         self._record_metrics(**{key: int(current) + 1})
+
+    def _increment_counter_metric(
+        self,
+        key: Literal[
+            "remote_audio_chunks_in",
+            "remote_audio_bytes_in",
+            "remote_audio_chunks_dropped",
+            "vad_segments_partial",
+            "vad_segments_final",
+        ],
+        amount: int = 1,
+    ) -> None:
+        current = getattr(self._metrics, key, 0) or 0
+        self._record_metrics(**{key: int(current) + int(amount)})
+
+    @staticmethod
+    def _pcm16_rms_level(audio: bytes) -> float:
+        payload = bytes(audio or b"")
+        if not payload or len(payload) < 2:
+            return 0.0
+        try:
+            rms = float(audioop.rms(payload, 2))
+        except Exception:
+            return 0.0
+        return max(0.0, min(1.0, rms / 32768.0))
 
     def _resolve_realtime_settings(self) -> dict[str, int | float | bool]:
         config = self.config_getter()
@@ -1143,6 +1199,10 @@ class RuntimeOrchestrator:
         if self._current_asr_mode() == "browser_google":
             browser_lang = str(self._browser_asr_config().get("recognition_language", "ru-RU") or "ru-RU")
             return f"Preparing browser speech worker mode for {browser_lang}. The popup window will capture audio."
+        if self._uses_remote_event_source():
+            return "Initializing controller relay mode and waiting for remote worker transcript events."
+        if self._uses_remote_audio_source():
+            return "Initializing worker ASR runtime and waiting for remote controller audio stream."
         asr_status = self._asr_engine.status()
         model_path = Path(asr_status.model_path) if asr_status.model_path else None
         if model_path is not None and not model_path.exists():
@@ -1153,14 +1213,34 @@ class RuntimeOrchestrator:
         return "Initializing the ASR runtime and loading the Parakeet model."
 
     async def _capture_loop(self) -> None:
-        assert self._audio_capture is not None
         try:
             while self._state.is_running:
-                chunk = await asyncio.to_thread(self._audio_capture.read_chunk, 0.25)
-                if chunk is None:
-                    continue
+                if self._uses_remote_audio_source():
+                    remote_audio_queue = self._remote_audio_queue
+                    if remote_audio_queue is None:
+                        await asyncio.sleep(0.05)
+                        continue
+                    try:
+                        chunk_data = await asyncio.wait_for(remote_audio_queue.get(), timeout=0.25)
+                    except asyncio.TimeoutError:
+                        if self._remote_audio_last_chunk_monotonic is not None:
+                            self._record_metrics(
+                                remote_audio_last_chunk_age_ms=(time.perf_counter() - self._remote_audio_last_chunk_monotonic) * 1000.0
+                            )
+                        continue
+                    if not chunk_data:
+                        continue
+                    self._record_metrics(remote_audio_last_chunk_age_ms=0.0)
+                else:
+                    if self._audio_capture is None:
+                        await asyncio.sleep(0.05)
+                        continue
+                    chunk = await asyncio.to_thread(self._audio_capture.read_chunk, 0.25)
+                    if chunk is None:
+                        continue
+                    chunk_data = chunk.data
                 vad_started = time.perf_counter()
-                segments = self._vad.process_chunk(chunk.data)
+                segments = self._vad.process_chunk(chunk_data)
                 vad_elapsed_ms = (time.perf_counter() - vad_started) * 1000.0
                 self._record_metrics(
                     vad_ms=vad_elapsed_ms,
@@ -1168,6 +1248,12 @@ class RuntimeOrchestrator:
                 )
                 if not segments:
                     continue
+                partial_segments = sum(1 for segment in segments if segment.kind == "partial")
+                final_segments = sum(1 for segment in segments if segment.kind == "final")
+                if partial_segments > 0:
+                    self._increment_counter_metric("vad_segments_partial", partial_segments)
+                if final_segments > 0:
+                    self._increment_counter_metric("vad_segments_final", final_segments)
 
                 for segment in segments:
                     segment_id, revision, started_now = self._assign_segment_tracking(segment.kind)
@@ -1300,15 +1386,16 @@ class RuntimeOrchestrator:
                         self._clear_partial_tracking(work_item.segment_id)
                         await self.subtitle_router.handle_transcript(transcript_event)
                         await self._obs_caption_output.publish_source_event(transcript_event)
-                        await self._translation_queue.put(
-                            (
-                                self._sequence,
-                                text,
-                                segment.source_lang,
-                                work_item.created_at_monotonic,
-                                work_item.vad_ms,
+                        if self._translation_queue is not None:
+                            await self._translation_queue.put(
+                                (
+                                    self._sequence,
+                                    text,
+                                    segment.source_lang,
+                                    work_item.created_at_monotonic,
+                                    work_item.vad_ms,
+                                )
                             )
-                        )
                         await self._broadcast_runtime()
                     else:
                         await self.subtitle_router.handle_transcript(transcript_event)
@@ -1332,7 +1419,11 @@ class RuntimeOrchestrator:
     async def _translation_loop(self) -> None:
         try:
             while self._state.is_running:
-                sequence, source_text, source_lang, created_at_monotonic, vad_ms = await self._translation_queue.get()
+                translation_queue = self._translation_queue
+                if translation_queue is None:
+                    await asyncio.sleep(0.05)
+                    continue
+                sequence, source_text, source_lang, created_at_monotonic, vad_ms = await translation_queue.get()
                 try:
                     config = self.config_getter()
                     translation_config = config.get("translation", {})
@@ -1596,15 +1687,16 @@ class RuntimeOrchestrator:
             self._increment_metric("finals_emitted")
             await self.subtitle_router.handle_transcript(transcript_event)
             await self._obs_caption_output.publish_source_event(transcript_event)
-            await self._translation_queue.put(
-                (
-                    self._sequence,
-                    final_text,
-                    normalized_source_lang,
-                    created_at_monotonic,
-                    0.0,
+            if self._translation_queue is not None:
+                await self._translation_queue.put(
+                    (
+                        self._sequence,
+                        final_text,
+                        normalized_source_lang,
+                        created_at_monotonic,
+                        0.0,
+                    )
                 )
-            )
             self._active_segment_id = None
             self._active_segment_revision = 0
             await self._set_listening_if_current(
@@ -1620,8 +1712,21 @@ class RuntimeOrchestrator:
         self._runtime_loop = asyncio.get_running_loop()
         self._latest_runtime_status_message = None
         self._metrics = RuntimeMetrics()
+        self._translation_queue = asyncio.Queue()
+        self._remote_audio_queue = asyncio.Queue(maxsize=256)
         asr_mode = self._current_asr_mode()
-        if asr_mode != "browser_google" and not has_audio_inputs:
+        if self._current_remote_role() == REMOTE_ROLE_WORKER and asr_mode == "browser_google":
+            await self._set_runtime_state(
+                is_running=False,
+                status="error",
+                started_at_utc=None,
+                last_error="Remote worker mode supports AI runtime only. Browser speech mode is not allowed.",
+                status_message=None,
+            )
+            return self._state
+        use_remote_audio_source = self._uses_remote_audio_source()
+        use_remote_event_source = self._uses_remote_event_source()
+        if asr_mode != "browser_google" and not use_remote_audio_source and not use_remote_event_source and not has_audio_inputs:
             await self._set_runtime_state(
                 is_running=False,
                 status="error",
@@ -1638,7 +1743,7 @@ class RuntimeOrchestrator:
         )
 
         try:
-            if asr_mode != "browser_google":
+            if asr_mode != "browser_google" and not use_remote_event_source:
                 asr_status = await asyncio.to_thread(self._asr_engine.initialize_runtime)
                 self._apply_vad_tuning()
                 if not asr_status.ready:
@@ -1650,12 +1755,17 @@ class RuntimeOrchestrator:
                         status_message=None,
                     )
                     return self._state
-            self._device_id = device_id
+            self._device_id = "remote_webrtc_controller" if use_remote_audio_source else device_id
             if asr_mode != "browser_google":
                 self._external_worker_connected = False
-            if asr_mode != "browser_google":
+            if asr_mode != "browser_google" and not use_remote_audio_source:
                 self._audio_capture = AudioCapture()
                 self._audio_capture.start(device_id=device_id)
+            if use_remote_audio_source:
+                self._clear_remote_audio_queue()
+                self._remote_audio_connected = False
+                self._remote_audio_session_id = None
+                self._remote_audio_last_chunk_monotonic = None
             await self._obs_caption_output.start()
             await self._obs_caption_output.apply_live_settings(self.config_getter())
             self._reset_export_session()
@@ -1663,11 +1773,6 @@ class RuntimeOrchestrator:
             self._vad.reset()
             self._asr_engine.reset_runtime_state()
             self._segment_queue.clear()
-            while not self._translation_queue.empty():
-                try:
-                    self._translation_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
             self._sequence = 0
             self._last_partial_text_by_segment.clear()
             self._last_partial_emit_monotonic_by_segment.clear()
@@ -1681,6 +1786,12 @@ class RuntimeOrchestrator:
                 status="listening",
                 started_at_utc=started_at,
                 status_message=(
+                    "Controller relay mode is ready and waiting for remote worker events."
+                    if use_remote_event_source
+                    else
+                    "Worker runtime is ready and waiting for remote WebRTC audio."
+                    if use_remote_audio_source
+                    else
                     (
                         "Browser speech worker connected. Press Start Recognition in the popup window."
                         if self._external_worker_connected
@@ -1690,10 +1801,11 @@ class RuntimeOrchestrator:
                     else None
                 ),
             )
-            if asr_mode != "browser_google":
+            if asr_mode != "browser_google" and not use_remote_event_source:
                 self._capture_task = asyncio.create_task(self._capture_loop())
                 self._asr_task = asyncio.create_task(self._asr_loop())
-            self._translation_task = asyncio.create_task(self._translation_loop())
+            if not use_remote_event_source:
+                self._translation_task = asyncio.create_task(self._translation_loop())
         except Exception as exc:
             await self._safe_stop_audio()
             await self._obs_caption_output.stop()
@@ -1727,6 +1839,9 @@ class RuntimeOrchestrator:
         self._translation_task = None
         self._external_worker_connected = False
         self._active_runtime_mode = None
+        self._remote_audio_connected = False
+        self._remote_audio_session_id = None
+        self._remote_audio_last_chunk_monotonic = None
         await self._safe_stop_audio()
         await self._obs_caption_output.stop()
         stopped_at_utc = datetime.now(timezone.utc).isoformat()
@@ -1741,11 +1856,9 @@ class RuntimeOrchestrator:
         await asyncio.to_thread(self._asr_engine.unload_runtime_state)
         self._last_partial_text_by_segment.clear()
         self._last_partial_emit_monotonic_by_segment.clear()
-        while not self._translation_queue.empty():
-            try:
-                self._translation_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
+        self._clear_remote_audio_queue()
+        self._translation_queue = None
+        self._remote_audio_queue = None
         self._reset_export_session()
         self._metrics = RuntimeMetrics()
         self._runtime_loop = None
@@ -1754,8 +1867,129 @@ class RuntimeOrchestrator:
         await self._broadcast_runtime()
         return self._state
 
+    def _clear_remote_audio_queue(self) -> None:
+        remote_audio_queue = self._remote_audio_queue
+        if remote_audio_queue is None:
+            return
+        while not remote_audio_queue.empty():
+            try:
+                remote_audio_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+    async def remote_audio_ingest_connected(self, *, session_id: str | None = None) -> None:
+        self._remote_audio_connected = True
+        self._remote_audio_session_id = str(session_id or "").strip() or None
+        self._remote_audio_last_chunk_monotonic = time.perf_counter()
+        await self._set_listening_if_current(
+            "listening",
+            last_error=None,
+            status_message="Remote controller audio stream is connected.",
+        )
+
+    async def remote_audio_ingest_disconnected(self) -> None:
+        self._remote_audio_connected = False
+        self._remote_audio_last_chunk_monotonic = None
+        await self._set_listening_if_current(
+            "listening",
+            last_error=None,
+            status_message="Waiting for remote controller audio stream.",
+        )
+
+    async def ingest_remote_audio_chunk(self, payload: bytes) -> bool:
+        if not self._state.is_running:
+            return False
+        if not self._uses_remote_audio_source():
+            return False
+        audio = bytes(payload or b"")
+        if not audio:
+            return False
+        if len(audio) % 2 != 0:
+            audio = audio[:-1]
+            if not audio:
+                return False
+        remote_audio_queue = self._remote_audio_queue
+        if remote_audio_queue is None:
+            return False
+        if remote_audio_queue.full():
+            try:
+                remote_audio_queue.get_nowait()
+                self._increment_counter_metric("remote_audio_chunks_dropped", 1)
+            except asyncio.QueueEmpty:
+                pass
+        await remote_audio_queue.put(audio)
+        self._increment_counter_metric("remote_audio_chunks_in", 1)
+        self._increment_counter_metric("remote_audio_bytes_in", len(audio))
+        self._record_metrics(
+            remote_audio_level_rms=self._pcm16_rms_level(audio),
+            remote_audio_last_chunk_age_ms=0.0,
+        )
+        self._remote_audio_last_chunk_monotonic = time.perf_counter()
+        return True
+
+    async def ingest_remote_transcript_event(self, payload: dict) -> bool:
+        if not self._state.is_running or not self._uses_remote_event_source():
+            return False
+        if not isinstance(payload, dict):
+            return False
+        try:
+            event = TranscriptEvent.model_validate(payload)
+        except Exception:
+            return False
+        if event.event == "partial":
+            await self._set_runtime_state(
+                is_running=True,
+                status="transcribing",
+                started_at_utc=self._state.started_at_utc,
+                status_message="Receiving remote worker transcript stream.",
+            )
+        await self._broadcast_transcript(event)
+        await self.subtitle_router.handle_transcript(event)
+        await self._obs_caption_output.publish_source_event(event)
+        if event.event == "final":
+            self._increment_metric("finals_emitted")
+            await self._set_runtime_state(
+                is_running=True,
+                status="listening",
+                started_at_utc=self._state.started_at_utc,
+                status_message="Remote worker transcript stream is active.",
+            )
+        return True
+
+    async def ingest_remote_translation_event(self, payload: dict) -> bool:
+        if not self._state.is_running or not self._uses_remote_event_source():
+            return False
+        if not isinstance(payload, dict):
+            return False
+        try:
+            event = TranslationEvent.model_validate(payload)
+        except Exception:
+            return False
+        await self._set_runtime_state(
+            is_running=True,
+            status="translating",
+            started_at_utc=self._state.started_at_utc,
+            status_message="Receiving remote worker translation stream.",
+        )
+        await self._broadcast_translation(event)
+        await self.subtitle_router.handle_translation(event)
+        await self._set_runtime_state(
+            is_running=True,
+            status="listening",
+            started_at_utc=self._state.started_at_utc,
+            status_message="Remote worker transcript stream is active.",
+        )
+        return True
+
     def status(self) -> RuntimeState:
         self._apply_vad_tuning()
+        if self._uses_remote_audio_source():
+            if self._remote_audio_last_chunk_monotonic is not None:
+                self._record_metrics(
+                    remote_audio_last_chunk_age_ms=(time.perf_counter() - self._remote_audio_last_chunk_monotonic) * 1000.0
+                )
+        else:
+            self._record_metrics(remote_audio_last_chunk_age_ms=None)
         self._state = self._state.model_copy(
             update={
                 "asr_diagnostics": self.asr_diagnostics(),

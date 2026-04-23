@@ -21,6 +21,12 @@ from urllib.parse import urljoin, urlparse
 from urllib.error import URLError
 from urllib.request import urlopen
 
+from backend.core.remote_mode import (
+    REMOTE_ROLE_CONTROLLER,
+    REMOTE_ROLE_DISABLED,
+    REMOTE_ROLE_WORKER,
+    normalize_remote_role,
+)
 from desktop.runtime_bootstrap import (
     RuntimeBootstrapper,
     auto_detect_install_profile,
@@ -37,6 +43,8 @@ STARTUP_MODE_LOCAL = "local"
 LAUNCH_OPTION_BROWSER = "browser_google"
 LAUNCH_OPTION_NVIDIA = "nvidia"
 LAUNCH_OPTION_CPU = "cpu"
+LAUNCH_OPTION_REMOTE_CONTROLLER = "remote_controller"
+LAUNCH_OPTION_REMOTE_WORKER = "remote_worker"
 
 
 def _show_error_dialog(title: str, message: str) -> None:
@@ -49,8 +57,8 @@ def _show_error_dialog(title: str, message: str) -> None:
 def _build_splash_html(title: str) -> str:
     payload = {
         "title": title,
-        "subtitle": "Preparing the local runtime, backend, and dashboard window...",
-        "detail": "All startup and dependency work now runs through the desktop launcher window.",
+        "subtitle": "Choose startup mode before launching the local backend and dashboard.",
+        "detail": "Select Local or Remote mode, then pick the startup profile.",
     }
     escaped = json.dumps(payload)
     return f"""<!doctype html>
@@ -136,6 +144,12 @@ def _build_splash_html(title: str) -> str:
         border: 1px solid rgba(160, 193, 255, 0.14);
         background: rgba(7, 14, 24, 0.84);
       }}
+      .mode-actions {{
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 10px;
+      }}
       .profile-title {{
         margin: 0 0 8px;
         font-size: 13px;
@@ -148,10 +162,26 @@ def _build_splash_html(title: str) -> str:
         color: var(--muted);
         font-size: 14px;
       }}
+      .step-title {{
+        margin: 0;
+        color: #d8e6ff;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }}
+      .selection-panel {{
+        margin-top: 14px;
+      }}
+      .selection-panel[hidden] {{
+        display: none;
+      }}
       .profile-actions {{
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 12px;
+      }}
+      .profile-actions.remote {{
+        grid-template-columns: repeat(2, minmax(0, 1fr));
       }}
       .profile-button {{
         appearance: none;
@@ -171,6 +201,9 @@ def _build_splash_html(title: str) -> str:
       .profile-button.active {{
         background: var(--button-active);
         border-color: rgba(124, 227, 173, 0.42);
+      }}
+      .mode-button.active {{
+        border-color: rgba(108, 199, 255, 0.46);
       }}
       .profile-button[data-mode="browser_google"].active {{
         border-color: rgba(108, 199, 255, 0.46);
@@ -251,22 +284,49 @@ def _build_splash_html(title: str) -> str:
           </div>
         </div>
         <section class="profile-panel">
-          <p class="profile-title">Runtime Profile</p>
-          <p id="profile-hint" class="profile-hint">Choose how this desktop session should start.</p>
-          <div class="profile-actions">
-            <button id="profile-browser" class="profile-button" data-mode="browser_google" type="button" onclick="window.__sstChooseLaunchOption('browser_google')">
-              <strong>Quick Start</strong>
-              <small>Browser Speech only. Opens the dashboard fast and skips local AI runtime installation.</small>
+          <p class="profile-title">Startup Mode</p>
+          <p class="step-title">Step 1: Select mode</p>
+          <div class="mode-actions">
+            <button id="mode-local" class="profile-button mode-button" type="button" onclick="window.__sstSwitchLaunchMode('local')">
+              <strong>Local Mode</strong>
+              <small>Run recognition and subtitles on this same PC.</small>
             </button>
-            <button id="profile-nvidia" class="profile-button" data-mode="nvidia" type="button" onclick="window.__sstChooseLaunchOption('nvidia')">
-              <strong>NVIDIA GPU (CUDA)</strong>
-              <small>Recommended for NVIDIA cards. Uses the GPU-first PyTorch runtime.</small>
-            </button>
-            <button id="profile-cpu" class="profile-button" data-mode="cpu" type="button" onclick="window.__sstChooseLaunchOption('cpu')">
-              <strong>CPU-only</strong>
-              <small>Recommended for AMD, Intel, or no-GPU machines.</small>
+            <button id="mode-remote" class="profile-button mode-button" type="button" onclick="window.__sstSwitchLaunchMode('remote')">
+              <strong>Remote Mode</strong>
+              <small>Use this PC as controller or processing worker in LAN mode.</small>
             </button>
           </div>
+          <div id="selection-local" class="selection-panel">
+            <p class="step-title">Step 2: Choose local startup profile</p>
+            <div class="profile-actions">
+              <button id="profile-browser" class="profile-button" data-mode="browser_google" type="button" onclick="window.__sstChooseLaunchOption('browser_google')">
+                <strong>Quick Start (Browser Speech)</strong>
+                <small>Fast startup. Uses browser speech worker and skips local AI runtime installation.</small>
+              </button>
+              <button id="profile-nvidia" class="profile-button" data-mode="nvidia" type="button" onclick="window.__sstChooseLaunchOption('nvidia')">
+                <strong>Local AI (NVIDIA GPU)</strong>
+                <small>Recommended for NVIDIA cards. Uses GPU-first runtime.</small>
+              </button>
+              <button id="profile-cpu" class="profile-button" data-mode="cpu" type="button" onclick="window.__sstChooseLaunchOption('cpu')">
+                <strong>Local AI (CPU)</strong>
+                <small>Use when CUDA GPU is unavailable.</small>
+              </button>
+            </div>
+          </div>
+          <div id="selection-remote" class="selection-panel" hidden>
+            <p class="step-title">Step 2: Choose remote role</p>
+            <div class="profile-actions remote">
+              <button id="profile-remote-controller" class="profile-button" data-mode="remote_controller" type="button" onclick="window.__sstChooseLaunchOption('remote_controller')">
+                <strong>Main PC (Control & Captions)</strong>
+                <small>Sends microphone audio to remote AI worker and routes subtitles to local outputs.</small>
+              </button>
+              <button id="profile-remote-worker" class="profile-button" data-mode="remote_worker" type="button" onclick="window.__sstChooseLaunchOption('remote_worker')">
+                <strong>AI Processing PC</strong>
+                <small>Receives remote audio over WebRTC and runs recognition/translation.</small>
+              </button>
+            </div>
+          </div>
+          <p id="profile-hint" class="profile-hint">Choose mode and profile, then click the desired card to start.</p>
         </section>
         <section class="log-panel">
           <p class="log-title">Startup Dev Log</p>
@@ -274,38 +334,108 @@ def _build_splash_html(title: str) -> str:
         </section>
         <div class="splash-footer">Powered by Kiriuru</div>
       `;
+      const LOCAL_OPTIONS = ["browser_google", "nvidia", "cpu"];
+      const REMOTE_OPTIONS = ["remote_controller", "remote_worker"];
+      const MODE_DEFAULT_SELECTION = {{
+        local: "nvidia",
+        remote: "remote_controller",
+      }};
+      const launchState = {{
+        mode: "local",
+        selected: MODE_DEFAULT_SELECTION.local,
+        locked: false,
+      }};
+      function inferModeFromSelection(selection) {{
+        if (REMOTE_OPTIONS.includes(selection)) {{
+          return "remote";
+        }}
+        return "local";
+      }}
+      function optionModeSet(mode) {{
+        return mode === "remote" ? REMOTE_OPTIONS : LOCAL_OPTIONS;
+      }}
+      function renderLaunchState() {{
+        const localPanel = document.getElementById("selection-local");
+        const remotePanel = document.getElementById("selection-remote");
+        if (localPanel) {{
+          localPanel.hidden = launchState.mode !== "local";
+        }}
+        if (remotePanel) {{
+          remotePanel.hidden = launchState.mode !== "remote";
+        }}
+        const modeLocal = document.getElementById("mode-local");
+        const modeRemote = document.getElementById("mode-remote");
+        if (modeLocal) {{
+          modeLocal.classList.toggle("active", launchState.mode === "local");
+          modeLocal.disabled = launchState.locked;
+        }}
+        if (modeRemote) {{
+          modeRemote.classList.toggle("active", launchState.mode === "remote");
+          modeRemote.disabled = launchState.locked;
+        }}
+        const allButtons = [
+          document.getElementById("profile-browser"),
+          document.getElementById("profile-nvidia"),
+          document.getElementById("profile-cpu"),
+          document.getElementById("profile-remote-controller"),
+          document.getElementById("profile-remote-worker"),
+        ];
+        allButtons.forEach((button) => {{
+          if (!button) return;
+          const mode = String(button.dataset.mode || "").toLowerCase();
+          button.classList.toggle("active", mode === launchState.selected);
+          button.disabled = launchState.locked;
+        }});
+      }}
+      window.__sstSwitchLaunchMode = function (mode) {{
+        if (launchState.locked) {{
+          return;
+        }}
+        const normalized = String(mode || "").toLowerCase() === "remote" ? "remote" : "local";
+        launchState.mode = normalized;
+        const validOptions = optionModeSet(normalized);
+        if (!validOptions.includes(launchState.selected)) {{
+          launchState.selected = MODE_DEFAULT_SELECTION[normalized];
+        }}
+        renderLaunchState();
+      }};
       window.__sstSetLaunchOptionPrompt = function (payload) {{
         const normalized = payload || {{}};
         const hintEl = document.getElementById("profile-hint");
-        const browserButton = document.getElementById("profile-browser");
-        const nvidiaButton = document.getElementById("profile-nvidia");
-        const cpuButton = document.getElementById("profile-cpu");
         const selected = String(normalized.selected || "").toLowerCase();
+        const resolvedMode = String(normalized.mode || inferModeFromSelection(selected) || launchState.mode).toLowerCase() === "remote"
+          ? "remote"
+          : "local";
+        launchState.mode = resolvedMode;
+        launchState.locked = Boolean(normalized.locked);
+        if (selected) {{
+          launchState.selected = selected;
+        }}
+        const modeOptions = optionModeSet(launchState.mode);
+        if (!modeOptions.includes(launchState.selected)) {{
+          launchState.selected = MODE_DEFAULT_SELECTION[launchState.mode];
+        }}
         if (hintEl) {{
           hintEl.textContent = normalized.hint || "Choose how this desktop session should start.";
         }}
-        if (browserButton) {{
-          browserButton.classList.toggle("active", selected === "browser_google");
-          browserButton.disabled = Boolean(normalized.locked);
-        }}
-        if (nvidiaButton) {{
-          nvidiaButton.classList.toggle("active", selected === "nvidia");
-          nvidiaButton.disabled = Boolean(normalized.locked);
-        }}
-        if (cpuButton) {{
-          cpuButton.classList.toggle("active", selected === "cpu");
-          cpuButton.disabled = Boolean(normalized.locked);
-        }}
+        renderLaunchState();
       }};
       window.__sstChooseLaunchOption = function (selection) {{
         if (!window.pywebview || !window.pywebview.api || typeof window.pywebview.api.choose_launch_mode !== "function") {{
           return;
         }}
         const normalized = String(selection || "").toLowerCase();
+        const selectionMode = inferModeFromSelection(normalized);
         const applyingHint = normalized === "browser_google"
-          ? "Applying the Browser Speech quick start mode..."
-          : "Applying the selected local AI runtime profile...";
-        window.__sstSetLaunchOptionPrompt({{ selected: normalized, locked: true, hint: applyingHint }});
+          ? "Applying Browser Speech quick start mode..."
+          : normalized === "nvidia"
+            ? "Applying local AI startup (NVIDIA GPU)..."
+            : normalized === "cpu"
+              ? "Applying local AI startup (CPU)..."
+              : normalized === "remote_controller"
+                ? "Applying remote mode: Main PC (Control & Captions)..."
+                : "Applying remote mode: AI Processing PC...";
+        window.__sstSetLaunchOptionPrompt({{ selected: normalized, mode: selectionMode, locked: true, hint: applyingHint }});
         window.pywebview.api.choose_launch_mode(normalized);
       }};
       window.__sstDesktopLog = function (message) {{
@@ -319,6 +449,12 @@ def _build_splash_html(title: str) -> str:
         if (!el) return;
         el.textContent = message;
       }};
+      window.__sstSetLaunchOptionPrompt({{
+        selected: MODE_DEFAULT_SELECTION.local,
+        mode: "local",
+        locked: false,
+        hint: "Choose mode and profile, then click the desired card to start.",
+      }});
     </script>
   </body>
 </html>"""
@@ -333,6 +469,7 @@ class LaunchContext:
     browser_worker_url: str
     startup_mode: str
     install_profile: str
+    remote_role: str
     profile_name: str
     project_root: str
     data_dir: str
@@ -361,6 +498,27 @@ def _load_saved_asr_mode(config_path: Path) -> str:
         return STARTUP_MODE_LOCAL
     mode = str(asr.get("mode", STARTUP_MODE_LOCAL) or STARTUP_MODE_LOCAL).strip().lower()
     return mode if mode in {STARTUP_MODE_LOCAL, STARTUP_MODE_BROWSER} else STARTUP_MODE_LOCAL
+
+
+def _load_saved_remote_state(config_path: Path) -> tuple[bool, str]:
+    if not config_path.exists():
+        return False, REMOTE_ROLE_DISABLED
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False, REMOTE_ROLE_DISABLED
+    if not isinstance(payload, dict):
+        return False, REMOTE_ROLE_DISABLED
+    remote = payload.get("remote", {})
+    if not isinstance(remote, dict):
+        return False, REMOTE_ROLE_DISABLED
+    enabled = bool(remote.get("enabled", False))
+    role = normalize_remote_role(remote.get("role", REMOTE_ROLE_DISABLED))
+    if enabled and role == REMOTE_ROLE_DISABLED:
+        role = REMOTE_ROLE_CONTROLLER
+    if not enabled:
+        return False, REMOTE_ROLE_DISABLED
+    return True, role
 
 
 def _read_install_profile(install_profile_file: Path) -> str:
@@ -500,15 +658,18 @@ class DesktopLauncher:
 
     def _build_context(self) -> LaunchContext:
         base_url = f"http://{APP_HOST}:{APP_PORT}"
+        config_path = self._paths.data_dir / "config.json"
+        remote_enabled, remote_role = _load_saved_remote_state(config_path)
         return LaunchContext(
             desktop_mode=True,
             base_url=base_url,
             dashboard_url=f"{base_url}/?desktop=1",
             overlay_url=f"{base_url}/overlay",
             browser_worker_url=f"{base_url}/google-asr",
-            startup_mode=_load_saved_asr_mode(self._paths.data_dir / "config.json"),
+            startup_mode=_load_saved_asr_mode(config_path),
             install_profile=_read_install_profile(self._paths.install_profile_file),
-            profile_name=_load_profile_name(self._paths.data_dir / "config.json"),
+            remote_role=remote_role if remote_enabled else REMOTE_ROLE_DISABLED,
+            profile_name=_load_profile_name(config_path),
             project_root=str(self._paths.project_root),
             data_dir=str(self._paths.data_dir),
         )
@@ -561,7 +722,13 @@ class DesktopLauncher:
 
     def _set_launch_option(self, selection: str) -> bool:
         normalized = str(selection or "").strip().lower()
-        if normalized not in {LAUNCH_OPTION_BROWSER, LAUNCH_OPTION_NVIDIA, LAUNCH_OPTION_CPU}:
+        if normalized not in {
+            LAUNCH_OPTION_BROWSER,
+            LAUNCH_OPTION_NVIDIA,
+            LAUNCH_OPTION_CPU,
+            LAUNCH_OPTION_REMOTE_CONTROLLER,
+            LAUNCH_OPTION_REMOTE_WORKER,
+        }:
             return False
         with self._selected_launch_option_lock:
             self._selected_launch_option = normalized
@@ -578,27 +745,43 @@ class DesktopLauncher:
         window: Any,
         *,
         selected: str,
+        selected_mode: str,
         saved_profile: str | None,
         detected_profile: str,
         saved_asr_mode: str,
+        saved_remote_enabled: bool,
+        saved_remote_role: str,
     ) -> None:
-        saved_label = "saved" if saved_profile else "detected"
-        selected_label = (
-            "Quick Start (Browser Speech)"
-            if selected == LAUNCH_OPTION_BROWSER
-            else "NVIDIA GPU (CUDA 12.8)"
-            if selected == LAUNCH_OPTION_NVIDIA
-            else "CPU-only"
+        selected_label = {
+            LAUNCH_OPTION_BROWSER: "Quick Start (Browser Speech)",
+            LAUNCH_OPTION_NVIDIA: "Local AI (NVIDIA GPU)",
+            LAUNCH_OPTION_CPU: "Local AI (CPU)",
+            LAUNCH_OPTION_REMOTE_CONTROLLER: "Main PC (Control & Captions)",
+            LAUNCH_OPTION_REMOTE_WORKER: "AI Processing PC",
+        }.get(selected, "Local AI (NVIDIA GPU)")
+        detected_label = "NVIDIA GPU" if detected_profile == LAUNCH_OPTION_NVIDIA else "CPU"
+        saved_mode_label = (
+            "Remote mode"
+            if saved_remote_enabled
+            else "Browser Speech quick start"
+            if saved_asr_mode == STARTUP_MODE_BROWSER
+            else "Local AI"
         )
-        detected_label = "NVIDIA GPU" if detected_profile == "nvidia" else "CPU-only"
-        saved_mode_label = "Browser Speech quick start" if saved_asr_mode == STARTUP_MODE_BROWSER else "Local AI"
+        if saved_remote_enabled:
+            saved_mode_label = (
+                "Remote worker (AI Processing PC)"
+                if saved_remote_role == REMOTE_ROLE_WORKER
+                else "Remote controller (Main PC)"
+            )
+        saved_install_label = saved_profile or detected_profile
         hint = (
-            f"Choose how this desktop session should start. "
-            f"Saved recognition mode: {saved_mode_label}. "
-            f"Current {saved_label} local AI profile: {saved_profile or detected_profile}. "
-            f"Auto-detected local AI recommendation: {detected_label}. Selected: {selected_label}."
+            f"Choose mode and profile to continue startup. "
+            f"Last saved startup: {saved_mode_label}. "
+            f"Saved local install profile: {saved_install_label}. "
+            f"Auto-detected local AI recommendation: {detected_label}. "
+            f"Selected: {selected_label}."
         )
-        payload = {"selected": selected, "hint": hint, "locked": False}
+        payload = {"selected": selected, "mode": selected_mode, "hint": hint, "locked": False}
         try:
             window.evaluate_js(
                 f"window.__sstSetLaunchOptionPrompt && window.__sstSetLaunchOptionPrompt({json.dumps(payload)});"
@@ -606,25 +789,47 @@ class DesktopLauncher:
         except Exception:
             pass
 
-    def _wait_for_launch_option_selection(self, window: Any) -> tuple[str, str | None]:
+    def _wait_for_launch_option_selection(self, window: Any) -> tuple[str, str | None, str, bool]:
+        config_path = self._paths.data_dir / "config.json"
         saved_profile = normalize_install_profile(_read_install_profile(self._paths.install_profile_file))
         detected_profile = auto_detect_install_profile()
-        saved_asr_mode = _load_saved_asr_mode(self._paths.data_dir / "config.json")
-        selected = LAUNCH_OPTION_BROWSER if saved_asr_mode == STARTUP_MODE_BROWSER else (saved_profile or detected_profile)
+        saved_asr_mode = _load_saved_asr_mode(config_path)
+        saved_remote_enabled, saved_remote_role = _load_saved_remote_state(config_path)
+        prefer_remote_default = saved_remote_enabled and saved_asr_mode != STARTUP_MODE_BROWSER
+        if prefer_remote_default:
+            selected = (
+                LAUNCH_OPTION_REMOTE_WORKER
+                if saved_remote_role == REMOTE_ROLE_WORKER
+                else LAUNCH_OPTION_REMOTE_CONTROLLER
+            )
+            selected_mode = "remote"
+        else:
+            selected = LAUNCH_OPTION_BROWSER if saved_asr_mode == STARTUP_MODE_BROWSER else (saved_profile or detected_profile)
+            selected_mode = "local"
         self._launch_option_event.clear()
         with self._selected_launch_option_lock:
             self._selected_launch_option = None
         self._publish_profile_prompt(
             window,
             selected=selected,
+            selected_mode=selected_mode,
             saved_profile=saved_profile,
             detected_profile=detected_profile,
             saved_asr_mode=saved_asr_mode,
+            saved_remote_enabled=saved_remote_enabled,
+            saved_remote_role=saved_remote_role,
         )
-        self._publish_window_status(window, "Choose Browser Speech, CPU, or GPU on the splash screen to continue startup.")
+        self._publish_window_status(
+            window,
+            "Choose Local or Remote mode on splash, then click a startup profile card to continue.",
+        )
         self._publish_window_log(
             window,
-            f"launch selector ready: saved_mode={saved_asr_mode}, saved_install={saved_profile or 'none'}, detected={detected_profile}, selected={selected}",
+            "launch selector ready: "
+            f"saved_mode={saved_asr_mode}, "
+            f"saved_remote={'on' if saved_remote_enabled else 'off'}:{saved_remote_role}, "
+            f"remote_default={'on' if prefer_remote_default else 'off'}, "
+            f"saved_install={saved_profile or 'none'}, detected={detected_profile}, selected={selected}",
         )
         while not self._launch_option_event.wait(timeout=0.2):
             if self._shutdown_started.is_set():
@@ -633,14 +838,32 @@ class DesktopLauncher:
         if chosen == LAUNCH_OPTION_BROWSER:
             fallback_install_profile = saved_profile or detected_profile
             self._publish_window_status(window, "Preparing lightweight Browser Speech startup...")
-            return STARTUP_MODE_BROWSER, fallback_install_profile
+            return STARTUP_MODE_BROWSER, fallback_install_profile, REMOTE_ROLE_DISABLED, False
+        if chosen == LAUNCH_OPTION_REMOTE_CONTROLLER:
+            self._publish_window_status(window, "Preparing remote controller startup (lightweight mode)...")
+            return STARTUP_MODE_LOCAL, None, REMOTE_ROLE_CONTROLLER, False
+        if chosen == LAUNCH_OPTION_REMOTE_WORKER:
+            worker_profile = saved_profile or detected_profile
+            worker_profile_label = "NVIDIA GPU" if worker_profile == LAUNCH_OPTION_NVIDIA else "CPU"
+            self._publish_window_status(
+                window,
+                f"Preparing remote worker AI runtime ({worker_profile_label})...",
+            )
+            return STARTUP_MODE_LOCAL, worker_profile, REMOTE_ROLE_WORKER, True
         self._publish_window_status(
             window,
             "Preparing the local environment for NVIDIA GPU..." if chosen == LAUNCH_OPTION_NVIDIA else "Preparing the local CPU-only environment...",
         )
-        return STARTUP_MODE_LOCAL, chosen
+        return STARTUP_MODE_LOCAL, chosen, REMOTE_ROLE_DISABLED, False
 
-    def _apply_startup_mode_to_config(self, startup_mode: str, install_profile: str | None) -> None:
+    def _apply_startup_mode_to_config(
+        self,
+        startup_mode: str,
+        install_profile: str | None,
+        *,
+        remote_role: str,
+        remote_allow_lan: bool,
+    ) -> None:
         config_path = self._paths.data_dir / "config.json"
         payload: dict[str, Any]
         if config_path.exists():
@@ -658,10 +881,43 @@ class DesktopLauncher:
         if startup_mode == STARTUP_MODE_LOCAL and install_profile in {LAUNCH_OPTION_CPU, LAUNCH_OPTION_NVIDIA}:
             asr["prefer_gpu"] = install_profile == LAUNCH_OPTION_NVIDIA
         payload["asr"] = asr
+
+        remote = payload.get("remote", {})
+        if not isinstance(remote, dict):
+            remote = {}
+        lan = remote.get("lan", {})
+        if not isinstance(lan, dict):
+            lan = {}
+
+        normalized_remote_role = normalize_remote_role(remote_role, fallback=REMOTE_ROLE_DISABLED)
+        if startup_mode == STARTUP_MODE_BROWSER:
+            normalized_remote_role = REMOTE_ROLE_DISABLED
+            remote_allow_lan = False
+        if normalized_remote_role in {REMOTE_ROLE_CONTROLLER, REMOTE_ROLE_WORKER}:
+            remote["enabled"] = True
+            remote["role"] = normalized_remote_role
+            if normalized_remote_role == REMOTE_ROLE_WORKER:
+                lan["bind_enabled"] = bool(remote_allow_lan)
+                lan["bind_host"] = "0.0.0.0" if remote_allow_lan else str(lan.get("bind_host", "127.0.0.1"))
+            else:
+                lan["bind_enabled"] = False
+                lan["bind_host"] = "127.0.0.1"
+        else:
+            remote["enabled"] = False
+            remote["role"] = REMOTE_ROLE_DISABLED
+            lan["bind_enabled"] = False
+        remote["lan"] = lan
+        payload["remote"] = remote
+
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         self._write_log(
-            f"startup config applied: mode={asr.get('mode')} install_profile={install_profile or 'none'} -> {config_path}"
+            "startup config applied: "
+            f"mode={asr.get('mode')} "
+            f"install_profile={install_profile or 'none'} "
+            f"remote_role={normalized_remote_role} "
+            f"remote_lan={'on' if remote_allow_lan else 'off'} "
+            f"-> {config_path}"
         )
 
     def _normalize_external_url(self, url: str) -> str:
@@ -784,12 +1040,23 @@ class DesktopLauncher:
                 f"See launcher log:\n{self._log_path}",
             )
             return False
+        isolated_profile_dir = self._paths.runtime_root / "browser-worker-profile"
+        try:
+            isolated_profile_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self._set_browser_worker_error(
+                f"Failed to prepare browser worker profile directory '{isolated_profile_dir}': {type(exc).__name__}: {exc}"
+            )
+            return False
         args = [
             str(browser_path),
-            f"--app={normalized_url}",
             "--new-window",
+            "--no-first-run",
+            "--disable-default-apps",
+            f"--user-data-dir={isolated_profile_dir}",
             "--disable-session-crashed-bubble",
             "--window-size=980,860",
+            normalized_url,
         ]
         self._write_log(f"[browser-worker] launch args: {args}")
         try:
@@ -798,7 +1065,9 @@ class DesktopLauncher:
                 cwd=str(browser_path.parent),
                 creationflags=getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             )
-            self._write_log(f"[browser-worker] launched app window via {browser_path}")
+            self._write_log(
+                f"[browser-worker] launched isolated worker window via {browser_path}; profile={isolated_profile_dir}"
+            )
             return True
         except Exception as exc:
             self._set_browser_worker_error(
@@ -844,8 +1113,19 @@ class DesktopLauncher:
         lines.append("Close the previous local app instance or free the port, then launch the desktop app again.")
         return "\n".join(lines)
 
-    def _start_backend_process(self, window: Any, python_exe: Path, env: dict[str, str]) -> None:
-        self._publish_window_status(window, "Starting local backend subprocess on 127.0.0.1 ...")
+    def _start_backend_process(
+        self,
+        window: Any,
+        python_exe: Path,
+        env: dict[str, str],
+        *,
+        remote_role: str,
+        remote_allow_lan: bool,
+    ) -> None:
+        bind_hint = "0.0.0.0 (LAN enabled)" if remote_allow_lan else "127.0.0.1"
+        self._publish_window_status(window, f"Starting local backend subprocess on {bind_hint} ...")
+        env["SST_REMOTE_ROLE"] = normalize_remote_role(remote_role, fallback=REMOTE_ROLE_DISABLED)
+        env["SST_ALLOW_LAN"] = "1" if remote_allow_lan else "0"
         bootstrap_code = (
             "import runpy, sys; "
             f"sys.path.insert(0, {self._paths.bundle_root.as_posix()!r}); "
@@ -866,7 +1146,10 @@ class DesktopLauncher:
         )
         self._backend_process = process
         self._register_child_process(process)
-        self._publish_window_log(window, f"backend subprocess started via {python_exe}")
+        self._publish_window_log(
+            window,
+            f"backend subprocess started via {python_exe} | remote_role={env['SST_REMOTE_ROLE']} | allow_lan={env['SST_ALLOW_LAN']}",
+        )
 
         def reader() -> None:
             assert process.stdout is not None
@@ -903,7 +1186,7 @@ class DesktopLauncher:
                 raise RuntimeError(self._format_port_error())
             self._publish_window_log(window, "preflight passed")
 
-            startup_mode, install_profile_override = self._wait_for_launch_option_selection(window)
+            startup_mode, install_profile_override, remote_role, remote_allow_lan = self._wait_for_launch_option_selection(window)
             bootstrapper = RuntimeBootstrapper(
                 paths=self._paths,
                 log=lambda message: self._publish_window_log(window, message),
@@ -912,7 +1195,10 @@ class DesktopLauncher:
                 unregister_process=self._unregister_child_process,
             )
             install_profile = install_profile_override
-            if startup_mode == STARTUP_MODE_LOCAL:
+            needs_local_ai_runtime = (
+                startup_mode == STARTUP_MODE_LOCAL and remote_role != REMOTE_ROLE_CONTROLLER
+            )
+            if needs_local_ai_runtime:
                 install_profile = bootstrapper.ensure_local_asr_runtime(
                     install_profile_override=install_profile_override,
                 )
@@ -920,18 +1206,30 @@ class DesktopLauncher:
             else:
                 python_exe = bootstrapper.ensure_base_environment()
             bootstrapper.cleanup_transient_runtime_files(preserve_paths=[self._log_path])
-            self._apply_startup_mode_to_config(startup_mode, install_profile)
+            self._apply_startup_mode_to_config(
+                startup_mode,
+                install_profile,
+                remote_role=remote_role,
+                remote_allow_lan=remote_allow_lan,
+            )
             self._context = LaunchContext(
                 **{
                     **asdict(self._context),
                     "startup_mode": startup_mode,
-                    "install_profile": install_profile,
+                    "install_profile": install_profile or self._context.install_profile or "auto",
+                    "remote_role": remote_role,
                     "profile_name": _load_profile_name(self._paths.data_dir / "config.json"),
                 }
             )
 
             env = bootstrapper.runtime_environment()
-            self._start_backend_process(window, python_exe, env)
+            self._start_backend_process(
+                window,
+                python_exe,
+                env,
+                remote_role=remote_role,
+                remote_allow_lan=remote_allow_lan,
+            )
             self._publish_window_status(window, "Waiting for local /api/health ...")
 
             def on_health_retry(attempt: int, last_error: str | None) -> None:

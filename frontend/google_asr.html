@@ -183,6 +183,13 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 12px;
       }
+      .actions.actions-three {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .settings-save-status {
+        margin-top: 2px;
+        min-height: 20px;
+      }
 
       button {
         appearance: none;
@@ -285,24 +292,11 @@
             <div class="metric-title" data-i18n="worker.configured_language">Configured recognition language</div>
             <div id="configured-language" class="status-value" data-i18n="common.loading">loading...</div>
           </div>
-          <div class="status-card stack">
-            <div>
-              <div class="metric-title" data-i18n="worker.microphone.eyebrow">Browser microphone access</div>
-              <p id="microphone-status" class="muted" data-i18n="worker.microphone.status.waiting">
-                No microphone access requested yet.
-              </p>
-            </div>
-            <label>
-              <span data-i18n="worker.microphone.detected">Detected browser microphones</span>
-              <select id="microphone-device-select"></select>
-            </label>
+          <div class="status-card">
+            <div class="metric-title" data-i18n="worker.microphone.eyebrow">Browser microphone access</div>
             <p class="muted" data-i18n="worker.microphone.note">
-              Browser Speech follows the microphone selected in browser/site permissions. Use this panel to request access, inspect visible devices, and confirm which microphone label the browser exposes.
+              Use the browser microphone/site-permission icon in the address bar to select and switch the microphone for this worker window.
             </p>
-            <div class="actions">
-              <button id="refresh-microphones" class="secondary" type="button" data-i18n="worker.microphone.refresh">Refresh Microphones</button>
-              <button id="request-microphone-access" class="secondary" type="button" data-i18n="worker.microphone.request_access">Request Microphone Access</button>
-            </div>
           </div>
           <label class="toggle">
             <input id="interim-results" type="checkbox" checked />
@@ -319,10 +313,12 @@
           <p class="muted" data-i18n="worker.force_finalization.note">
             Forced finalization uses a short idle timeout and sends the current interim text to the main app as a final segment.
           </p>
-          <div class="actions">
+          <div class="actions actions-three">
             <button id="start-recognition" class="primary" type="button" data-i18n="worker.start">Start Recognition</button>
             <button id="stop-recognition" class="secondary" type="button" data-i18n="common.stop">Stop</button>
+            <button id="save-worker-settings" class="secondary" type="button" data-i18n="common.save">Save</button>
           </div>
+          <p id="settings-save-status" class="muted settings-save-status"></p>
         </section>
 
         <section class="panel status-row">
@@ -406,10 +402,6 @@
         const socketStatusEl = document.getElementById("socket-status");
         const configuredLanguageEl = document.getElementById("configured-language");
         const visibilityWarningText = document.getElementById("visibility-warning-text");
-        const microphoneStatusEl = document.getElementById("microphone-status");
-        const microphoneDeviceSelect = document.getElementById("microphone-device-select");
-        const refreshMicrophonesButton = document.getElementById("refresh-microphones");
-        const requestMicrophoneAccessButton = document.getElementById("request-microphone-access");
         const partialBox = document.getElementById("partial-box");
         const finalBox = document.getElementById("final-box");
         const interimResultsToggle = document.getElementById("interim-results");
@@ -417,6 +409,8 @@
         const forceFinalizationToggle = document.getElementById("force-finalization");
         const startButton = document.getElementById("start-recognition");
         const stopButton = document.getElementById("stop-recognition");
+        const saveSettingsButton = document.getElementById("save-worker-settings");
+        const settingsSaveStatusEl = document.getElementById("settings-save-status");
 
         const state = {
           configuredLanguage: "ru-RU",
@@ -439,9 +433,6 @@
           currentStatus: "idle",
           restartTimer: null,
           restartAttemptsWithoutAudio: 0,
-          microphoneDevices: [],
-          selectedMicrophoneId: "",
-          selectedMicrophoneLabel: "",
           lastRecognitionStartAt: 0,
           lastAudioActivityAt: 0,
           lastErrorCode: "",
@@ -513,8 +504,6 @@
             "requesting microphone permission",
             "microphone permission granted",
             "microphone permission failed",
-            "browser microphone list updated",
-            "browser microphone selected",
             "recognition.start",
             "recognition.start failed",
             "recognition.onstart",
@@ -561,6 +550,20 @@
           };
         }
 
+        function defaultSettingsSaveStatusText() {
+          return locale() === "ru"
+            ? "Изменения сохраняются автоматически. Можно нажать «Сохранить» вручную."
+            : "Changes are autosaved. You can also press Save manually.";
+        }
+
+        function setSettingsSaveStatus(message, isError = false) {
+          if (!settingsSaveStatusEl) {
+            return;
+          }
+          settingsSaveStatusEl.textContent = String(message || "").trim();
+          settingsSaveStatusEl.style.color = isError ? "var(--danger)" : "var(--muted)";
+        }
+
         function applyRecognitionSettingsToRuntime() {
           if (!state.recognition) {
             return;
@@ -590,6 +593,13 @@
 
         function queueBrowserSettingsSave(reason) {
           const nextWorkerSettings = readWorkerSettingsFromControls();
+          setSettingsSaveStatus(
+            locale() === "ru" ? "Сохранение настроек..." : "Saving settings...",
+            false
+          );
+          if (saveSettingsButton) {
+            saveSettingsButton.disabled = true;
+          }
           state.settingsSavePromise = state.settingsSavePromise
             .catch(() => undefined)
             .then(async () => {
@@ -634,12 +644,29 @@
               }
               updateCounters();
               appendLog(
-                `worker settings autosaved (${reason}): interim=${interimResultsToggle.checked}, continuous=${continuousResultsToggle.checked}, force_finalization=${forceFinalizationToggle.checked}`
+                `worker settings saved (${reason}): interim=${interimResultsToggle.checked}, continuous=${continuousResultsToggle.checked}, force_finalization=${forceFinalizationToggle.checked}`
+              );
+              setSettingsSaveStatus(
+                locale() === "ru"
+                  ? `Сохранено в ${formatNow()}`
+                  : `Saved at ${formatNow()}`,
+                false
               );
             })
             .catch((error) => {
               const message = error instanceof Error ? error.message : String(error || "");
-              appendLog(`worker settings autosave failed (${reason}): ${message}`);
+              appendLog(`worker settings save failed (${reason}): ${message}`);
+              setSettingsSaveStatus(
+                locale() === "ru"
+                  ? `Ошибка сохранения: ${message || "неизвестная ошибка"}`
+                  : `Save failed: ${message || "unknown error"}`,
+                true
+              );
+            })
+            .finally(() => {
+              if (saveSettingsButton) {
+                saveSettingsButton.disabled = false;
+              }
             });
           return state.settingsSavePromise;
         }
@@ -693,71 +720,6 @@
           configuredLanguageEl.textContent = locale() === "ru"
             ? `${state.configuredLanguage} -> источник ${state.sourceLang}`
             : `${state.configuredLanguage} -> source ${state.sourceLang}`;
-        }
-
-        function setMicrophoneStatus(message) {
-          if (microphoneStatusEl) {
-            microphoneStatusEl.textContent = message;
-          }
-        }
-
-        function renderMicrophoneDevices() {
-          if (!microphoneDeviceSelect) {
-            return;
-          }
-          microphoneDeviceSelect.innerHTML = "";
-          const devices = Array.isArray(state.microphoneDevices) ? state.microphoneDevices : [];
-          if (!devices.length) {
-            const option = document.createElement("option");
-            option.value = "";
-            option.textContent = locale() === "ru" ? "Браузер пока не раскрыл микрофоны" : "No browser microphones available yet";
-            microphoneDeviceSelect.appendChild(option);
-            microphoneDeviceSelect.disabled = true;
-            return;
-          }
-          microphoneDeviceSelect.disabled = false;
-          devices.forEach((device, index) => {
-            const option = document.createElement("option");
-            option.value = device.deviceId;
-            option.textContent = device.label || (locale() === "ru"
-              ? `Микрофон ${index + 1}`
-              : `Microphone ${index + 1}`);
-            microphoneDeviceSelect.appendChild(option);
-          });
-          const selectedId = devices.some((device) => device.deviceId === state.selectedMicrophoneId)
-            ? state.selectedMicrophoneId
-            : devices[0]?.deviceId || "";
-          microphoneDeviceSelect.value = selectedId;
-          state.selectedMicrophoneId = selectedId;
-          state.selectedMicrophoneLabel = devices.find((device) => device.deviceId === selectedId)?.label || "";
-        }
-
-        async function refreshMicrophoneDevices() {
-          if (!navigator.mediaDevices?.enumerateDevices) {
-            setMicrophoneStatus(locale() === "ru"
-              ? "Браузер не предоставляет список микрофонов через MediaDevices."
-              : "This browser does not expose a microphone list through MediaDevices.");
-            return;
-          }
-          const devices = await navigator.mediaDevices.enumerateDevices();
-          state.microphoneDevices = devices.filter((device) => device.kind === "audioinput");
-          renderMicrophoneDevices();
-          appendLog(`browser microphone list updated: ${state.microphoneDevices.length} device(s)`);
-          if (!state.microphoneDevices.length) {
-            setMicrophoneStatus(locale() === "ru"
-              ? "После выдачи доступа браузер покажет доступные микрофоны здесь."
-              : "Available microphones will appear here after browser access is granted.");
-            return;
-          }
-          if (state.selectedMicrophoneLabel) {
-            setMicrophoneStatus(locale() === "ru"
-              ? `Выбранный браузером микрофон: ${state.selectedMicrophoneLabel}`
-              : `Browser-visible microphone: ${state.selectedMicrophoneLabel}`);
-            return;
-          }
-          setMicrophoneStatus(locale() === "ru"
-            ? "Выберите микрофон ниже и при необходимости заново запросите доступ."
-            : "Choose a microphone below and request access again if needed.");
         }
 
         function clearForceFinalizeTimer() {
@@ -1055,36 +1017,12 @@
         }
 
         async function ensureMicrophonePermission() {
-          const selectedDeviceId = String(state.selectedMicrophoneId || "").trim();
           appendLog("requesting microphone permission via getUserMedia");
-          const preferredAudioConstraints = selectedDeviceId
-            ? { deviceId: { exact: selectedDeviceId } }
-            : true;
-          let stream;
-          try {
-            stream = await navigator.mediaDevices.getUserMedia({ audio: preferredAudioConstraints });
-          } catch (error) {
-            if (!selectedDeviceId) {
-              throw error;
-            }
-            appendLog("microphone permission failed for selected device; retrying with browser default microphone");
-            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          }
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           const [track] = stream.getAudioTracks();
           appendLog(
             `microphone permission granted${track?.label ? `: ${track.label}` : ""}`
           );
-          state.selectedMicrophoneLabel = track?.label || state.selectedMicrophoneLabel || "";
-          setMicrophoneStatus(
-            state.selectedMicrophoneLabel
-              ? (locale() === "ru"
-                ? `Доступ к микрофону получен: ${state.selectedMicrophoneLabel}`
-                : `Microphone access granted: ${state.selectedMicrophoneLabel}`)
-              : (locale() === "ru"
-                ? "Доступ к микрофону получен."
-                : "Microphone access granted.")
-          );
-          await refreshMicrophoneDevices();
           stream.getTracks().forEach((track) => track.stop());
         }
 
@@ -1156,54 +1094,9 @@
           stopRecognition();
         });
 
-        if (microphoneDeviceSelect) {
-          microphoneDeviceSelect.addEventListener("change", () => {
-            state.selectedMicrophoneId = String(microphoneDeviceSelect.value || "");
-            state.selectedMicrophoneLabel = state.microphoneDevices.find(
-              (device) => device.deviceId === state.selectedMicrophoneId
-            )?.label || "";
-            appendLog(
-              `browser microphone selected: ${state.selectedMicrophoneLabel || state.selectedMicrophoneId || "default"}`
-            );
-            setMicrophoneStatus(
-              state.selectedMicrophoneLabel
-                ? (locale() === "ru"
-                  ? `Выбран браузерный микрофон: ${state.selectedMicrophoneLabel}`
-                  : `Selected browser microphone: ${state.selectedMicrophoneLabel}`)
-                : (locale() === "ru"
-                  ? "Выбран браузерный микрофон. При необходимости заново запросите доступ."
-                  : "Browser microphone selected. Request access again if needed.")
-            );
-          });
-        }
-
-        if (refreshMicrophonesButton) {
-          refreshMicrophonesButton.addEventListener("click", () => {
-            refreshMicrophoneDevices().catch((error) => {
-              const message = error instanceof Error ? error.message : String(error || "");
-              appendLog(`microphone list refresh failed: ${message}`);
-              setMicrophoneStatus(
-                locale() === "ru"
-                  ? `Не удалось обновить список микрофонов: ${message}`
-                  : `Could not refresh microphone list: ${message}`
-              );
-            });
-          });
-        }
-
-        if (requestMicrophoneAccessButton) {
-          requestMicrophoneAccessButton.addEventListener("click", async () => {
-            try {
-              await ensureMicrophonePermission();
-            } catch (error) {
-              const message = error instanceof Error ? error.message : String(error || "");
-              appendLog(`microphone permission failed: ${message}`);
-              setMicrophoneStatus(
-                locale() === "ru"
-                  ? `Ошибка доступа к микрофону: ${message}`
-                  : `Microphone access failed: ${message}`
-              );
-            }
+        if (saveSettingsButton) {
+          saveSettingsButton.addEventListener("click", async () => {
+            await queueBrowserSettingsSave("manual");
           });
         }
 
@@ -1272,6 +1165,10 @@
             updateVisibilityWarning();
             startButton.textContent = t("worker.start");
             stopButton.textContent = t("common.stop");
+            if (saveSettingsButton) {
+              saveSettingsButton.textContent = t("common.save");
+            }
+            setSettingsSaveStatus(defaultSettingsSaveStatusText(), false);
           });
         }
 
@@ -1279,11 +1176,7 @@
           connectSocket();
           updateCounters();
           updateVisibilityWarning();
-          refreshMicrophoneDevices().catch(() => {
-            setMicrophoneStatus(locale() === "ru"
-              ? "Откройте доступ к микрофону, чтобы увидеть список устройств."
-              : "Grant microphone access to see available devices.");
-          });
+          setSettingsSaveStatus(defaultSettingsSaveStatusText(), false);
           const params = new URLSearchParams(location.search);
           appendLog(`worker ready; autostart=${params.get("autostart") === "1" ? "yes" : "no"}`);
           if (params.get("autostart") === "1") {

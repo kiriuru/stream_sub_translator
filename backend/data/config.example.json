@@ -63,6 +63,35 @@
   "audio": {
     "input_device_id": null
   },
+  "remote": {
+    "enabled": false,
+    "role": "disabled",
+    "session_id": "",
+    "pair_code": "",
+    "lan": {
+      "bind_enabled": false,
+      "bind_host": "0.0.0.0",
+      "port": 8876
+    },
+    "controller": {
+      "worker_url": "",
+      "connect_timeout_ms": 8000,
+      "reconnect_delay_ms": 2000
+    },
+    "worker": {
+      "allow_unpaired": false,
+      "heartbeat_timeout_ms": 15000
+    }
+  },
+  "updates": {
+    "enabled": false,
+    "provider": "github_releases",
+    "github_repo": "",
+    "release_channel": "stable",
+    "check_interval_hours": 12,
+    "last_checked_utc": "",
+    "latest_known_version": ""
+  },
   "translation": {
     "enabled": false,
     "provider": "google_translate_v2",

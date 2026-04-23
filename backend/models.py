@@ -16,6 +16,13 @@ class RuntimeMetrics(BaseModel):
     finals_emitted: int = 0
     suppressed_partial_updates: int = 0
     vad_dropped_segments: int = 0
+    remote_audio_chunks_in: int = 0
+    remote_audio_bytes_in: int = 0
+    remote_audio_chunks_dropped: int = 0
+    remote_audio_level_rms: float | None = None
+    remote_audio_last_chunk_age_ms: float | None = None
+    vad_segments_partial: int = 0
+    vad_segments_final: int = 0
 
 
 class AsrDiagnostics(BaseModel):
@@ -73,16 +80,39 @@ class AsrDiagnostics(BaseModel):
     runtime_initialized: bool = False
 
 
+class ReleaseSyncStatus(BaseModel):
+    provider: str = "github_releases"
+    enabled: bool = False
+    github_repo: str | None = None
+    release_channel: str = "stable"
+    latest_known_version: str | None = None
+    last_checked_utc: str | None = None
+    update_available: bool = False
+    check_supported: bool = False
+    check_active: bool = False
+    message: str | None = None
+
+
+class VersionInfoResponse(BaseModel):
+    ok: bool = True
+    current_version: str
+    release_track: str = "stable"
+    sync: ReleaseSyncStatus
+
+
 class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "stream-sub-translator"
     timestamp_utc: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    app_version: str | None = None
+    release_sync: ReleaseSyncStatus | None = None
     asr_provider: str | None = None
     asr_ready: bool | None = None
     asr_message: str | None = None
     asr_diagnostics: AsrDiagnostics | None = None
     translation_diagnostics: "TranslationDiagnostics | None" = None
     obs_caption_diagnostics: "ObsCaptionDiagnostics | None" = None
+    remote_diagnostics: "RemoteDiagnostics | None" = None
 
 
 class ClientLogEventRequest(BaseModel):
@@ -105,6 +135,7 @@ class RuntimeState(BaseModel):
     asr_diagnostics: AsrDiagnostics | None = None
     translation_diagnostics: "TranslationDiagnostics | None" = None
     obs_caption_diagnostics: "ObsCaptionDiagnostics | None" = None
+    remote_diagnostics: "RemoteDiagnostics | None" = None
     metrics: RuntimeMetrics | None = None
 
 
@@ -120,6 +151,103 @@ class RuntimeStartRequest(BaseModel):
 
 class ObsUrlResponse(BaseModel):
     overlay_url: str
+
+
+class RemoteDiagnostics(BaseModel):
+    enabled: bool = False
+    configured_role: Literal["disabled", "controller", "worker"] = "disabled"
+    effective_role: Literal["disabled", "controller", "worker"] = "disabled"
+    lan_bind_enabled: bool = False
+    lan_bind_host: str = "127.0.0.1"
+    lan_bind_port: int = 8765
+    worker_url: str | None = None
+    session_id: str | None = None
+    pair_code_set: bool = False
+    message: str | None = None
+
+
+class RemoteStateResponse(BaseModel):
+    ok: bool = True
+    remote: RemoteDiagnostics
+    pairing: "RemotePairingStatus | None" = None
+
+
+class RemotePairingStatus(BaseModel):
+    session_id: str | None = None
+    expires_at_utc: str | None = None
+    is_active: bool = False
+    controller_last_seen_utc: str | None = None
+    worker_last_seen_utc: str | None = None
+    controller_online: bool = False
+    worker_online: bool = False
+
+
+class RemotePairCreateRequest(BaseModel):
+    ttl_seconds: int = 43200
+
+
+class RemotePairCreateResponse(BaseModel):
+    ok: bool = True
+    session_id: str
+    pair_code: str
+    expires_at_utc: str
+    pairing: RemotePairingStatus
+
+
+class RemotePairVerifyRequest(BaseModel):
+    session_id: str
+    pair_code: str
+
+
+class RemotePairVerifyResponse(BaseModel):
+    ok: bool = True
+    accepted: bool
+    reason: str | None = None
+    pairing: RemotePairingStatus | None = None
+
+
+class RemoteHeartbeatRequest(BaseModel):
+    session_id: str
+    role: Literal["controller", "worker"]
+
+
+class RemoteHeartbeatResponse(BaseModel):
+    ok: bool = True
+    accepted: bool = True
+    reason: str | None = None
+    pairing: RemotePairingStatus | None = None
+
+
+class RemoteWorkerRuntimeActionResponse(BaseModel):
+    ok: bool = True
+    action: Literal["start", "stop"]
+    worker_url: str | None = None
+    worker_runtime: RuntimeState | None = None
+    error: str | None = None
+
+
+class RemoteWorkerRuntimeStatusResponse(BaseModel):
+    ok: bool = True
+    worker_url: str | None = None
+    worker_runtime: RuntimeState | None = None
+    error: str | None = None
+
+
+class RemoteWorkerHealthResponse(BaseModel):
+    ok: bool = True
+    worker_url: str | None = None
+    health: dict[str, Any] | None = None
+    error: str | None = None
+
+
+class RemoteWorkerSettingsSyncResponse(BaseModel):
+    ok: bool = True
+    worker_url: str | None = None
+    synced_sections: list[str] = Field(default_factory=list)
+    worker_translation_enabled: bool | None = None
+    worker_target_languages: list[str] = Field(default_factory=list)
+    worker_asr_mode: str | None = None
+    error: str | None = None
 
 
 class AudioInputDevice(BaseModel):

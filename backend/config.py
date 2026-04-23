@@ -91,7 +91,10 @@ class AppSettings(BaseModel):
 
     @property
     def local_base_url(self) -> str:
-        return f"http://{self.app_host}:{self.app_port}"
+        public_host = self.app_host
+        if public_host in {"0.0.0.0", "::"}:
+            public_host = "127.0.0.1"
+        return f"http://{public_host}:{self.app_port}"
 
 
 def normalize_google_translate_api_key(raw_value: Any) -> str:
@@ -215,6 +218,35 @@ class LocalConfigManager:
             "audio": {
                 "input_device_id": None,
             },
+            "remote": {
+                "enabled": False,
+                "role": "disabled",
+                "session_id": "",
+                "pair_code": "",
+                "lan": {
+                    "bind_enabled": False,
+                    "bind_host": "0.0.0.0",
+                    "port": 8876,
+                },
+                "controller": {
+                    "worker_url": "",
+                    "connect_timeout_ms": 8000,
+                    "reconnect_delay_ms": 2000,
+                },
+                "worker": {
+                    "allow_unpaired": False,
+                    "heartbeat_timeout_ms": 15000,
+                },
+            },
+            "updates": {
+                "enabled": False,
+                "provider": "github_releases",
+                "github_repo": "",
+                "release_channel": "stable",
+                "check_interval_hours": 12,
+                "last_checked_utc": "",
+                "latest_known_version": "",
+            },
             "translation": {
                 "enabled": False,
                 "provider": "google_translate_v2",
@@ -335,6 +367,8 @@ class LocalConfigManager:
         normalized["audio"] = {
             "input_device_id": audio.get("input_device_id"),
         }
+        normalized["remote"] = self._normalize_remote_config(normalized.get("remote", {}))
+        normalized["updates"] = self._normalize_updates_config(normalized.get("updates", {}))
 
         obs_closed_captions = normalized.get("obs_closed_captions", {})
         if not isinstance(obs_closed_captions, dict):
@@ -416,7 +450,7 @@ class LocalConfigManager:
             "browser": {
                 "recognition_language": recognition_language,
                 "interim_results": bool(browser.get("interim_results", True)),
-                "continuous_results": bool(browser.get("continuous_results", True)),
+                "continuous_results": bool(browser.get("continuous_results", False)),
                 "force_finalization_enabled": bool(browser.get("force_finalization_enabled", True)),
                 "force_finalization_timeout_ms": max(300, min(15000, force_finalization_timeout_ms)),
             },
@@ -484,6 +518,117 @@ class LocalConfigManager:
         normalized["asr"]["realtime"]["finalization_hold_ms"] = normalized["subtitle_lifecycle"]["pause_to_finalize_ms"]
         normalized["asr"]["realtime"]["max_segment_ms"] = normalized["subtitle_lifecycle"]["hard_max_phrase_ms"]
         return normalized
+
+    def _normalize_updates_config(self, payload: Any) -> dict[str, Any]:
+        defaults = self.default_config()["updates"]
+        current = payload if isinstance(payload, dict) else {}
+
+        provider = str(current.get("provider", defaults["provider"]) or defaults["provider"]).strip().lower()
+        if provider not in {"github_releases"}:
+            provider = defaults["provider"]
+
+        release_channel = str(
+            current.get("release_channel", defaults["release_channel"]) or defaults["release_channel"]
+        ).strip().lower()
+        if release_channel not in {"stable", "prerelease"}:
+            release_channel = defaults["release_channel"]
+
+        github_repo = str(current.get("github_repo", defaults["github_repo"]) or "").strip()
+        last_checked_utc = str(current.get("last_checked_utc", defaults["last_checked_utc"]) or "").strip()
+        latest_known_version = str(current.get("latest_known_version", defaults["latest_known_version"]) or "").strip()
+
+        try:
+            check_interval_hours = int(
+                current.get("check_interval_hours", defaults["check_interval_hours"])
+                or defaults["check_interval_hours"]
+            )
+        except (TypeError, ValueError):
+            check_interval_hours = int(defaults["check_interval_hours"])
+
+        return {
+            "enabled": bool(current.get("enabled", defaults["enabled"])),
+            "provider": provider,
+            "github_repo": github_repo,
+            "release_channel": release_channel,
+            "check_interval_hours": max(1, min(168, check_interval_hours)),
+            "last_checked_utc": last_checked_utc,
+            "latest_known_version": latest_known_version,
+        }
+
+    def _normalize_remote_config(self, payload: Any) -> dict[str, Any]:
+        defaults = self.default_config()["remote"]
+        current = payload if isinstance(payload, dict) else {}
+        enabled = bool(current.get("enabled", defaults["enabled"]))
+        role = str(current.get("role", defaults["role"]) or defaults["role"]).strip().lower()
+        if role not in {"disabled", "controller", "worker"}:
+            role = "disabled"
+        if not enabled:
+            role = "disabled"
+
+        lan = current.get("lan", {})
+        if not isinstance(lan, dict):
+            lan = {}
+        controller = current.get("controller", {})
+        if not isinstance(controller, dict):
+            controller = {}
+        worker = current.get("worker", {})
+        if not isinstance(worker, dict):
+            worker = {}
+
+        try:
+            lan_port = int(lan.get("port", defaults["lan"]["port"]) or defaults["lan"]["port"])
+        except (TypeError, ValueError):
+            lan_port = int(defaults["lan"]["port"])
+        try:
+            controller_connect_timeout_ms = int(
+                controller.get("connect_timeout_ms", defaults["controller"]["connect_timeout_ms"])
+                or defaults["controller"]["connect_timeout_ms"]
+            )
+        except (TypeError, ValueError):
+            controller_connect_timeout_ms = int(defaults["controller"]["connect_timeout_ms"])
+        try:
+            controller_reconnect_delay_ms = int(
+                controller.get("reconnect_delay_ms", defaults["controller"]["reconnect_delay_ms"])
+                or defaults["controller"]["reconnect_delay_ms"]
+            )
+        except (TypeError, ValueError):
+            controller_reconnect_delay_ms = int(defaults["controller"]["reconnect_delay_ms"])
+        try:
+            worker_heartbeat_timeout_ms = int(
+                worker.get("heartbeat_timeout_ms", defaults["worker"]["heartbeat_timeout_ms"])
+                or defaults["worker"]["heartbeat_timeout_ms"]
+            )
+        except (TypeError, ValueError):
+            worker_heartbeat_timeout_ms = int(defaults["worker"]["heartbeat_timeout_ms"])
+
+        bind_host = str(lan.get("bind_host", defaults["lan"]["bind_host"]) or defaults["lan"]["bind_host"]).strip()
+        if not bind_host:
+            bind_host = defaults["lan"]["bind_host"]
+
+        worker_url = str(controller.get("worker_url", defaults["controller"]["worker_url"]) or "").strip()
+        session_id = str(current.get("session_id", defaults["session_id"]) or "").strip()
+        pair_code = str(current.get("pair_code", defaults["pair_code"]) or "").strip()
+
+        return {
+            "enabled": enabled,
+            "role": role,
+            "session_id": session_id,
+            "pair_code": pair_code,
+            "lan": {
+                "bind_enabled": bool(lan.get("bind_enabled", defaults["lan"]["bind_enabled"])),
+                "bind_host": bind_host,
+                "port": max(1, min(65535, lan_port)),
+            },
+            "controller": {
+                "worker_url": worker_url,
+                "connect_timeout_ms": max(1000, min(120000, controller_connect_timeout_ms)),
+                "reconnect_delay_ms": max(100, min(30000, controller_reconnect_delay_ms)),
+            },
+            "worker": {
+                "allow_unpaired": bool(worker.get("allow_unpaired", defaults["worker"]["allow_unpaired"])),
+                "heartbeat_timeout_ms": max(1000, min(120000, worker_heartbeat_timeout_ms)),
+            },
+        }
 
     def _normalize_realtime_asr_config(self, payload: Any) -> dict[str, Any]:
         defaults = self.default_config()["asr"]["realtime"]

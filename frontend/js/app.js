@@ -574,6 +574,7 @@
   const asrRnnoiseStrength = document.getElementById("asr-rnnoise-strength");
   const asrRnnoiseStrengthLabel = document.getElementById("asr-rnnoise-strength-label");
   const logBox = document.getElementById("log-box");
+  const projectVersionTag = document.querySelector(".project-version-tag");
   const tabButtons = Array.from(document.querySelectorAll(".tab-button"));
   const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
   const TAB_STORAGE_KEY = "sst.dashboard.activeTab";
@@ -709,6 +710,43 @@
     return normalized;
   }
 
+  function normalizeVersionLabel(versionText) {
+    const raw = String(versionText || "").trim();
+    if (!raw) {
+      return "";
+    }
+    return raw.startsWith("v") ? raw : `v${raw}`;
+  }
+
+  function renderProjectVersionInfo(versionInfo) {
+    if (!projectVersionTag) {
+      return;
+    }
+    const currentVersion = normalizeVersionLabel(
+      versionInfo?.current_version || projectVersionTag.textContent || ""
+    ) || "v?.?.?";
+    projectVersionTag.textContent = currentVersion;
+
+    const sync = versionInfo?.sync && typeof versionInfo.sync === "object"
+      ? versionInfo.sync
+      : null;
+    const updateAvailable = Boolean(sync?.update_available);
+    projectVersionTag.classList.toggle("update-available", updateAvailable);
+
+    const titleParts = [`Project version: ${currentVersion}`];
+    if (sync?.github_repo) {
+      titleParts.push(`Release source: ${sync.github_repo}`);
+    }
+    if (updateAvailable && sync?.latest_known_version) {
+      titleParts.push(`Update available: v${sync.latest_known_version}`);
+    } else if (sync?.enabled === false) {
+      titleParts.push("Update check: disabled");
+    } else if (sync?.enabled === true && !sync?.check_supported) {
+      titleParts.push("Update check: repo is not configured");
+    }
+    projectVersionTag.title = titleParts.join(" | ");
+  }
+
   function applyDocumentLocalization() {
     window.AppState.uiLanguage = getCurrentLocale();
     if (uiLanguageSelect) {
@@ -732,6 +770,35 @@
       }
     });
     recognitionModeSelect.value = selected;
+  }
+
+  function isRemoteWorkerRoleActive() {
+    const runtimeRemote = window.AppState.runtime?.remote_diagnostics;
+    if (runtimeRemote && typeof runtimeRemote === "object") {
+      const enabled = runtimeRemote.enabled === true;
+      const role = String(runtimeRemote.effective_role || runtimeRemote.configured_role || "disabled")
+        .trim()
+        .toLowerCase();
+      if (enabled && role === "worker") {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function enforceRemoteWorkerRecognitionPolicy() {
+    if (!window.AppState.config?.asr) {
+      return false;
+    }
+    if (!isRemoteWorkerRoleActive()) {
+      return false;
+    }
+    if (window.AppState.config.asr.mode !== "browser_google") {
+      return false;
+    }
+    window.AppState.config.asr.mode = "local";
+    syncConfigText();
+    return true;
   }
 
   function renderVadModeOptions() {
@@ -1031,7 +1098,41 @@
     if (currentLocale) {
       params.set("locale", currentLocale);
     }
-    return `/google-asr?${params.toString()}`;
+    const relativeUrl = `/google-asr?${params.toString()}`;
+    try {
+      return new URL(relativeUrl, window.location.href).toString();
+    } catch (_error) {
+      return relativeUrl;
+    }
+  }
+
+  function openBrowserAsrWindowPlaceholder() {
+    if (isDesktopMode()) {
+      return null;
+    }
+    const popup = window.open("", "browser_asr_worker");
+    if (!popup) {
+      log("[browser-asr] popup blocked; allow popups for this local app");
+      return null;
+    }
+    try {
+      popup.document.title = getCurrentLocale() === "ru"
+        ? "Подготовка browser worker..."
+        : "Preparing browser worker...";
+      popup.document.body.style.margin = "0";
+      popup.document.body.style.fontFamily = "Segoe UI, sans-serif";
+      popup.document.body.style.background = "#08121f";
+      popup.document.body.style.color = "#dfe8ff";
+      popup.document.body.style.display = "grid";
+      popup.document.body.style.placeItems = "center";
+      popup.document.body.style.minHeight = "100vh";
+      popup.document.body.textContent = getCurrentLocale() === "ru"
+        ? "Подготовка окна browser распознавания..."
+        : "Preparing browser recognition window...";
+    } catch (_error) {
+      // Browser security rules can block styling or DOM writes on some engines.
+    }
+    return popup;
   }
 
   function applyDesktopContext(context) {
@@ -1041,6 +1142,7 @@
     const signature = JSON.stringify([
       context.desktop_mode,
       context.startup_mode || "",
+      context.remote_role || "",
       context.profile_name || "",
       context.install_profile || "",
     ]);
@@ -1050,8 +1152,8 @@
     window.AppState.desktop = context;
     window.AppState.desktop.__signature = signature;
     log(getCurrentLocale() === "ru"
-      ? `[desktop] desktop launcher активен | startup=${context.startup_mode || "local"} | profile=${context.profile_name || "default"} | install=${context.install_profile || "auto"}`
-      : `[desktop] desktop launcher active | startup=${context.startup_mode || "local"} | profile=${context.profile_name || "default"} | install=${context.install_profile || "auto"}`);
+      ? `[desktop] desktop launcher активен | startup=${context.startup_mode || "local"} | remote_role=${context.remote_role || "disabled"} | profile=${context.profile_name || "default"} | install=${context.install_profile || "auto"}`
+      : `[desktop] desktop launcher active | startup=${context.startup_mode || "local"} | remote_role=${context.remote_role || "disabled"} | profile=${context.profile_name || "default"} | install=${context.install_profile || "auto"}`);
     if (window.AppState.config) {
       enforceDesktopStartupMode(window.AppState.config);
       syncRecognitionControlsFromConfig();
@@ -1254,11 +1356,33 @@
     if (!normalized.subtitle_output || typeof normalized.subtitle_output !== "object") {
       normalized.subtitle_output = {};
     }
+    if (!normalized.remote || typeof normalized.remote !== "object") {
+      normalized.remote = {};
+    }
+    normalized.remote.enabled = normalized.remote.enabled === true;
+    normalized.remote.role = String(
+      normalized.remote.role || (normalized.remote.enabled ? "controller" : "disabled")
+    )
+      .trim()
+      .toLowerCase();
+    if (!["disabled", "controller", "worker"].includes(normalized.remote.role)) {
+      normalized.remote.role = normalized.remote.enabled ? "controller" : "disabled";
+    }
+    if (!normalized.remote.enabled) {
+      normalized.remote.role = "disabled";
+    }
+    if (!normalized.remote.controller || typeof normalized.remote.controller !== "object") {
+      normalized.remote.controller = {};
+    }
+    normalized.remote.controller.worker_url = String(normalized.remote.controller.worker_url || "").trim();
     if (!normalized.asr.provider_preference || typeof normalized.asr.provider_preference !== "string") {
       normalized.asr.provider_preference = "official_eu_parakeet_realtime";
     }
     normalized.asr.mode = String(normalized.asr.mode || "local").toLowerCase();
     if (!["local", "browser_google"].includes(normalized.asr.mode)) {
+      normalized.asr.mode = "local";
+    }
+    if (normalized.remote.enabled && normalized.remote.role === "worker" && normalized.asr.mode === "browser_google") {
       normalized.asr.mode = "local";
     }
     normalized.asr.provider_preference = String(normalized.asr.provider_preference).toLowerCase();
@@ -1538,6 +1662,7 @@
 
   function syncRecognitionControlsFromConfig() {
     if (!window.AppState.config) return;
+    enforceRemoteWorkerRecognitionPolicy();
     const asr = window.AppState.config.asr || {};
     const browser = asr.browser || {};
     if (recognitionModeSelect) {
@@ -1550,26 +1675,42 @@
   }
 
   function updateRecognitionModeUi() {
+    const forcedToLocal = enforceRemoteWorkerRecognitionPolicy();
     const mode = window.AppState.config?.asr?.mode || "local";
     const browserMode = mode === "browser_google";
+    const remoteWorkerRole = isRemoteWorkerRoleActive();
     const browserOnlyDesktopSession = String(window.AppState.desktop?.startup_mode || "").trim().toLowerCase() === "browser_google";
     setElementVisibility(recognitionLanguageRow, browserMode);
     if (recognitionModeSelect) {
+      const browserModeOption = Array.from(recognitionModeSelect.options).find((option) => option.value === "browser_google");
+      if (browserModeOption) {
+        browserModeOption.disabled = remoteWorkerRole;
+      }
+      if (remoteWorkerRole && recognitionModeSelect.value === "browser_google") {
+        recognitionModeSelect.value = "local";
+      }
       recognitionModeSelect.disabled = browserOnlyDesktopSession;
     }
     if (audioInputSelect) {
       audioInputSelect.disabled = browserMode;
     }
-      if (recognitionModeHint) {
-        const browserHint = t("overview.recognition.hint.browser_google");
-        recognitionModeHint.textContent = browserMode
+    if (recognitionModeHint) {
+      const browserHint = t("overview.recognition.hint.browser_google");
+      recognitionModeHint.textContent = remoteWorkerRole
+        ? t("overview.recognition.hint.remote_worker_ai_only")
+        : browserMode
           ? browserHint
           : t("overview.recognition.hint.local");
-      }
+    }
+    if (forcedToLocal) {
+      log(getCurrentLocale() === "ru"
+        ? "[asr] browser mode отключён: remote worker поддерживает только AI runtime"
+        : "[asr] browser mode disabled: remote worker supports AI runtime only");
+    }
     if (audioInputMeta && browserMode) {
       audioInputMeta.textContent = getCurrentLocale() === "ru"
-        ? "В режиме браузерного распознавания выбор микрофона выполняется в окне browser worker."
-        : "Microphone selection is handled by the browser worker window in Browser Speech mode.";
+        ? "В Browser Speech микрофон выбирается через значок разрешений в адресной строке браузера."
+        : "In Browser Speech mode, switch microphone using the browser permission icon in the address bar.";
     } else if (audioInputMeta && audioInputSelect) {
       const option = audioInputSelect.selectedOptions?.[0];
       audioInputMeta.textContent = option?.dataset.meta || (getCurrentLocale() === "ru" ? "Устройство не выбрано." : "No device selected.");
@@ -1579,7 +1720,8 @@
   function syncRecognitionConfigFromControls() {
     if (!window.AppState.config) return;
     const asr = window.AppState.config.asr;
-    asr.mode = recognitionModeSelect?.value === "browser_google" ? "browser_google" : "local";
+    const remoteWorkerRole = isRemoteWorkerRoleActive();
+    asr.mode = !remoteWorkerRole && recognitionModeSelect?.value === "browser_google" ? "browser_google" : "local";
     asr.browser = asr.browser || {};
     asr.browser.recognition_language = recognitionLanguageSelect?.value || "ru-RU";
     syncRecognitionControlsFromConfig();
@@ -1597,11 +1739,7 @@
       }
       return;
     }
-    const popup = window.open(
-      browserAsrUrl,
-      "browser_asr_worker",
-      "popup=yes,width=980,height=860"
-    );
+    const popup = window.open(browserAsrUrl, "browser_asr_worker");
     if (!popup) {
       log("[browser-asr] popup blocked; allow popups for this local app");
       return;
@@ -1956,6 +2094,7 @@
       runtime.metrics || null,
       runtime.obs_caption_diagnostics || null
     );
+    updateRecognitionModeUi();
   }
 
   function formatMetric(value) {
@@ -3712,7 +3851,7 @@
   if (recognitionModeSelect) {
     recognitionModeSelect.addEventListener("change", () => {
       syncRecognitionConfigFromControls();
-      log(`[asr] mode -> ${getRecognitionModeLabel(recognitionModeSelect.value)}`);
+      log(`[asr] mode -> ${getRecognitionModeLabel(window.AppState.config?.asr?.mode || recognitionModeSelect.value)}`);
     });
   }
 
@@ -4094,6 +4233,13 @@
   });
 
   applyLanguageToUi();
+  try {
+    const versionInfo = await window.Api.getVersionInfo();
+    window.AppState.versionInfo = versionInfo || null;
+    renderProjectVersionInfo(versionInfo);
+  } catch (_error) {
+    renderProjectVersionInfo(null);
+  }
 
   const health = await window.Api.getHealth();
   if (healthBadge) {

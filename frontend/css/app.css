@@ -904,6 +904,66 @@ textarea {
   background: linear-gradient(135deg, var(--accent-soft), rgba(255, 108, 230, 0.08));
 }
 
+.remote-tools-panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.remote-tools-intro {
+  margin: 0;
+}
+
+.remote-tools-layout {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.remote-tools-card {
+  display: grid;
+  gap: var(--space-3);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0.01)),
+    var(--bg-panel-elevated);
+}
+
+.remote-tools-card h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.remote-tools-fields {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.remote-tools-action-grid {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.remote-tools-action-grid-compact {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.remote-tools-status {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.remote-tools-status-line {
+  margin: 0;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-control);
+  padding: 10px 12px;
+}
+
 .app-footer {
   max-width: 1240px;
   margin: 0 auto;
@@ -913,6 +973,30 @@ textarea {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   font-size: 12px;
+}
+
+.project-version-tag {
+  position: fixed;
+  right: 12px;
+  bottom: 10px;
+  z-index: 999;
+  pointer-events: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgba(8, 14, 24, 0.9);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  padding: 6px 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.project-version-tag.update-available {
+  border-color: rgba(255, 191, 87, 0.72);
+  color: #ffe2ad;
+  background: rgba(34, 24, 10, 0.92);
 }
 
 .subtitle-stage-note {
@@ -940,6 +1024,13 @@ textarea {
 
   .app-footer {
     padding: 0 var(--space-4) var(--space-5);
+  }
+
+  .project-version-tag {
+    right: 10px;
+    bottom: 8px;
+    font-size: 10px;
+    padding: 5px 8px;
   }
 
   .hero-panel,
@@ -975,5 +1066,11 @@ textarea {
   .button-stack {
     width: 100%;
     min-width: 0;
+  }
+
+  .remote-tools-fields,
+  .remote-tools-action-grid,
+  .remote-tools-action-grid-compact {
+    grid-template-columns: 1fr;
   }
 }

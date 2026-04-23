@@ -46,3 +46,7 @@ backend/data/models/*
 # Local ad-hoc diagnostics
 tmp_google_asr_inline_check.js
 .tmp-google-asr-inline-check.js
+
+# Local remote test/package artifacts
+SST desktop remote SST/
+desktop remote clean/

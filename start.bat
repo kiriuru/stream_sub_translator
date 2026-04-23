@@ -12,6 +12,20 @@ set "PROJECT_CACHE_DIR=%CD%\.cache"
 set "PROJECT_TEMP_DIR=%CD%\.tmp"
 set "PROJECT_HF_DIR=%PROJECT_CACHE_DIR%\huggingface"
 set "TORCH_PROFILE_STATE_FILE=%CD%\.venv\torch_profile_state.txt"
+set "LIGHT_CONTROLLER_MODE=0"
+set "REMOTE_BOOTSTRAP_MODE=0"
+
+if /i "%SST_REMOTE_BOOTSTRAP%"=="1" set "REMOTE_BOOTSTRAP_MODE=1"
+if "%REMOTE_BOOTSTRAP_MODE%"=="1" (
+  if /i "%SST_REMOTE_ROLE%"=="controller" set "LIGHT_CONTROLLER_MODE=1"
+  if /i "%SST_CONTROLLER_LIGHT%"=="0" set "LIGHT_CONTROLLER_MODE=0"
+  if /i "%SST_CONTROLLER_LIGHT%"=="1" set "LIGHT_CONTROLLER_MODE=1"
+) else (
+  rem Force regular local startup even if stale SST_* vars exist globally.
+  set "SST_REMOTE_ROLE=disabled"
+  set "SST_CONTROLLER_LIGHT=0"
+  set "SST_ALLOW_LAN=0"
+)
 
 call :prepare_local_environment
 
@@ -20,6 +34,12 @@ if /i "%~1"=="--nvidia" set "INSTALL_PROFILE_OVERRIDE=nvidia"
 if /i "%STREAM_SUB_TRANSLATOR_INSTALL_PROFILE%"=="cpu" set "INSTALL_PROFILE_OVERRIDE=cpu"
 if /i "%STREAM_SUB_TRANSLATOR_INSTALL_PROFILE%"=="nvidia" set "INSTALL_PROFILE_OVERRIDE=nvidia"
 if /i "%STREAM_SUB_TRANSLATOR_INSTALL_PROFILE%"=="cuda" set "INSTALL_PROFILE_OVERRIDE=nvidia"
+
+if "%LIGHT_CONTROLLER_MODE%"=="1" (
+  echo [mode] REMOTE controller bootstrap mode.
+) else (
+  echo [mode] MAIN local mode.
+)
 
 echo [1/7] Resolving project-local Python runtime...
 call :resolve_python
@@ -36,13 +56,18 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [3/7] Resolving local ASR install profile...
-call :resolve_install_profile
-if errorlevel 1 (
-  pause
-  exit /b 1
+if "%LIGHT_CONTROLLER_MODE%"=="1" (
+  set "INSTALL_PROFILE=cpu"
+  echo [3/7] Controller lightweight mode enabled ^(SST_REMOTE_ROLE=controller^). Skipping ASR profile selection.
+) else (
+  echo [3/7] Resolving local ASR install profile...
+  call :resolve_install_profile
+  if errorlevel 1 (
+    pause
+    exit /b 1
+  )
+  echo [info] Install profile: %INSTALL_PROFILE%
 )
-echo [info] Install profile: %INSTALL_PROFILE%
 
 echo [4/7] Installing/updating requirements...
 call ".venv\Scripts\python.exe" -m pip install --upgrade pip
@@ -51,55 +76,69 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-call :ensure_torch_profile
-if errorlevel 1 (
-  pause
-  exit /b 1
-)
-call ".venv\Scripts\python.exe" -m pip install -r requirements.txt
-if errorlevel 1 (
-  echo Failed to install shared requirements from requirements.txt
-  pause
-  exit /b 1
-)
-
-echo [5/7] Ensuring model directory exists...
-if not exist "user-data\models" mkdir "user-data\models"
-if not exist "user-data\models\parakeet-tdt-0.6b-v3\parakeet-tdt-0.6b-v3.nemo" (
-  echo [info] Official EU multilingual Parakeet model is not installed yet.
-  echo [info] The first Start in the dashboard will download it automatically into user-data\models.
-  echo [info] Watch this console for download progress during that first ASR startup.
-  echo [info] Optional manual install command:
-  echo [info]   .venv\Scripts\python.exe -m backend.install_asr_model --model eu
-)
-
-if /i "%INSTALL_PROFILE%"=="cpu" (
-  echo [policy] Install profile is CPU-only. NVIDIA CUDA PyTorch wheels are not installed.
-  echo [policy] This mode is intended for AMD, Intel, or no-GPU machines.
+if "%LIGHT_CONTROLLER_MODE%"=="1" (
+  call ".venv\Scripts\python.exe" -m pip install -r requirements.controller.txt
+  if errorlevel 1 (
+    echo Failed to install controller requirements from requirements.controller.txt
+    pause
+    exit /b 1
+  )
+  echo [5/7] Controller lightweight mode: skipping local ASR model bootstrap checks.
+  echo [policy] Controller mode uses remote worker for AI processing.
+  echo [policy] Local AI dependencies are not required for controller startup.
 ) else (
-  echo [policy] Install profile is NVIDIA CUDA 12.8. Realtime GPU mode is preferred.
-)
-echo [preflight] Checking local environment summary...
-call ".venv\Scripts\python.exe" -m backend.preflight
-if errorlevel 1 (
-  echo [warning] Preflight reported a problem. Startup will continue, but runtime behavior may be degraded.
-)
+  call :ensure_torch_profile
+  if errorlevel 1 (
+    pause
+    exit /b 1
+  )
+  call ".venv\Scripts\python.exe" -m pip install -r requirements.txt
+  if errorlevel 1 (
+    echo Failed to install shared requirements from requirements.txt
+    pause
+    exit /b 1
+  )
 
-for /f "usebackq delims=" %%i in (`".venv\Scripts\python.exe" -c "import importlib; torch = importlib.import_module('torch'); build = getattr(getattr(torch, 'version', None), 'cuda', None); available = bool(torch.cuda.is_available()); print('CPU_ONLY' if not build else ('CUDA_READY' if available else 'CUDA_DEGRADED'))" 2^>nul`) do set TORCH_BUILD=%%i
-if /i "%TORCH_BUILD%"=="CPU_ONLY" (
-  echo [warning] Detected CPU-only PyTorch in the project venv.
-  echo [warning] Realtime GPU mode is unavailable; the app will run in degraded CPU fallback mode.
-  echo [warning] Install a CUDA-enabled PyTorch build in this same .venv to enable the default GPU path.
-)
-if /i "%TORCH_BUILD%"=="CUDA_DEGRADED" (
-  echo [warning] CUDA-enabled PyTorch is installed, but torch.cuda.is_available^(^) is false.
-  echo [warning] Realtime GPU mode is unavailable; the app will run in degraded CPU fallback mode.
-)
-if /i "%TORCH_BUILD%"=="CUDA_READY" (
-  echo [info] CUDA-enabled PyTorch detected. Realtime GPU mode is the expected runtime path.
+  echo [5/7] Ensuring model directory exists...
+  if not exist "user-data\models" mkdir "user-data\models"
+  if not exist "user-data\models\parakeet-tdt-0.6b-v3\parakeet-tdt-0.6b-v3.nemo" (
+    echo [info] Official EU multilingual Parakeet model is not installed yet.
+    echo [info] The first Start in the dashboard will download it automatically into user-data\models.
+    echo [info] Watch this console for download progress during that first ASR startup.
+    echo [info] Optional manual install command:
+    echo [info]   .venv\Scripts\python.exe -m backend.install_asr_model --model eu
+  )
+
+  if /i "%INSTALL_PROFILE%"=="cpu" (
+    echo [policy] Install profile is CPU-only. NVIDIA CUDA PyTorch wheels are not installed.
+    echo [policy] This mode is intended for AMD, Intel, or no-GPU machines.
+  ) else (
+    echo [policy] Install profile is NVIDIA CUDA 12.8. Realtime GPU mode is preferred.
+  )
+  echo [preflight] Checking local environment summary...
+  call ".venv\Scripts\python.exe" -m backend.preflight
+  if errorlevel 1 (
+    echo [warning] Preflight reported a problem. Startup will continue, but runtime behavior may be degraded.
+  )
+
+  for /f "usebackq delims=" %%i in (`".venv\Scripts\python.exe" -c "import importlib; torch = importlib.import_module('torch'); build = getattr(getattr(torch, 'version', None), 'cuda', None); available = bool(torch.cuda.is_available()); print('CPU_ONLY' if not build else ('CUDA_READY' if available else 'CUDA_DEGRADED'))" 2^>nul`) do set TORCH_BUILD=%%i
+  if /i "%TORCH_BUILD%"=="CPU_ONLY" (
+    echo [warning] Detected CPU-only PyTorch in the project venv.
+    echo [warning] Realtime GPU mode is unavailable; the app will run in degraded CPU fallback mode.
+    echo [warning] Install a CUDA-enabled PyTorch build in this same .venv to enable the default GPU path.
+  )
+  if /i "%TORCH_BUILD%"=="CUDA_DEGRADED" (
+    echo [warning] CUDA-enabled PyTorch is installed, but torch.cuda.is_available^(^) is false.
+    echo [warning] Realtime GPU mode is unavailable; the app will run in degraded CPU fallback mode.
+  )
+  if /i "%TORCH_BUILD%"=="CUDA_READY" (
+    echo [info] CUDA-enabled PyTorch detected. Realtime GPU mode is the expected runtime path.
+  )
 )
 echo [info] Translation configuration can be disabled, ready, partial, or experimental.
-echo [info] See the preflight lines above if translation is not ready on this machine.
+if not "%LIGHT_CONTROLLER_MODE%"=="1" (
+  echo [info] See the preflight lines above if translation is not ready on this machine.
+)
 
 echo [6/7] Starting FastAPI app...
 echo [7/7] Opening local UI in browser and keeping logs here...

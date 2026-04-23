@@ -1,250 +1,178 @@
 # AGENTS.md
 
-## Local-first product rules
-- This project is local-first for the main app, UI, API, websocket, overlay, logs, cache, profiles, and exports.
-- Do not add cloud deployment, Docker deployment, hosted backend, remote database, or SaaS assumptions.
-- Do not add authentication, user accounts, multi-user support, or internet-facing hosting logic.
-- All UI, API, websocket, overlay, logs, cache, profiles, and exports must run locally on the same Windows machine.
-- Bind server to 127.0.0.1 by default, not 0.0.0.0.
-- OBS overlay must be served from the same local FastAPI app via localhost.
-- Do not introduce Electron, Tauri, Node.js, npm, pnpm, yarn, Vite, React, or frontend build tooling.
-- Do not assume Codex cloud tasks are required to build or run the project.
-- Prioritize local development workflow and local Codex-compatible repository structure.
-- Browser-based speech recognition modes are allowed as explicit optional features when they are clearly labeled as browser-dependent/external and still feed the same local app pipeline.
-
-## Project
+## Product Scope
 Windows-first local real-time subtitle translator for streamers.
 
-Pipeline:
-microphone or browser speech worker -> ASR -> translation to 1..N target languages -> local OBS browser overlay -> export logs/subtitles
+Core pipeline:
+microphone or browser speech worker -> ASR -> optional translation to 1..N target languages -> local OBS browser overlay -> export logs/subtitles
 
-## Hard constraints
-- Do NOT use Node.js, npm, pnpm, yarn, Vite, Webpack, or any frontend build tool.
-- The app must be runnable with one click on Windows via `start.bat`.
-- Keep microphone audio path simple and clean. Do not add speculative DSP, automatic EQ, auto gain, or “audio enhancement” logic. Optional experimental noise reduction paths may exist only as clearly labeled local-only features that stay off by default and do not replace the raw recognition path.
-- Frontend must work without a JS build step.
-- Realtime ASR must be GPU-first by default when CUDA is available.
-- The default ASR provider/runtime policy should prefer `official_eu_parakeet_realtime` with GPU enabled.
-- CPU fallback is allowed only as an explicit degraded safety mode and must be reported honestly.
-- Optional browser-based ASR modes are allowed as alternative recognition backends and may use separate browser windows/tabs and browser APIs when clearly marked in UI and docs.
-- Keep the architecture modular and easy to extend.
+This repository now has two valid operation families:
+- local-first single-machine runtime (default)
+- optional LAN remote controller/worker runtime (explicit startup mode)
 
-## Stack
-- Python 3.11+
-- FastAPI
-- Uvicorn
-- Pydantic
-- WebSockets
-- sounddevice
-- numpy
-- webrtcvad or silero-vad
-- onnxruntime / onnxruntime-gpu
-- httpx
+## Local-First Baseline and Remote Exception
+- Keep default startup local-first and localhost-only.
+- `start.bat` must default to local mode and force `SST_REMOTE_ROLE=disabled` unless explicit remote bootstrap is requested.
+- Default bind target remains `127.0.0.1`.
+- LAN bind is an explicit opt-in only for remote worker scenarios.
+- Do not add cloud deployment, hosted backend, remote database, accounts, or SaaS assumptions.
 
-## Translation rules
-- Google Translate v2 is the primary translation provider and must be implemented first-class
-- Translation must be optional
-- Recognition must continue working without translation
-- The user must be able to configure zero or more target languages and their output order
-- The product must support source-only, translation-only, and mixed source+translation subtitle modes
+Remote exception policy:
+- LAN remote mode is allowed and already implemented.
+- Remote mode is controller/worker split for the same local product, not a public internet service.
+- Do not turn remote mode into internet-facing multi-user infrastructure.
 
-## Subtitle output flexibility
-The product must support flexible subtitle output modes.
+## Hard Constraints
+- Do NOT use Node.js, npm, pnpm, yarn, Vite, Webpack, React, TypeScript build pipelines, Electron, or Tauri.
+- Frontend must run as plain HTML/CSS/JavaScript served by FastAPI.
+- One-click Windows startup via `start.bat` must stay operational.
+- Keep microphone audio path simple and predictable.
+- Do not add speculative DSP, auto-EQ, auto-gain, or forced enhancement chains in the main path.
+- Optional experimental noise-reduction paths must stay optional and off by default.
+- GPU-first ASR behavior is the target when CUDA is available.
+- CPU fallback must be treated as degraded mode and surfaced honestly.
 
-Required output modes:
-- source language only
-- translation output only
-- source language + one translation
-- source language + multiple translations
-- multiple translations without source text if configured
+## Runtime Modes (Current)
+- `local` ASR mode: local AI runtime (Parakeet pipeline).
+- `browser_google` ASR mode: browser speech worker (`/google-asr`) feeding local pipeline.
+- Remote controller role: relays microphone audio to remote worker and ingests remote transcript/translation events.
+- Remote worker role: AI runtime mode only for remote processing.
+
+Important role constraints:
+- Remote worker role must not run browser speech recognition mode.
+- Worker settings sync should enforce AI runtime mode (`asr.mode=local`) on worker side.
+
+## Startup Scripts (Current)
+- `start.bat`: default local startup, local bootstrap, opens dashboard.
+- `start-remote-controller.bat`: remote controller bootstrap (`SST_REMOTE_BOOTSTRAP=1`, lightweight controller profile).
+- `start-remote-worker.bat`: remote worker bootstrap with LAN bind enabled.
+- `backend/run.py`: shared runtime launcher with `--remote-role` and `--allow-lan`.
+- `backend/run_controller.py`: wrapper for controller defaults.
+- `backend/run_worker.py`: wrapper for worker defaults.
+
+Controller lightweight mode expectations:
+- No GPU/CPU profile prompt for controller bootstrap.
+- Uses `requirements.controller.txt`.
+- Skips local AI model bootstrap requirements intentionally.
+
+## API and WebSocket Surface (Current)
+Primary local routes:
+- `/api/health`
+- `/api/runtime/start`
+- `/api/runtime/stop`
+- `/api/runtime/status`
+- `/api/settings/load`
+- `/api/settings/save`
+- `/api/devices/audio-inputs`
+- `/api/obs/url`
+- `/api/version`
+
+Remote API routes:
+- `/api/remote/state`
+- `/api/remote/pair/create`
+- `/api/remote/pair/verify`
+- `/api/remote/heartbeat`
+- `/api/remote/worker/settings/sync`
+- `/api/remote/worker/runtime/start`
+- `/api/remote/worker/runtime/stop`
+- `/api/remote/worker/runtime/status`
+- `/api/remote/worker/health`
+
+WebSocket routes:
+- `/ws/events`
+- `/ws/asr_worker`
+- `/ws/remote/signaling`
+- `/ws/remote/audio_ingest`
+- `/ws/remote/result_ingest`
+
+Remote bridge pages:
+- `/remote/controller-bridge`
+- `/remote/worker-bridge`
+
+## Translation Rules
+- Google Translate v2 is first-class primary provider.
+- Translation must remain optional.
+- Recognition must continue working without translation.
+- User can configure zero or more target languages and explicit output order.
+- Support source-only, translation-only, and mixed source+translation subtitle modes.
+
+## Subtitle Output and Rendering Rules
+Required output flexibility:
+- source only
+- translation only
+- source + one translation
+- source + multiple translations
+- multiple translations without source text
 
 Requirements:
-- the number of displayed translated languages must be configurable
-- the order of displayed languages must be configurable
-- source text visibility must be independently configurable
-- translated text visibility must be independently configurable
-- the UI and overlay must both follow the saved language order and visibility settings
+- configurable number of translation lines
+- configurable language order
+- independent visibility toggles for source and translated text
+- UI preview and OBS overlay must follow the same saved output ordering/visibility rules
 
-Examples of valid user configurations:
-- source only
-- English only
-- English + Japanese
-- source + English
-- source + English + Japanese
-
-These examples are illustrative, not mandatory defaults.
-
-## Language display rules
-Do not hardcode any language as always required or always first.
-Displayed languages and their order must come from user settings.
-The app must support zero or more translation outputs depending on user configuration.
-
-## Subtitle style requirements
-Subtitle styling is a core product feature.
-
-The app must support:
-- multiple built-in subtitle style presets
+## Subtitle Style Rules
+Subtitle styling is core product behavior and must include:
+- built-in style presets
 - custom style editing
-- local persistence of style settings in config and profiles
-- compatibility with source-only, translation-only, and mixed subtitle modes
+- local persistence in config/profiles
+- compatibility across source-only, translation-only, and mixed modes
 
-Style controls should support:
+Style controls should include:
 - font family
 - font size
 - text color
 - outline/stroke
 - shadow
 - background style
-- timing / ttl
+- timing/ttl
 - line behavior
 
-## Subtitle rendering consistency
-Dashboard preview and OBS overlay must use the same saved subtitle output settings and the same subtitle style settings.
-Do not create separate conflicting style/state systems for preview and overlay unless explicitly required.
+## Frontend Rules
+- Plain HTML/CSS/JavaScript only.
+- No JS build step.
+- Modular JS files are allowed.
+- Dashboard, browser worker page, and remote bridge pages must stay FastAPI-served static pages.
 
-## Frontend rules
-- Use plain HTML/CSS/JavaScript served by FastAPI.
-- No Node.js dependency.
-- No React, no TypeScript, no bundler.
-- Keep UI simple, dark theme, modular JS files allowed.
+## Overlay Rules
+- Overlay remains a lightweight separate page for OBS Browser Source.
+- Must auto-reconnect on websocket drop.
+- Keep preset behavior (`single`, `dual-line`, `stacked`, `compact`) and query-param compatibility.
 
-## Overlay rules
-- Overlay is a separate lightweight page for OBS Browser Source.
-- It must reconnect automatically if websocket drops.
-- Support presets:
-  - single
-  - dual-line
-  - stacked
-  - compact
-- Support query params like:
-  - `?profile=default`
-  - `?profile=jp_stream&compact=1`
+## Data, Logs, and Versioning
+- Keep local data under project-local `user-data/` and log outputs local.
+- Keep runtime caches/temp local to the project runtime environment.
+- Project version source of truth is `backend/versioning.py` (`PROJECT_VERSION`).
+- `GET /api/version` must remain aligned with local version metadata.
+- Future release-sync scaffolding should remain optional and local-safe by default.
 
-## Backend rules
-Implement:
-- `/api/health`
-- `/api/runtime/start`
-- `/api/runtime/stop`
-- `/api/settings/save`
-- `/api/devices/audio-inputs`
-- `/api/obs/url`
+## Directory Guidance
+The existing working structure is authoritative.
+Do not reshuffle stable code to match old placeholder layouts.
 
-Use:
-- REST for settings and runtime control
-- WebSocket for transcript / translation / overlay events / metrics
+Current remote-related files must be preserved:
+- `backend/api/routes_remote.py`
+- `backend/api/routes_version.py`
+- `backend/core/remote_mode.py`
+- `backend/core/remote_session.py`
+- `backend/core/remote_signaling.py`
+- `backend/core/remote_diagnostics.py`
+- `backend/run_controller.py`
+- `backend/run_worker.py`
+- `frontend/js/remote.js`
+- `frontend/js/remote-controller-bridge.js`
+- `frontend/js/remote-worker-bridge.js`
+- `frontend/js/remote-worker-audio-worklet.js`
+- `frontend/remote_controller_bridge.html`
+- `frontend/remote_worker_bridge.html`
+- `start-remote-controller.bat`
+- `start-remote-worker.bat`
+- `requirements.controller.txt`
 
-## Pipeline behavior
-- microphone capture
-- VAD segmentation
-- ASR with partial and final segments
-- translation fan-out to multiple languages
-- overlay payload broadcasting
-- export to `.srt` and `.jsonl`
-
-## Required features
-- Profiles
-- Translation cache by `(source_text, source_lang, target_lang)`
-- Per-stage latency metrics:
-  - vad
-  - asr
-  - translation
-  - total
-- Status badges:
-  - starting
-  - idle
-  - listening
-  - transcribing
-  - translating
-  - error
-
-## One-click startup
-`start.bat` must:
-1. Check Python
-2. Create `.venv` if missing
-3. Install requirements if needed
-4. Ensure model directory exists
-5. Start FastAPI app
-6. Open browser to local UI
-7. Keep console open with logs
-
-`update.bat` must:
-1. Pull updates if git exists
-2. Upgrade/install requirements
-3. Preserve config
-4. Optionally clear stale caches
-
-## Directory target
-The listed directory target is a guiding structure, not a rigid requirement.
-Do not reshuffle working code into placeholder files unless there is a clear functional benefit.
-
-Create this structure:
-
-stream-sub-translator/
-  start.bat
-  update.bat
-  requirements.txt
-  README.md
-  .env.example
-  AGENTS.md
-
-  backend/
-    app.py
-    config.py
-    models.py
-    ws_manager.py
-
-    api/
-      routes_settings.py
-      routes_runtime.py
-      routes_devices.py
-      routes_profiles.py
-      routes_exports.py
-
-    core/
-      audio_capture.py
-      vad.py
-      segment_queue.py
-      asr_engine.py
-      parakeet_provider.py
-      translation_engine.py
-      subtitle_router.py
-      overlay_broadcaster.py
-      exporter.py
-      profile_manager.py
-      cache_manager.py
-
-    data/
-      config.json
-      profiles/
-      logs/
-      exports/
-      cache/
-      models/
-
-  frontend/
-    index.html
-    css/
-      app.css
-    js/
-      app.js
-      api.js
-      state.js
-      ws.js
-      dashboard.js
-      profiles.js
-      logs.js
-      overlay-designer.js
-
-  overlay/
-    overlay.html
-    overlay.css
-    overlay.js
-
-## Done means
-A task is complete only if:
-- code is created in the correct files
-- routes and modules are wired together
-- README is updated
-- startup commands are documented
-- no Node.js dependency is introduced
-- the local UI and overlay are both served from the Python app
+## Done Means
+A change is complete only if:
+- behavior works in the intended mode without regressing default local startup
+- routes/modules are wired and not dead code
+- README documentation is updated when behavior or startup flow changes
+- no forbidden frontend/tooling stack is introduced
+- local dashboard and overlay remain served from Python app
+- remote mode remains explicit opt-in and does not hijack default local `start.bat` flow

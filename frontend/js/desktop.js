@@ -9,6 +9,7 @@
     browser_worker_url: `${location.origin}/google-asr`,
     startup_mode: "local",
     install_profile: "auto",
+    remote_role: "disabled",
   };
 
   let cachedContext = { ...DEFAULT_CONTEXT };

@@ -73,14 +73,14 @@ class _QueuedObsCaptionEvent:
 class ObsCaptionOutput:
     def __init__(self, config_getter: Callable[[], dict[str, Any]]) -> None:
         self.config_getter = config_getter
-        self._queue: asyncio.Queue[_QueuedObsCaptionEvent] = asyncio.Queue(maxsize=32)
+        self._queue: asyncio.Queue[_QueuedObsCaptionEvent] | None = None
         self._worker_task: asyncio.Task | None = None
         self._connection_task: asyncio.Task | None = None
         self._delayed_send_task: asyncio.Task | None = None
         self._clear_task: asyncio.Task | None = None
-        self._request_lock = asyncio.Lock()
-        self._state_lock = asyncio.Lock()
-        self._connected_event = asyncio.Event()
+        self._request_lock: asyncio.Lock | None = None
+        self._state_lock: asyncio.Lock | None = None
+        self._connected_event: asyncio.Event | None = None
         self._websocket: Any | None = None
         self._connected = False
         self._desired_connection = False
@@ -202,6 +202,10 @@ class ObsCaptionOutput:
 
     async def start(self) -> None:
         if self._worker_task is None or self._worker_task.done():
+            self._queue = asyncio.Queue(maxsize=32)
+            self._request_lock = asyncio.Lock()
+            self._state_lock = asyncio.Lock()
+            self._connected_event = asyncio.Event()
             self._worker_task = asyncio.create_task(self._worker_loop())
 
     async def stop(self) -> None:
@@ -224,6 +228,10 @@ class ObsCaptionOutput:
             except asyncio.CancelledError:
                 pass
             self._worker_task = None
+        self._queue = None
+        self._request_lock = None
+        self._state_lock = None
+        self._connected_event = None
 
     async def apply_live_settings(self, config: dict[str, Any]) -> None:
         _ = config
@@ -259,45 +267,58 @@ class ObsCaptionOutput:
     def _enqueue(self, item: _QueuedObsCaptionEvent) -> None:
         if self._worker_task is None or self._worker_task.done():
             return
+        queue = self._queue
+        if queue is None:
+            return
         if item.kind == "source_partial":
             self._drop_queued_partials()
         try:
-            self._queue.put_nowait(item)
+            queue.put_nowait(item)
         except asyncio.QueueFull:
             try:
-                _ = self._queue.get_nowait()
+                _ = queue.get_nowait()
             except asyncio.QueueEmpty:
                 return
             try:
-                self._queue.put_nowait(item)
+                queue.put_nowait(item)
             except asyncio.QueueFull:
                 pass
 
     def _drop_queued_partials(self) -> None:
+        queue = self._queue
+        if queue is None:
+            return
         retained: list[_QueuedObsCaptionEvent] = []
         while True:
             try:
-                current = self._queue.get_nowait()
+                current = queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
             if current.kind != "source_partial":
                 retained.append(current)
         for current in retained:
             try:
-                self._queue.put_nowait(current)
+                queue.put_nowait(current)
             except asyncio.QueueFull:
                 break
 
     def _drain_queue(self) -> None:
+        queue = self._queue
+        if queue is None:
+            return
         while True:
             try:
-                _ = self._queue.get_nowait()
+                _ = queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
 
     async def _worker_loop(self) -> None:
         while True:
-            item = await self._queue.get()
+            queue = self._queue
+            if queue is None:
+                await asyncio.sleep(0.05)
+                continue
+            item = await queue.get()
             try:
                 if item.kind == "clear":
                     settings = self._settings()
@@ -624,7 +645,8 @@ class ObsCaptionOutput:
         except asyncio.CancelledError:
             raise
         finally:
-            self._connected_event.clear()
+            if self._connected_event is not None:
+                self._connected_event.clear()
 
     async def _wait_for_connection(self, timeout_seconds: float = 3.0) -> bool:
         if self._connected and self._websocket is not None:
@@ -634,14 +656,20 @@ class ObsCaptionOutput:
             return False
         self._desired_connection = True
         self._ensure_connection_task()
+        connected_event = self._connected_event
+        if connected_event is None:
+            return False
         try:
-            await asyncio.wait_for(self._connected_event.wait(), timeout=timeout_seconds)
+            await asyncio.wait_for(connected_event.wait(), timeout=timeout_seconds)
         except asyncio.TimeoutError:
             return False
         return self._connected and self._websocket is not None
 
     async def _open_connection(self, settings: dict[str, Any]) -> None:
-        async with self._state_lock:
+        state_lock = self._state_lock
+        if state_lock is None:
+            raise RuntimeError("OBS state lock is not initialized.")
+        async with state_lock:
             if self._connected and self._websocket is not None:
                 return
 
@@ -689,7 +717,8 @@ class ObsCaptionOutput:
 
                 self._websocket = websocket
                 self._connected = True
-                self._connected_event.set()
+                if self._connected_event is not None:
+                    self._connected_event.set()
                 self._obs_studio_version = str(hello_data.get("obsStudioVersion", "") or "") or None
                 self._obs_websocket_version = str(hello_data.get("obsWebSocketVersion", "") or "") or None
                 self._connection_key = self._settings_connection_key(settings)
@@ -704,7 +733,10 @@ class ObsCaptionOutput:
         websocket = self._websocket
         if websocket is None or not self._connected:
             raise RuntimeError("OBS websocket is not connected.")
-        async with self._request_lock:
+        request_lock = self._request_lock
+        if request_lock is None:
+            raise RuntimeError("OBS request lock is not initialized.")
+        async with request_lock:
             pong_waiter = await websocket.ping()
             await asyncio.wait_for(pong_waiter, timeout=5.0)
 
@@ -713,7 +745,10 @@ class ObsCaptionOutput:
         if websocket is None or not self._connected:
             raise RuntimeError("OBS websocket is not connected.")
 
-        async with self._request_lock:
+        request_lock = self._request_lock
+        if request_lock is None:
+            raise RuntimeError("OBS request lock is not initialized.")
+        async with request_lock:
             request_id = str(uuid.uuid4())
             await asyncio.wait_for(
                 websocket.send(
@@ -810,7 +845,8 @@ class ObsCaptionOutput:
         websocket = self._websocket
         self._websocket = None
         self._connected = False
-        self._connected_event.clear()
+        if self._connected_event is not None:
+            self._connected_event.clear()
         self._stream_output_active = None
         self._stream_output_reconnecting = None
         if websocket is not None:
@@ -842,6 +878,8 @@ class ObsCaptionOutput:
         state: Literal["disabled", "disconnected", "connecting", "connected", "auth_failed", "error"],
     ) -> None:
         self._connection_state = state
+        if self._connected_event is None:
+            return
         if state == "connected":
             self._connected_event.set()
         else:

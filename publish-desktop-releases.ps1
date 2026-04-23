@@ -1,7 +1,7 @@
 param(
     [string]$SourceDist = "F:\AI\stream-sub-translator\dist\Stream Subtitle Translator",
-    [string]$InstalledRelease = "F:\AI\stream-sub-translator-desktop-release",
-    [string]$CleanRelease = "F:\AI\stream-sub-translator-desktop-release-clean"
+    [string]$InstalledRelease = "F:\AI\stream-sub-translator-desktop-remote-release",
+    [string]$CleanRelease = "F:\AI\stream-sub-translator-desktop-remote-release-clean"
 )
 
 $ErrorActionPreference = "Stop"

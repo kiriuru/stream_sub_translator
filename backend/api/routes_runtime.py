@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Body, Request
 
+from backend.core.remote_diagnostics import build_remote_diagnostics
 from backend.models import ObsUrlResponse, RuntimeActionResponse, RuntimeStartRequest, RuntimeState
 
 router = APIRouter(prefix="/api", tags=["runtime"])
@@ -26,7 +27,14 @@ async def runtime_stop(request: Request) -> RuntimeActionResponse:
 
 @router.get("/runtime/status", response_model=RuntimeState)
 async def runtime_status(request: Request) -> RuntimeState:
-    return request.app.state.runtime_orchestrator.status()
+    state = request.app.state.runtime_orchestrator.status()
+    app_settings = request.app.state.app_settings
+    remote_diagnostics = build_remote_diagnostics(
+        request.app.state.config,
+        app_host=app_settings.app_host,
+        app_port=app_settings.app_port,
+    )
+    return state.model_copy(update={"remote_diagnostics": remote_diagnostics})
 
 
 @router.get("/obs/url", response_model=ObsUrlResponse)
