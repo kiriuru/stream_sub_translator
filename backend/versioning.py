@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-PROJECT_VERSION = "2.8.0"
+PROJECT_VERSION = "2.8.1"
 RELEASE_TRACK = "stable"
 DEFAULT_UPDATE_PROVIDER = "github_releases"
 DEFAULT_RELEASE_CHANNEL = "stable"
