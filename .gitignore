@@ -4,6 +4,15 @@
 .bootstrap/
 __pycache__/
 *.pyc
+app-runtime/
+Stream Subtitle Translator.exe
+AGENTS.md
+Stream Subtitle Translator.spec
+build-desktop.bat
+publish-desktop-releases.ps1
+requirements.desktop.txt
+desktop/
+frontend/js/desktop.js
 
 # Env
 .env
@@ -50,3 +59,5 @@ tmp_google_asr_inline_check.js
 # Local remote test/package artifacts
 SST desktop remote SST/
 desktop remote clean/
+*-desktop-remote-release/
+*-desktop-remote-release-clean/
