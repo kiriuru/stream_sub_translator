@@ -330,6 +330,19 @@ class SubtitleRouter:
         source_expiry_monotonic = float(finalized_at_monotonic) + (int(lifecycle["completed_source_ttl_ms"]) / 1000.0)
         return current >= source_expiry_monotonic
 
+    def _sequence_awaits_translation(self, sequence: int | None) -> bool:
+        if sequence is None or not self._translation_required_for_display():
+            return False
+        record = self._records.get(sequence)
+        if record is None:
+            return False
+        if bool(record.get("translation_received")):
+            return False
+        # Do not let an invisible stale source block newer finalized captions forever.
+        if self._source_ttl_expired_for_sequence(sequence):
+            return False
+        return True
+
     def _promotion_payload(self, sequence: int) -> SubtitlePayloadEvent | None:
         payload = self._build_payload(sequence)
         if payload is None:
@@ -430,13 +443,25 @@ class SubtitleRouter:
         if (
             self._completed_sequence is not None
             and self._completed_sequence != sequence
+            and self._sequence_awaits_translation(self._completed_sequence)
+        ):
+            self._pending_final_sequence = sequence
+            return
+        if (
+            self._completed_sequence is not None
+            and self._completed_sequence != sequence
             and not lifecycle["allow_early_replace_on_next_final"]
         ):
             self._pending_final_sequence = sequence
             return
 
+        preserved_pending_sequence = (
+            self._pending_final_sequence
+            if self._pending_final_sequence is not None and self._pending_final_sequence != sequence
+            else None
+        )
         self._completed_sequence = sequence
-        self._pending_final_sequence = None
+        self._pending_final_sequence = preserved_pending_sequence
         if self._active_partial and int(self._active_partial.get("sequence", -1)) == sequence:
             self._active_partial = None
         self._schedule_expiry(payload)

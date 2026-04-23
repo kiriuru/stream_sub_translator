@@ -195,9 +195,15 @@ class VadEngine:
                 self._segment_total_frames += 1
                 self._segment_voiced_frames += 1
 
+                frames_since_last_partial = len(self._speech_frames) - self._last_partial_frame_count
+                target_partial_frames = (
+                    self.first_partial_min_speech_frames
+                    if self._last_partial_frame_count == 0
+                    else self.partial_interval_frames
+                )
                 if (
                     len(self._speech_frames) >= self.min_speech_frames
-                    and len(self._speech_frames) - self._last_partial_frame_count >= self.partial_interval_frames
+                    and frames_since_last_partial >= target_partial_frames
                 ):
                     partial_segment = self._build_segment("partial")
                     if partial_segment is not None:

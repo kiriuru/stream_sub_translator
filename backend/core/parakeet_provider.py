@@ -941,6 +941,18 @@ class OfficialEuParakeetRealtimeProvider(BaseOfficialEuParakeetNemoProvider):
         left_context_ms = max(1800, min(6000, chunk_window_ms * 3))
         return chunk_window_ms, chunk_overlap_ms, left_context_ms
 
+    def _resolved_partial_decode_window_ms(self) -> int:
+        realtime = self._realtime_config()
+        partial_emit_interval_ms = max(120, int(realtime.get("partial_emit_interval_ms", 450) or 450))
+        chunk_window_ms = int(realtime.get("chunk_window_ms", 0) or 0)
+        chunk_overlap_ms = int(realtime.get("chunk_overlap_ms", 0) or 0)
+
+        if chunk_window_ms <= 0:
+            chunk_window_ms = max(2200, min(3600, int(round(partial_emit_interval_ms * 5.5))))
+        if chunk_overlap_ms <= 0:
+            chunk_overlap_ms = max(500, min(1000, chunk_window_ms // 3))
+        return max(1600, chunk_window_ms + chunk_overlap_ms)
+
     def _ensure_streaming_runtime(self, model: Any, *, sample_rate: int) -> None:
         if (
             self._streaming_context_samples is not None
@@ -1136,6 +1148,11 @@ class OfficialEuParakeetRealtimeProvider(BaseOfficialEuParakeetNemoProvider):
         audio_array = self._audio_bytes_to_float32(audio_segment)
         if audio_array.size == 0:
             return AsrResult()
+        if not is_final:
+            partial_window_ms = self._resolved_partial_decode_window_ms()
+            partial_window_samples = max(1, int(sample_rate * (partial_window_ms / 1000.0)))
+            if audio_array.shape[0] > partial_window_samples:
+                audio_array = audio_array[-partial_window_samples:]
 
         try:
             hypotheses = model.transcribe(

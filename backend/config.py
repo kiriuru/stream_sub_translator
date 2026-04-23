@@ -168,7 +168,7 @@ class LocalConfigManager:
                 "browser": {
                     "recognition_language": "ru-RU",
                     "interim_results": True,
-                    "continuous_results": False,
+                    "continuous_results": True,
                     "force_finalization_enabled": True,
                     "force_finalization_timeout_ms": 1600,
                 },
@@ -450,7 +450,7 @@ class LocalConfigManager:
             "browser": {
                 "recognition_language": recognition_language,
                 "interim_results": bool(browser.get("interim_results", True)),
-                "continuous_results": bool(browser.get("continuous_results", False)),
+                "continuous_results": True,
                 "force_finalization_enabled": bool(browser.get("force_finalization_enabled", True)),
                 "force_finalization_timeout_ms": max(300, min(15000, force_finalization_timeout_ms)),
             },

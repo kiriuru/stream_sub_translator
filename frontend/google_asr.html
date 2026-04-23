@@ -312,7 +312,7 @@
             <span data-i18n="worker.interim">Return interim results</span>
           </label>
           <label class="toggle">
-            <input id="continuous-results" type="checkbox" />
+            <input id="continuous-results" type="checkbox" checked disabled />
             <span data-i18n="worker.continuous">Return continuous results</span>
           </label>
           <label class="toggle">
@@ -426,6 +426,8 @@
           configuredLanguage: "ru-RU",
           sourceLang: "ru",
           desiredRunning: false,
+          recognitionState: "idle",
+          restartRequestedAfterStop: false,
           socket: null,
           recognition: null,
           reconnectTimer: null,
@@ -454,10 +456,18 @@
         const workerDefaults = Object.freeze({
           recognitionLanguage: "ru-RU",
           interimResults: true,
-          continuousResults: false,
+          continuousResults: true,
           forceFinalizationEnabled: true,
           forceFinalizationTimeoutMs: 1600,
         });
+
+        function enforceContinuousResultsToggle() {
+          if (!continuousResultsToggle) {
+            return true;
+          }
+          continuousResultsToggle.checked = true;
+          return true;
+        }
 
         function formatNow() {
           return new Date().toLocaleTimeString([], { hour12: false });
@@ -543,10 +553,11 @@
         }
 
         function readWorkerSettingsFromControls() {
+          enforceContinuousResultsToggle();
           return {
             recognition_language: String(state.configuredLanguage || workerDefaults.recognitionLanguage),
             interim_results: interimResultsToggle.checked,
-            continuous_results: continuousResultsToggle.checked,
+            continuous_results: true,
             force_finalization_enabled: forceFinalizationToggle.checked,
             force_finalization_timeout_ms: state.forceFinalizationTimeoutMs,
           };
@@ -583,7 +594,6 @@
           const backend = backendBrowserConfig && typeof backendBrowserConfig === "object" ? backendBrowserConfig : {};
           const stored = storedWorkerSettings && typeof storedWorkerSettings === "object" ? storedWorkerSettings : {};
           const hasStoredInterim = Object.prototype.hasOwnProperty.call(stored, "interim_results");
-          const hasStoredContinuous = Object.prototype.hasOwnProperty.call(stored, "continuous_results");
           const hasStoredForceFinalization = Object.prototype.hasOwnProperty.call(stored, "force_finalization_enabled");
           const hasStoredForceTimeout = Object.prototype.hasOwnProperty.call(stored, "force_finalization_timeout_ms");
           return {
@@ -593,9 +603,7 @@
             interim_results: hasStoredInterim
               ? stored.interim_results !== false
               : backend.interim_results !== false,
-            continuous_results: hasStoredContinuous
-              ? stored.continuous_results === true
-              : backend.continuous_results === true,
+            continuous_results: true,
             force_finalization_enabled: hasStoredForceFinalization
               ? stored.force_finalization_enabled !== false
               : backend.force_finalization_enabled !== false,
@@ -617,24 +625,33 @@
           if (!state.recognition) {
             return;
           }
+          enforceContinuousResultsToggle();
           state.recognition.lang = state.configuredLanguage;
           state.recognition.interimResults = interimResultsToggle.checked;
-          state.recognition.continuous = continuousResultsToggle.checked;
+          state.recognition.continuous = true;
         }
 
         function maybeRestartRecognitionAfterSettingsChange() {
           if (!state.desiredRunning || !state.recognition) {
             return;
           }
+          enforceContinuousResultsToggle();
           appendLog("worker settings changed; restarting recognition to apply them immediately");
           state.restartAttemptsWithoutAudio = 0;
+          state.restartRequestedAfterStop = true;
           clearForceFinalizeTimer();
           clearRestartTimer();
           setStatus("restarting");
+          if (state.recognitionState === "stopping") {
+            return;
+          }
+          state.recognitionState = "stopping";
           try {
             state.recognition.stop();
           } catch (_error) {
+            state.recognitionState = "idle";
             window.setTimeout(() => {
+              state.restartRequestedAfterStop = false;
               tryStartRecognition();
             }, 120);
           }
@@ -664,7 +681,7 @@
                 state.configuredLanguage.split("-", 1)[0] || "ru"
               ).toLowerCase();
               interimResultsToggle.checked = savedBrowser.interim_results !== false;
-              continuousResultsToggle.checked = savedBrowser.continuous_results === true;
+              enforceContinuousResultsToggle();
               forceFinalizationToggle.checked = savedBrowser.force_finalization_enabled !== false;
               state.forceFinalizationTimeoutMs = Math.max(
                 300,
@@ -795,6 +812,10 @@
             appendLog(`restart skipped: desiredRunning=false (${reason})`);
             return;
           }
+          if (state.recognitionState === "starting" || state.recognitionState === "running") {
+            appendLog(`restart skipped: recognition already ${state.recognitionState} (${reason})`);
+            return;
+          }
           if (isTerminalRecognitionError(state.lastErrorCode)) {
             state.desiredRunning = false;
             appendLog(`restart cancelled due to terminal error: ${state.lastErrorCode}`);
@@ -810,17 +831,10 @@
           } else {
             state.restartAttemptsWithoutAudio = 0;
           }
-          if (state.restartAttemptsWithoutAudio >= 4) {
-            state.desiredRunning = false;
-            appendLog("auto-restart stopped after repeated starts without audio activity");
-            setStatus(
-              locale() === "ru"
-                ? "остановлено: браузер не получает звук с микрофона"
-                : "stopped: browser never received microphone audio"
-            );
-            return;
+          if (state.restartAttemptsWithoutAudio > 0) {
+            appendLog(`restart continuing without recent audio (${state.restartAttemptsWithoutAudio})`);
           }
-          const delayMs = 400 + Math.max(0, state.restartAttemptsWithoutAudio - 1) * 450;
+          const delayMs = Math.min(5000, 400 + Math.max(0, state.restartAttemptsWithoutAudio - 1) * 450);
           appendLog(`restart scheduled in ${delayMs} ms (${reason})`);
           setStatus("restarting");
           state.restartTimer = window.setTimeout(() => {
@@ -913,7 +927,7 @@
             );
             state.sourceLang = String(state.configuredLanguage.split("-", 1)[0] || "ru").toLowerCase();
             interimResultsToggle.checked = effectiveBrowserConfig.interim_results !== false;
-            continuousResultsToggle.checked = effectiveBrowserConfig.continuous_results === true;
+            enforceContinuousResultsToggle();
             forceFinalizationToggle.checked = effectiveBrowserConfig.force_finalization_enabled !== false;
             state.forceFinalizationTimeoutMs = Math.max(
               300,
@@ -933,7 +947,7 @@
             state.configuredLanguage = effectiveBrowserConfig.recognition_language || workerDefaults.recognitionLanguage;
             state.sourceLang = String(state.configuredLanguage.split("-", 1)[0] || "ru").toLowerCase();
             interimResultsToggle.checked = effectiveBrowserConfig.interim_results !== false;
-            continuousResultsToggle.checked = effectiveBrowserConfig.continuous_results === true;
+            enforceContinuousResultsToggle();
             forceFinalizationToggle.checked = effectiveBrowserConfig.force_finalization_enabled !== false;
             state.forceFinalizationTimeoutMs = effectiveBrowserConfig.force_finalization_timeout_ms;
             updateCounters();
@@ -952,6 +966,8 @@
             state.recognition = new SpeechRecognitionCtor();
             state.recognition.maxAlternatives = 1;
             state.recognition.onstart = () => {
+              state.recognitionState = "running";
+              state.restartRequestedAfterStop = false;
               state.lastErrorCode = "";
               state.lastErrorMessage = "";
               appendLog("recognition.onstart");
@@ -993,12 +1009,19 @@
               setStatus(locale() === "ru" ? `ошибка: ${event.error || "неизвестно"}` : `error: ${event.error || "unknown"}`);
             };
             state.recognition.onend = () => {
+              const restartAfterStop = state.restartRequestedAfterStop;
+              state.recognitionState = "idle";
+              state.restartRequestedAfterStop = false;
               state.onSound = false;
               updateCounters();
               appendLog(
-                `recognition.onend (desiredRunning=${state.desiredRunning}, lastError=${state.lastErrorCode || "none"}, noAudioRestarts=${state.restartAttemptsWithoutAudio})`
+                `recognition.onend (desiredRunning=${state.desiredRunning}, restartAfterStop=${restartAfterStop}, lastError=${state.lastErrorCode || "none"}, noAudioRestarts=${state.restartAttemptsWithoutAudio})`
               );
-              if (state.desiredRunning) {
+              if (restartAfterStop && state.desiredRunning) {
+                window.setTimeout(() => {
+                  tryStartRecognition();
+                }, 80);
+              } else if (state.desiredRunning) {
                 scheduleRecognitionRestart("onend");
               } else {
                 setStatus("stopped");
@@ -1073,17 +1096,37 @@
           if (!state.desiredRunning) {
             return;
           }
+          if (state.recognitionState === "starting" || state.recognitionState === "running") {
+            appendLog(`recognition.start skipped: already ${state.recognitionState}`);
+            return;
+          }
+          if (state.recognitionState === "stopping") {
+            appendLog("recognition.start deferred: recognition is stopping");
+            return;
+          }
           try {
             const recognition = ensureRecognition();
+            enforceContinuousResultsToggle();
+            applyRecognitionSettingsToRuntime();
             state.lastRecognitionStartAt = Date.now();
+            state.recognitionState = "starting";
             appendLog(
               `recognition.start lang=${state.configuredLanguage}, interim=${recognition.interimResults}, continuous=${recognition.continuous}`
             );
             recognition.start();
           } catch (error) {
             const message = error instanceof Error ? error.message : (locale() === "ru" ? "Не удалось запустить браузерное распознавание." : "Could not start browser speech recognition.");
+            const normalizedMessage = String(message).toLowerCase();
+            if (normalizedMessage.includes("already started")) {
+              state.recognitionState = "running";
+              appendLog(`recognition.start skipped: ${message}`);
+              setStatus("listening");
+              return;
+            }
+            state.recognitionState = "idle";
             appendLog(`recognition.start failed: ${message}`);
             setStatus(message);
+            scheduleRecognitionRestart("start failed");
           }
         }
 
@@ -1093,6 +1136,7 @@
             return;
           }
           state.desiredRunning = true;
+          state.restartRequestedAfterStop = false;
           state.lastErrorCode = "";
           state.lastErrorMessage = "";
           state.restartAttemptsWithoutAudio = 0;
@@ -1115,14 +1159,17 @@
         function stopRecognition() {
           appendLog("stop requested by user");
           state.desiredRunning = false;
+          state.restartRequestedAfterStop = false;
           clearForceFinalizeTimer();
           clearRestartTimer();
           state.currentPartial = "";
           state.hasOpenSentence = false;
           if (state.recognition) {
+            state.recognitionState = "stopping";
             try {
               state.recognition.stop();
             } catch (_error) {
+              state.recognitionState = "idle";
               // no-op
             }
           }
@@ -1153,6 +1200,7 @@
 
         if (continuousResultsToggle) {
           continuousResultsToggle.addEventListener("change", () => {
+            enforceContinuousResultsToggle();
             applyRecognitionSettingsToRuntime();
             queueBrowserSettingsSave("continuous_results");
             maybeRestartRecognitionAfterSettingsChange();

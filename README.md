@@ -1,4 +1,4 @@
-# SST Desktop 2.8.1
+# SST Desktop 2.8.2
 
 SST Desktop is a local Windows application for real-time speech recognition, optional translation, subtitle routing, and OBS-ready output.
 
@@ -258,7 +258,7 @@ To update SST Desktop:
 - Default bind target is localhost (`127.0.0.1`).
 
 ## Release Version
-- `2.8.1`
+- `2.8.2`
 - Single runtime source of truth: `backend/versioning.py` (`PROJECT_VERSION`).
 - Future GitHub release sync scaffold:
   - config section: `updates` in `backend/data/config.example.json` and local `config.json`;
