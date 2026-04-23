@@ -1,4 +1,4 @@
-# SST Desktop 2.7.3
+# SST Desktop 2.8.0
 
 SST Desktop is a local Windows application for real-time speech recognition, optional translation, subtitle routing, and OBS-ready output.
 
@@ -20,16 +20,19 @@ Do not remove or rename `app-runtime/`. The executable expects it next to the `.
    - `Stream Subtitle Translator.exe`
    - `app-runtime/`
 3. Launch `Stream Subtitle Translator.exe`.
-4. Select startup profile in the splash launcher.
+4. In splash launcher:
+   - Step 1: choose `Local Mode` or `Remote Mode`
+   - Step 2: choose startup profile/role
 5. Wait for the dashboard to open.
 
 ## Startup Profiles
-- `Quick Start`
-  Browser Speech path for fastest initial startup.
-- `NVIDIA GPU (CUDA)`
-  Local AI recognition path with GPU-first policy.
-- `CPU-only`
-  Local AI recognition path without GPU acceleration.
+- Local mode:
+  - `Quick Start (Browser Speech)` for fastest startup
+  - `Local AI (NVIDIA GPU)` for GPU-first local recognition
+  - `Local AI (CPU)` for CPU-only local recognition
+- Remote mode:
+  - `Main PC (Control & Captions)` for controller relay role
+  - `AI Processing PC` for worker AI role (LAN bind enabled)
 
 ## Core Features
 - Real-time microphone recognition.
@@ -147,6 +150,62 @@ Overlay query examples:
 - `?profile=default`
 - `?compact=1`
 
+## LAN Remote Foundation (Phase 1)
+This branch now includes an isolated remote foundation that does not change default local behavior.
+
+- Default startup remains local-only on `127.0.0.1`.
+- Remote role can be selected at startup:
+  - `start-remote-controller.bat`
+  - `start-remote-worker.bat`
+- `start-remote-controller.bat` uses lightweight bootstrap by default:
+  - no GPU/CPU profile prompt
+  - no forced local AI/NeMo bootstrap
+  - intended for controller relay mode with remote worker execution
+- Worker launcher enables LAN bind explicitly through runtime flags.
+- API endpoint for diagnostics:
+  - `GET /api/remote/state`
+- API endpoints for LAN pairing baseline:
+  - `POST /api/remote/pair/create`
+  - `POST /api/remote/pair/verify`
+  - `POST /api/remote/heartbeat`
+- Controller endpoints for worker control/sync:
+  - `POST /api/remote/worker/settings/sync`
+  - `POST /api/remote/worker/runtime/start`
+  - `POST /api/remote/worker/runtime/stop`
+  - `GET /api/remote/worker/runtime/status`
+  - `GET /api/remote/worker/health`
+
+Current scope of this phase:
+- remote config normalization
+- runtime role wiring (`disabled|controller|worker`)
+- LAN-bind startup controls
+- remote diagnostics in health/runtime responses
+
+Current LAN bridge baseline:
+- WebRTC signaling websocket:
+  - `WS /ws/remote/signaling?session_id=...&pair_code=...&role=controller|worker`
+- Worker audio ingest websocket:
+  - `WS /ws/remote/audio_ingest?session_id=...&pair_code=...`
+- Controller local result ingest websocket:
+  - `WS /ws/remote/result_ingest`
+- Bridge pages:
+  - `GET /remote/controller-bridge`
+  - `GET /remote/worker-bridge`
+- Bridge pages now include automatic reconnect with exponential backoff for transient LAN disconnects.
+
+Quick LAN test flow:
+1. On worker machine, run `start-remote-worker.bat`.
+2. Open dashboard, go to `Tools & Data -> Remote LAN`, click `Create Local Pair`.
+3. On worker machine, open `Open Local Worker Bridge`.
+4. On controller machine, run `start-remote-controller.bat`.
+5. In controller dashboard `Remote LAN`, set `Worker Base URL` to worker host URL and fill the same session/pair values.
+6. Open `Open Controller Bridge`, choose the required microphone in `Microphone Input`, then click `Start Stream`.
+7. Click `Prepare Remote Run` on controller dashboard `Remote LAN` to run:
+   - worker settings sync
+   - worker runtime start
+   - controller bridge open
+8. Start runtime on the controller dashboard in remote-enabled controller role to route incoming remote transcript/translation events to local preview/overlay/OBS output.
+
 ## Local Data and Logs
 Created next to the executable:
 - `user-data/`
@@ -196,4 +255,8 @@ To update SST Desktop:
 - Default bind target is localhost (`127.0.0.1`).
 
 ## Release Version
-- `2.7.3`
+- `2.8.0`
+- Single runtime source of truth: `backend/versioning.py` (`PROJECT_VERSION`).
+- Future GitHub release sync scaffold:
+  - config section: `updates` in `backend/data/config.example.json` and local `config.json`;
+  - API endpoint: `GET /api/version` (returns local version + sync metadata, no live polling by default).

@@ -1,0 +1,1072 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Stream Subtitle Translator</title>
+    <link rel="stylesheet" href="/project-fonts.css?v=20260422a" />
+    <link rel="stylesheet" href="/static/css/app.css?v=20260422c" />
+    <link rel="stylesheet" href="/static/css/subtitle-style.css?v=20260422a" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="panel hero-panel">
+        <div class="hero-copy">
+          <p class="eyebrow" data-i18n="header.eyebrow">Local Runtime Dashboard</p>
+          <h1 data-i18n="header.title">Stream Subtitle Translator</h1>
+          <p class="muted hero-description" data-i18n="header.description">Compact local control center for live recognition, translation, subtitle routing, and OBS output.</p>
+        </div>
+        <div class="hero-actions">
+          <label class="stack-field locale-switcher">
+            <span data-i18n="language.label">Interface language</span>
+            <select id="ui-language-select">
+              <option value="en" data-i18n="language.en">English</option>
+              <option value="ru" data-i18n="language.ru">Русский</option>
+            </select>
+          </label>
+        </div>
+      </header>
+
+      <section class="panel runtime-shell">
+        <div class="runtime-shell-main">
+          <div class="runtime-status">
+            <div class="badges">
+              <span id="health-badge" class="badge">health: unknown</span>
+              <span id="runtime-badge" class="badge">runtime: idle</span>
+              <span id="asr-provider-badge" class="badge">asr: unknown</span>
+              <span id="asr-device-badge" class="badge">device: unknown</span>
+              <span id="asr-partials-badge" class="badge">partials: unknown</span>
+              <span id="asr-mode-badge" class="badge">mode: unknown</span>
+              <span id="translation-status-badge" class="badge">translation: unknown</span>
+              <span id="obs-cc-badge" class="badge">obs cc: disabled</span>
+            </div>
+            <div class="badges" id="runtime-states">
+              <span class="badge state-pill" data-state="idle" data-i18n="runtime.state.idle">idle</span>
+              <span class="badge state-pill" data-state="starting" data-i18n="runtime.state.starting">starting</span>
+              <span class="badge state-pill" data-state="listening" data-i18n="runtime.state.listening">listening</span>
+              <span class="badge state-pill" data-state="transcribing" data-i18n="runtime.state.transcribing">transcribing</span>
+              <span class="badge state-pill" data-state="translating" data-i18n="runtime.state.translating">translating</span>
+              <span class="badge state-pill" data-state="error" data-i18n="runtime.state.error">error</span>
+            </div>
+            <div id="runtime-progress-card" class="runtime-progress-card" hidden>
+              <div class="runtime-progress-head">
+                <strong id="runtime-progress-title">Runtime Progress</strong>
+                <span id="runtime-progress-percent">0%</span>
+              </div>
+              <p id="runtime-progress-text" class="muted runtime-progress-text">Preparing local runtime...</p>
+              <div class="runtime-progress-bar" aria-hidden="true">
+                <div id="runtime-progress-fill" class="runtime-progress-fill"></div>
+              </div>
+            </div>
+          </div>
+
+          <aside class="runtime-side">
+            <div class="actions runtime-actions">
+              <button id="start-btn" data-i18n="common.start">Start</button>
+              <button id="stop-btn" class="secondary" data-i18n="common.stop">Stop</button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="panel overview-layout">
+        <div class="overview-grid">
+          <div class="overview-left-column">
+            <article class="overview-transcript-card">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow" data-i18n="overview.recognition.eyebrow">Live Recognition</p>
+                  <h2 data-i18n="overview.transcript.title">Transcript</h2>
+                </div>
+              </div>
+              <p class="muted" data-i18n="overview.partial">Live partial text</p>
+              <pre id="partial-transcript" class="transcript-box"></pre>
+              <p class="muted" data-i18n="overview.final">Completed text</p>
+              <pre id="final-transcript" class="transcript-box"></pre>
+            </article>
+
+            <article class="mini-card overview-overlay-card">
+              <h2 data-i18n="overview.overlay.title">OBS Overlay URL</h2>
+              <p id="overlay-url" class="mono mini-card-value" data-i18n="common.loading">loading...</p>
+              <a id="overlay-link" target="_blank" rel="noreferrer" data-i18n="common.open_overlay">Open overlay</a>
+            </article>
+          </div>
+
+          <div class="overview-right-column">
+            <article class="mini-card overview-recognition-card">
+              <h2 data-i18n="overview.recognition.title">Recognition</h2>
+              <div class="stack compact-stack">
+                <label>
+                  <span class="label" data-i18n="overview.recognition.mode">Recognition method</span>
+                  <select id="recognition-mode-select">
+                    <option value="local" data-i18n="overview.recognition.mode.local">Local Parakeet</option>
+                    <option value="browser_google" data-i18n="overview.recognition.mode.browser_google">Browser Speech</option>
+                  </select>
+                </label>
+                <label id="recognition-language-row" hidden>
+                  <span class="label" data-i18n="overview.recognition.language">Recognition language</span>
+                  <select id="recognition-language-select"></select>
+                </label>
+              </div>
+              <p id="recognition-mode-hint" class="muted" data-i18n="overview.recognition.hint.local">Local mode uses the built-in microphone capture, VAD, and Parakeet runtime on this machine.</p>
+            </article>
+
+            <article class="mini-card overview-microphone-card">
+              <h2 data-i18n="overview.microphone.title">Microphone</h2>
+              <div class="actions compact-actions">
+                <select id="audio-input-select"></select>
+              </div>
+              <p id="audio-input-meta" class="muted">No device selected.</p>
+            </article>
+
+            <article class="mini-card overview-preview-card">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow" data-i18n="overview.snapshot.eyebrow">Live Snapshot</p>
+                  <h2 data-i18n="overview.preview.title">Subtitle Output Preview</h2>
+                </div>
+              </div>
+              <div id="subtitle-output-preview" class="translation-results"></div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="tab-toolbar">
+        <nav class="tab-bar" aria-label="Dashboard sections" role="tablist">
+          <button class="tab-button" type="button" data-tab-target="translation" data-i18n="tab.translation">Translation</button>
+          <button class="tab-button" type="button" data-tab-target="subtitles" data-i18n="tab.subtitles">Subtitles</button>
+          <button class="tab-button" type="button" data-tab-target="style" data-i18n="tab.style">Style</button>
+          <button class="tab-button" type="button" data-tab-target="obs" data-i18n="tab.obs">OBS</button>
+          <button class="tab-button" type="button" data-tab-target="tuning" data-i18n="tab.tuning">Tuning</button>
+          <button class="tab-button" type="button" data-tab-target="tools" data-i18n="tab.tools">Tools &amp; Data</button>
+        </nav>
+        <div class="tab-save-actions">
+          <button id="global-save-btn" data-i18n="common.save">Save</button>
+        </div>
+      </section>
+      <p id="save-status-text" class="muted save-status" data-i18n="save.status.default">
+        Save applies most settings immediately. ASR provider, GPU policy, and microphone device changes take effect after Stop/Start.
+      </p>
+
+      <section class="tab-panels">
+        <div class="tab-panel active" data-tab-panel="translation">
+      <section class="translation-layout">
+        <div class="translation-top">
+        <article class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow" data-i18n="translation.eyebrow">Provider &amp; Languages</p>
+              <h2 data-i18n="translation.title">Translation Settings</h2>
+            </div>
+          </div>
+          <div class="toggle-row">
+            <label class="checkbox-row">
+              <input id="translation-enabled" type="checkbox" />
+              <span data-i18n="translation.enable">Translate recognized speech</span>
+            </label>
+          </div>
+          <div class="actions">
+            <label class="stack-field grow">
+              <span data-i18n="translation.provider">Translation provider</span>
+              <select id="translation-provider"></select>
+            </label>
+          </div>
+          <div class="actions" id="translation-api-key-row">
+            <label class="stack-field grow">
+              <span data-i18n="translation.api_key">API key</span>
+              <input id="translation-api-key" type="password" placeholder="API key" data-i18n-placeholder="translation.api_key" />
+            </label>
+          </div>
+          <div class="actions" id="translation-base-url-row">
+            <label class="stack-field grow">
+              <span data-i18n="translation.base_url">Base URL</span>
+              <input id="translation-base-url" type="text" placeholder="Base URL" data-i18n-placeholder="translation.base_url" />
+            </label>
+          </div>
+          <div class="actions" id="translation-gas-url-row">
+            <label class="stack-field grow">
+              <span data-i18n="translation.gas_url">Google Apps Script URL</span>
+              <input id="translation-gas-url" type="text" placeholder="Google Apps Script web app URL" data-i18n-placeholder="translation.gas_url" />
+            </label>
+          </div>
+          <div class="actions" id="translation-endpoint-row">
+            <label class="stack-field grow">
+              <span data-i18n="translation.endpoint">Endpoint</span>
+              <input id="translation-endpoint" type="text" placeholder="Endpoint" data-i18n-placeholder="translation.endpoint" />
+            </label>
+            <label class="stack-field grow" id="translation-region-row">
+              <span data-i18n="translation.region">Region</span>
+              <input id="translation-region" type="text" placeholder="Region" data-i18n-placeholder="translation.region" />
+            </label>
+          </div>
+          <div class="actions" id="translation-api-url-row">
+            <label class="stack-field grow">
+              <span data-i18n="translation.provider_url">Provider URL</span>
+              <input id="translation-api-url" type="text" placeholder="Provider URL" data-i18n-placeholder="translation.provider_url" />
+            </label>
+          </div>
+          <div class="actions" id="translation-model-row">
+            <label class="stack-field grow">
+              <span data-i18n="translation.model">Model</span>
+              <input id="translation-model" type="text" placeholder="Model" data-i18n-placeholder="translation.model" />
+            </label>
+          </div>
+          <div class="actions" id="translation-prompt-row">
+            <label class="stack-field grow">
+              <span data-i18n="translation.custom_prompt">Custom prompt override</span>
+              <textarea id="translation-custom-prompt" class="mono code-box" spellcheck="false" placeholder="Custom prompt override (optional)" data-i18n-placeholder="translation.custom_prompt"></textarea>
+            </label>
+          </div>
+          <p id="translation-provider-hint" class="muted"></p>
+          <p id="translation-provider-status" class="muted"></p>
+          <div class="actions translation-language-picker">
+            <select id="translation-language-select" data-i18n-title="translation.language_picker"></select>
+          </div>
+        </article>
+        <article class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow" data-i18n="translation.latest.eyebrow">Latest Result</p>
+              <h2 data-i18n="translation.latest.title">Translated Results</h2>
+            </div>
+          </div>
+          <div id="translation-results" class="translation-results"></div>
+        </article>
+        </div>
+
+        <div class="translation-bottom">
+        <article class="panel">
+          <ul id="translation-language-order" class="ordered-list"></ul>
+          <p class="muted" data-i18n="translation.order.note">Translation is optional. Target language order is saved locally and reused by subtitle routing.</p>
+        </article>
+        <article class="panel translation-actions-panel">
+          <div class="button-stack translation-action-stack">
+          <div class="actions">
+            <button id="translation-lang-add-btn" data-i18n="translation.add_language">Add Language</button>
+          </div>
+          <div class="actions">
+            <button id="translation-lang-remove-btn" class="secondary" data-i18n="translation.remove">Remove</button>
+          </div>
+          <div class="actions">
+            <button id="translation-lang-up-btn" class="secondary" data-i18n="translation.move_up">Move Up</button>
+          </div>
+          <div class="actions">
+            <button id="translation-lang-down-btn" class="secondary" data-i18n="translation.move_down">Move Down</button>
+          </div>
+          </div>
+        </article>
+        </div>
+      </section>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="subtitles">
+      <section class="subtitles-layout">
+        <div class="subtitles-top">
+        <article class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow" data-i18n="subtitles.eyebrow">Routing &amp; Lifetime</p>
+              <h2 data-i18n="subtitles.title">Subtitle Output</h2>
+            </div>
+          </div>
+          <div class="actions">
+            <label class="stack-field grow">
+              <span data-i18n="subtitles.overlay_preset">Overlay layout preset</span>
+              <select id="overlay-preset-select">
+                <option value="single" data-i18n="subtitles.overlay_preset.single">Single</option>
+                <option value="dual-line" data-i18n="subtitles.overlay_preset.dual-line">Dual-line</option>
+                <option value="stacked" data-i18n="subtitles.overlay_preset.stacked">Stacked</option>
+              </select>
+            </label>
+            <p id="overlay-preset-hint" class="muted"></p>
+          </div>
+          <div class="toggle-row">
+            <label class="checkbox-row">
+              <input id="overlay-compact-toggle" type="checkbox" />
+              <span data-i18n="subtitles.compact">Compact overlay spacing</span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label class="checkbox-row">
+              <input id="subtitle-show-source" type="checkbox" />
+              <span data-i18n="subtitles.show_source">Show source text</span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label class="checkbox-row">
+              <input id="subtitle-show-translations" type="checkbox" />
+              <span data-i18n="subtitles.show_translations">Show translated text</span>
+            </label>
+          </div>
+          <div class="actions">
+            <label class="inline-field">
+              <span data-i18n="subtitles.max_translations">Max translated languages</span>
+              <input id="subtitle-max-translations" type="number" min="0" max="5" step="1" />
+            </label>
+          </div>
+        </article>
+        <article class="panel">
+          <h2 data-i18n="subtitles.timing.title">Subtitle Timing</h2>
+          <div class="actions">
+            <label class="inline-field">
+              <span data-i18n="subtitles.source_hold">Completed source hold (seconds)</span>
+              <input id="subtitle-completed-source-ttl" type="number" min="0.5" step="0.1" />
+            </label>
+            <label class="inline-field">
+              <span data-i18n="subtitles.translation_hold">Completed translation hold (seconds)</span>
+              <input id="subtitle-completed-translation-ttl" type="number" min="0.5" step="0.1" />
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label class="checkbox-row">
+              <input id="subtitle-sync-source-translation-expiry" type="checkbox" />
+              <span data-i18n="subtitles.sync_expiry">Keep completed source visible while its translation is still visible</span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label class="checkbox-row">
+              <input id="subtitle-allow-early-replace" type="checkbox" />
+              <span data-i18n="subtitles.allow_replace">Replace visible block immediately when the next phrase finalizes</span>
+            </label>
+          </div>
+          <p class="muted" data-i18n="subtitles.timing.note.order">This order is used by both the dashboard preview and the OBS overlay payload. Visible translated lines are capped at 5.</p>
+          <p class="muted" data-i18n="subtitles.timing.note.seconds">Values here are shown in seconds. These controls decide how long finished text stays on screen and how old completed text behaves when a new phrase starts.</p>
+        </article>
+        </div>
+
+        <div class="subtitles-bottom">
+        <article class="panel">
+          <ul id="subtitle-display-order" class="ordered-list"></ul>
+        </article>
+        <article class="panel subtitle-actions-panel">
+          <div class="button-stack subtitle-action-stack">
+            <div class="actions">
+              <button id="subtitle-order-up-btn" class="secondary" data-i18n="subtitles.move_up">Move Up</button>
+            </div>
+            <div class="actions">
+              <button id="subtitle-order-down-btn" class="secondary" data-i18n="subtitles.move_down">Move Down</button>
+            </div>
+          </div>
+        </article>
+        </div>
+
+        <article class="panel subtitle-notes-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow" data-i18n="subtitles.notes.eyebrow">Behavior Notes</p>
+              <h2 data-i18n="subtitles.notes.title">Subtitle Routing Notes</h2>
+            </div>
+          </div>
+          <p class="muted" data-i18n="subtitles.notes.preview">The live subtitle preview now stays in the top overview area so you can always compare transcript, output timing, and device state without switching tabs.</p>
+          <p class="muted" data-i18n="subtitles.notes.routing">Use this section to control visibility, language order, overlay preset, and subtitle hold timing. The same saved routing state is shared by the dashboard preview and the OBS overlay.</p>
+        </article>
+      </section>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="style">
+      <section class="panel panel-style">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow" data-i18n="style.eyebrow">Visual System</p>
+            <h2 data-i18n="style.title">Subtitle Style</h2>
+            <p class="muted" data-i18n="style.description">Shared style state for dashboard preview and OBS overlay.</p>
+          </div>
+        </div>
+
+        <div class="toolbar-row">
+          <label class="stack-field grow">
+            <span data-i18n="style.preset">Preset</span>
+            <select id="subtitle-style-preset"></select>
+          </label>
+          <label class="stack-field grow">
+            <span data-i18n="style.custom_name">Save current style as custom preset</span>
+            <input id="subtitle-style-custom-name" type="text" placeholder="my_stream_style" data-i18n-placeholder="style.custom_name.placeholder" />
+          </label>
+          <div class="button-stack">
+            <button id="subtitle-style-save-custom-btn" class="secondary" data-i18n="style.save_custom">Save Custom</button>
+            <button id="subtitle-style-delete-custom-btn" class="secondary" data-i18n="style.delete_custom">Delete Custom</button>
+          </div>
+        </div>
+        <p id="subtitle-style-preset-description" class="muted" data-i18n="style.preset_loading">Preset description loading...</p>
+        <p id="subtitle-style-custom-status" class="muted" data-i18n="style.custom_status.default">Built-in presets are editable, and custom presets are saved locally in config/profiles.</p>
+
+        <div class="settings-surface">
+          <div class="surface-header">
+            <div>
+              <h3 data-i18n="style.fonts.title">Fonts</h3>
+              <p class="muted" data-i18n="style.fonts.note">Project-local fonts are the reliable custom-font path. System font listing is best-effort.</p>
+            </div>
+            <button id="font-refresh-btn" class="secondary" data-i18n="style.fonts.refresh">Refresh System Fonts</button>
+          </div>
+          <p class="muted"><span data-i18n="style.fonts.dir">Project-local fonts folder:</span> <span id="project-fonts-dir" class="mono">loading...</span></p>
+          <p id="font-source-status" class="muted" data-i18n="style.fonts.status.default">Fallback fonts are always available. Local system font access depends on the browser/runtime.</p>
+        </div>
+
+        <div class="settings-surface">
+          <div class="surface-header">
+            <div>
+              <h3 data-i18n="style.base.title">Base Style</h3>
+              <p class="muted" data-i18n="style.base.note">Shared defaults applied to every visible subtitle line unless a line slot overrides them.</p>
+            </div>
+          </div>
+          <div class="style-grid">
+            <label class="stack-field">
+              <span data-i18n="style.field.font_family">Font family</span>
+              <select id="style-font-family"></select>
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.font_size">Font size</span>
+              <input id="style-font-size" type="number" min="12" max="96" step="1" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.font_weight">Font weight</span>
+              <input id="style-font-weight" type="number" min="300" max="900" step="100" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.text_color">Text color</span>
+              <input id="style-fill-color" type="color" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.outline_color">Outline color</span>
+              <input id="style-stroke-color" type="color" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.outline_width">Outline width</span>
+              <input id="style-stroke-width" type="number" min="0" max="8" step="1" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.shadow_color">Shadow color</span>
+              <input id="style-shadow-color" type="color" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.shadow_blur">Shadow blur</span>
+              <input id="style-shadow-blur" type="number" min="0" max="32" step="1" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.shadow_offset_y">Shadow offset Y</span>
+              <input id="style-shadow-offset-y" type="number" min="-24" max="24" step="1" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.background_color">Background color</span>
+              <input id="style-background-color" type="color" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.background_opacity">Background opacity</span>
+              <input id="style-background-opacity" type="number" min="0" max="100" step="1" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.text_align">Text alignment</span>
+              <select id="style-text-align">
+                <option value="left" data-i18n="style.field.text_align.left">Left</option>
+                <option value="center" data-i18n="style.field.text_align.center">Center</option>
+                <option value="right" data-i18n="style.field.text_align.right">Right</option>
+              </select>
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.line_spacing">Line spacing</span>
+              <input id="style-line-spacing" type="number" min="0.8" max="2.2" step="0.05" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.letter_spacing">Letter spacing</span>
+              <input id="style-letter-spacing" type="number" min="-0.08" max="0.2" step="0.01" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.line_gap">Line gap</span>
+              <input id="style-line-gap" type="number" min="0" max="40" step="1" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.effect">Effect</span>
+              <select id="style-effect">
+                <option value="none" data-i18n="style.field.effect.none">None</option>
+                <option value="fade" data-i18n="style.field.effect.fade">Fade</option>
+                <option value="subtle_pop" data-i18n="style.field.effect.subtle_pop">Subtle pop</option>
+              </select>
+            </label>
+          </div>
+
+          <details class="style-details">
+            <summary data-i18n="style.more_base">More base style controls</summary>
+            <div class="style-grid">
+              <label class="stack-field">
+                <span data-i18n="style.field.shadow_offset_x">Shadow offset X</span>
+                <input id="style-shadow-offset-x" type="number" min="-24" max="24" step="1" />
+              </label>
+              <label class="stack-field">
+                <span data-i18n="style.field.background_padding_x">Background padding X</span>
+                <input id="style-background-padding-x" type="number" min="0" max="40" step="1" />
+              </label>
+              <label class="stack-field">
+                <span data-i18n="style.field.background_padding_y">Background padding Y</span>
+                <input id="style-background-padding-y" type="number" min="0" max="24" step="1" />
+              </label>
+              <label class="stack-field">
+                <span data-i18n="style.field.background_radius">Background radius</span>
+                <input id="style-background-radius" type="number" min="0" max="40" step="1" />
+              </label>
+            </div>
+          </details>
+        </div>
+
+        <div class="settings-surface">
+          <div class="surface-header">
+            <div>
+              <h3 data-i18n="style.slots.title">Per-line Slot Overrides</h3>
+              <p class="muted" data-i18n="style.slots.note">Use separate styling for the source line and up to five visible translated lines.</p>
+            </div>
+            <label class="checkbox-row slot-enable-row">
+              <input id="style-line-slot-enabled" type="checkbox" />
+              <span data-i18n="style.slots.override">Override selected line slot</span>
+            </label>
+          </div>
+          <div id="style-line-slot-tabs" class="slot-tab-list"></div>
+          <p id="style-line-slot-description" class="muted" data-i18n="style.slots.description">Select a line slot to override the base style.</p>
+
+          <div id="style-line-slot-fields" class="style-grid">
+            <label class="stack-field">
+              <span>Font family</span>
+              <select id="style-line-slot-font-family"></select>
+            </label>
+            <label class="stack-field">
+              <span>Font size</span>
+              <input id="style-line-slot-font-size" type="number" min="12" max="96" step="1" />
+            </label>
+            <label class="stack-field">
+              <span>Font weight</span>
+              <input id="style-line-slot-font-weight" type="number" min="300" max="900" step="100" />
+            </label>
+            <label class="stack-field">
+              <span>Text color</span>
+              <input id="style-line-slot-fill-color" type="color" />
+            </label>
+            <label class="stack-field">
+              <span>Outline color</span>
+              <input id="style-line-slot-stroke-color" type="color" />
+            </label>
+            <label class="stack-field">
+              <span>Outline width</span>
+              <input id="style-line-slot-stroke-width" type="number" min="0" max="8" step="1" />
+            </label>
+            <label class="stack-field">
+              <span>Shadow color</span>
+              <input id="style-line-slot-shadow-color" type="color" />
+            </label>
+            <label class="stack-field">
+              <span>Shadow blur</span>
+              <input id="style-line-slot-shadow-blur" type="number" min="0" max="32" step="1" />
+            </label>
+            <label class="stack-field">
+              <span>Background color</span>
+              <input id="style-line-slot-background-color" type="color" />
+            </label>
+            <label class="stack-field">
+              <span>Background opacity</span>
+              <input id="style-line-slot-background-opacity" type="number" min="0" max="100" step="1" />
+            </label>
+            <label class="stack-field">
+              <span>Line spacing</span>
+              <input id="style-line-slot-line-spacing" type="number" min="0.8" max="2.2" step="0.05" />
+            </label>
+            <label class="stack-field">
+              <span>Letter spacing</span>
+              <input id="style-line-slot-letter-spacing" type="number" min="-0.08" max="0.2" step="0.01" />
+            </label>
+            <label class="stack-field">
+              <span>Text alignment</span>
+              <select id="style-line-slot-text-align">
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+              </select>
+            </label>
+            <label class="stack-field">
+              <span>Effect</span>
+              <select id="style-line-slot-effect">
+                <option value="none">None</option>
+                <option value="fade">Fade</option>
+                <option value="subtle_pop">Subtle pop</option>
+              </select>
+            </label>
+          </div>
+
+          <details id="style-line-slot-details" class="style-details">
+            <summary data-i18n="style.more_slot">More selected line slot controls</summary>
+            <div class="style-grid">
+              <label class="stack-field">
+                <span data-i18n="style.field.shadow_offset_x">Shadow offset X</span>
+                <input id="style-line-slot-shadow-offset-x" type="number" min="-24" max="24" step="1" />
+              </label>
+              <label class="stack-field">
+                <span data-i18n="style.field.shadow_offset_y">Shadow offset Y</span>
+                <input id="style-line-slot-shadow-offset-y" type="number" min="-24" max="24" step="1" />
+              </label>
+              <label class="stack-field">
+                <span data-i18n="style.field.background_padding_x">Background padding X</span>
+                <input id="style-line-slot-background-padding-x" type="number" min="0" max="40" step="1" />
+              </label>
+              <label class="stack-field">
+                <span data-i18n="style.field.background_padding_y">Background padding Y</span>
+                <input id="style-line-slot-background-padding-y" type="number" min="0" max="24" step="1" />
+              </label>
+              <label class="stack-field">
+                <span data-i18n="style.field.background_radius">Background radius</span>
+                <input id="style-line-slot-background-radius" type="number" min="0" max="40" step="1" />
+              </label>
+            </div>
+          </details>
+        </div>
+
+        <p class="muted" data-i18n="style.final_note">The same saved subtitle style payload drives this dashboard preview and the OBS overlay. Presets are a starting point, and your edits stay local in config/profiles.</p>
+      </section>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="obs">
+      <section class="panel grid">
+        <article>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow" data-i18n="obs.eyebrow">Optional Output Target</p>
+              <h2 data-i18n="obs.title">OBS Closed Captions</h2>
+            </div>
+          </div>
+          <div class="toggle-row">
+            <label class="checkbox-row">
+              <input id="obs-cc-enabled" type="checkbox" />
+              <span data-i18n="obs.enable">Enable OBS Closed Captions output</span>
+            </label>
+          </div>
+          <div class="actions">
+            <label class="stack-field grow">
+              <span data-i18n="obs.host">OBS websocket host</span>
+              <input id="obs-cc-host" type="text" placeholder="127.0.0.1" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="obs.port">Port</span>
+              <input id="obs-cc-port" type="number" min="1" max="65535" step="1" />
+            </label>
+          </div>
+          <div class="actions">
+            <label class="stack-field grow">
+              <span data-i18n="obs.password">Password</span>
+              <input id="obs-cc-password" type="password" placeholder="OBS websocket password" data-i18n-placeholder="obs.password.placeholder" />
+            </label>
+          </div>
+          <div class="actions">
+            <label class="stack-field grow">
+              <span data-i18n="obs.output_mode">Output mode</span>
+              <select id="obs-cc-output-mode">
+                <option value="disabled" data-i18n="obs.output.disabled">Disabled</option>
+                <option value="source_live" data-i18n="obs.output.source_live">Source live (partials + final)</option>
+                <option value="source_final_only" data-i18n="obs.output.source_final_only">Source final only</option>
+                <option value="translation_1" data-i18n="obs.output.translation_1">Translation 1</option>
+                <option value="translation_2" data-i18n="obs.output.translation_2">Translation 2</option>
+                <option value="translation_3" data-i18n="obs.output.translation_3">Translation 3</option>
+                <option value="translation_4" data-i18n="obs.output.translation_4">Translation 4</option>
+                <option value="translation_5" data-i18n="obs.output.translation_5">Translation 5</option>
+                <option value="first_visible_line" data-i18n="obs.output.first_visible_line">First visible line</option>
+              </select>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label class="checkbox-row">
+              <input id="obs-cc-debug-enabled" type="checkbox" />
+              <span data-i18n="obs.debug.enable">Mirror captions into an OBS text source for debugging</span>
+            </label>
+          </div>
+          <div class="actions">
+            <label class="stack-field grow">
+              <span data-i18n="obs.debug.input">Debug text input name</span>
+              <input id="obs-cc-debug-input-name" type="text" placeholder="CC_DEBUG" />
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label class="checkbox-row">
+              <input id="obs-cc-debug-send-partials" type="checkbox" />
+              <span data-i18n="obs.debug.send_partials">Send partials to the debug text input</span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label class="checkbox-row">
+              <input id="obs-cc-send-partials" type="checkbox" />
+              <span data-i18n="obs.source_live_partials">Send partial source updates in source_live mode</span>
+            </label>
+          </div>
+          <div class="style-grid">
+            <label class="stack-field">
+              <span data-i18n="obs.partial_throttle">Partial throttle</span>
+              <input id="obs-cc-partial-throttle" type="number" min="0" max="5000" step="10" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="obs.min_partial_delta">Min partial delta chars</span>
+              <input id="obs-cc-min-partial-delta" type="number" min="0" max="100" step="1" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="obs.final_delay">Final replace delay</span>
+              <input id="obs-cc-final-replace-delay" type="number" min="0" max="5000" step="10" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="obs.clear_after">Clear after</span>
+              <input id="obs-cc-clear-after" type="number" min="0" max="30000" step="100" />
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label class="checkbox-row">
+              <input id="obs-cc-avoid-duplicates" type="checkbox" />
+              <span data-i18n="obs.avoid_duplicates">Avoid duplicate caption text</span>
+            </label>
+          </div>
+          <p class="muted" data-i18n="obs.note.native">Native stream captions still use `SendStreamCaption`. The optional debug mirror writes the same text into a normal OBS text source via `SetInputSettings`, which is useful because native captions are not visible as a regular preview layer.</p>
+        </article>
+        <article>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow" data-i18n="obs.state.eyebrow">Connection State</p>
+              <h2 data-i18n="obs.state.title">OBS CC Status</h2>
+            </div>
+          </div>
+          <p id="obs-cc-status-text" class="muted" data-i18n="obs.state.default">OBS Closed Captions are disabled by default.</p>
+          <p class="muted" data-i18n="obs.state.note">Recommended debug pattern: partials to the OBS text source mirror, finals to both the text source and native `SendStreamCaption`. `first_visible_line` follows your current Subtitle Output order and visibility.</p>
+        </article>
+      </section>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="tuning">
+      <section class="panel grid">
+        <article>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow" data-i18n="tuning.quick.eyebrow">Quick Tuning</p>
+              <h2 data-i18n="tuning.quick.title">Recognition Feel</h2>
+            </div>
+          </div>
+          <div class="slider-group">
+            <label class="stack-field">
+              <div class="slider-heading">
+                <span data-i18n="tuning.appearance.label">How quickly text appears</span>
+                <strong id="simple-appearance-label">Balanced</strong>
+              </div>
+              <input id="simple-appearance-speed" type="range" min="1" max="5" step="1" />
+            </label>
+            <p class="muted" data-i18n="tuning.appearance.note">Higher values show in-progress text sooner. Lower values wait for a bit more speech.</p>
+          </div>
+          <div class="slider-group">
+            <label class="stack-field">
+              <div class="slider-heading">
+                <span data-i18n="tuning.finish.label">How quickly speech is considered finished</span>
+                <strong id="simple-finish-label">Balanced</strong>
+              </div>
+              <input id="simple-finish-speed" type="range" min="1" max="5" step="1" />
+            </label>
+            <p class="muted" data-i18n="tuning.finish.note">Higher values finalize phrases faster after a pause. Lower values wait longer before closing the subtitle block.</p>
+          </div>
+          <div class="slider-group">
+            <label class="stack-field">
+              <div class="slider-heading">
+                <span data-i18n="tuning.stability.label">How stable or less chatty updates should be</span>
+                <strong id="simple-stability-label">Balanced</strong>
+              </div>
+              <input id="simple-stability" type="range" min="1" max="5" step="1" />
+            </label>
+            <p class="muted" data-i18n="tuning.stability.note">Higher values reduce tiny partial rewrites. Lower values feel more live but can flicker more.</p>
+          </div>
+          <div class="toggle-row">
+            <label class="checkbox-row">
+              <input id="asr-rnnoise-enabled" type="checkbox" />
+              <span data-i18n="tuning.rnnoise.enable">RNNoise noise reduction (experimental)</span>
+            </label>
+          </div>
+          <div class="slider-group">
+            <label class="stack-field">
+              <div class="slider-heading">
+                <span data-i18n="tuning.rnnoise.strength">RNNoise strength</span>
+                <strong id="asr-rnnoise-strength-label">70%</strong>
+              </div>
+              <input id="asr-rnnoise-strength" type="range" min="0" max="100" step="5" />
+            </label>
+            <p class="muted" data-i18n="tuning.rnnoise.note.1">0% keeps the raw path. Higher values blend in more RNNoise output.</p>
+          </div>
+          <p class="muted" data-i18n="tuning.rnnoise.note.2">Optional and off by default. It can reduce false recognition from constant background noise, but it may also change recognition behavior.</p>
+          <p class="muted" data-i18n="tuning.rnnoise.note.3">Save config or profile after tuning. Advanced raw timing controls stay available below if you want exact numbers.</p>
+        </article>
+        <article>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow" data-i18n="tuning.notes.eyebrow">Context</p>
+              <h2 data-i18n="tuning.notes.title">Tuning Notes</h2>
+            </div>
+          </div>
+          <p class="muted" data-i18n="tuning.notes.1">This step uses real local microphone capture + VAD + websocket feed.</p>
+          <p class="muted" data-i18n="tuning.notes.2">The simple sliders only remap the existing timing controls. Nothing is sent anywhere outside this PC.</p>
+          <p class="muted" data-i18n="tuning.notes.3">RNNoise only touches the recognition input after VAD decides a speech segment exists. Raw capture remains the default path.</p>
+        </article>
+      </section>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="tools">
+      <section class="panel remote-tools-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Remote LAN</p>
+            <h2>Remote Pairing and Bridge</h2>
+          </div>
+        </div>
+        <p class="muted remote-tools-intro">Use one session and pair code for both controller and worker bridge windows in the same LAN.</p>
+        <div class="remote-tools-layout">
+          <article class="remote-tools-card">
+            <h3>Connection</h3>
+            <div class="remote-tools-fields">
+              <label class="stack-field">
+                <span>Worker Base URL</span>
+                <input id="remote-worker-url" type="text" placeholder="http://192.168.1.50:8765" />
+              </label>
+              <label class="stack-field">
+                <span>Session ID</span>
+                <input id="remote-session-id" type="text" placeholder="sst-..." />
+              </label>
+              <label class="stack-field">
+                <span>Pair Code</span>
+                <input id="remote-pair-code" type="text" placeholder="6 digits" />
+              </label>
+            </div>
+            <div class="remote-tools-action-grid remote-tools-action-grid-compact">
+              <button id="remote-create-pair-btn" class="secondary" type="button">Create Local Pair</button>
+              <button id="remote-refresh-state-btn" class="secondary" type="button">Refresh Remote State</button>
+            </div>
+          </article>
+
+          <article class="remote-tools-card">
+            <h3>Worker Runtime</h3>
+            <div class="remote-tools-action-grid">
+              <button id="remote-worker-sync-btn" class="secondary" type="button">Sync Worker Settings</button>
+              <button id="remote-worker-health-btn" class="secondary" type="button">Check Worker Health</button>
+              <button id="remote-worker-status-btn" class="secondary" type="button">Check Worker Runtime</button>
+              <button id="remote-prepare-run-btn" class="secondary" type="button">Prepare Remote Run</button>
+              <button id="remote-worker-start-btn" class="secondary" type="button">Start Worker Runtime</button>
+              <button id="remote-worker-stop-btn" class="secondary" type="button">Stop Worker Runtime</button>
+            </div>
+          </article>
+
+          <article class="remote-tools-card">
+            <h3>Bridge Windows</h3>
+            <div class="remote-tools-action-grid remote-tools-action-grid-compact">
+              <button id="remote-open-worker-bridge-btn" class="secondary" type="button">Open Local Worker Bridge</button>
+              <button id="remote-open-controller-bridge-btn" class="secondary" type="button">Open Controller Bridge</button>
+            </div>
+          </article>
+        </div>
+        <div class="remote-tools-status">
+          <p id="remote-state-text" class="muted remote-tools-status-line">Remote state: not loaded.</p>
+          <p id="remote-worker-text" class="muted remote-tools-status-line">Worker runtime: not loaded.</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow" data-i18n="tools.runtime.eyebrow">Deep Runtime Detail</p>
+            <h2 data-i18n="tools.runtime.title">Runtime Diagnostics</h2>
+          </div>
+        </div>
+        <p id="latency-metrics-text" class="muted" data-i18n="tools.runtime.loading.latency">Latency metrics loading...</p>
+        <p id="asr-diagnostics-text" class="muted" data-i18n="tools.runtime.loading.asr">ASR diagnostics loading...</p>
+        <p id="translation-diagnostics-text" class="muted" data-i18n="tools.runtime.loading.translation">Translation diagnostics loading...</p>
+        <p id="obs-cc-diagnostics-text" class="muted" data-i18n="tools.runtime.loading.obs">OBS Closed Captions diagnostics loading...</p>
+      </section>
+
+      <details class="panel advanced-panel">
+        <summary data-i18n="tools.advanced.summary">Advanced Recognition &amp; Diagnostics</summary>
+        <div class="grid details-grid">
+          <article>
+            <h2 data-i18n="tools.advanced.title">Advanced Realtime Tuning</h2>
+          <div class="actions">
+            <label class="inline-field annotated-field">
+              <div class="inline-field-head">
+                <span data-i18n="tools.advanced.vad_mode">VAD mode</span>
+                <strong class="inline-field-note" data-i18n="tools.advanced.vad_mode.note">def:3 safer:2</strong>
+              </div>
+              <select id="rt-vad-mode">
+                <option value="0" data-i18n="tools.advanced.vad_mode.0">0 - Fastest, most sensitive to speech and noise</option>
+                <option value="1" data-i18n="tools.advanced.vad_mode.1">1 - Responsive balanced mode</option>
+                <option value="2" data-i18n="tools.advanced.vad_mode.2">2 - Stricter, calmer mode</option>
+                <option value="3" data-i18n="tools.advanced.vad_mode.3">3 - Strictest, least likely to trigger on noise</option>
+              </select>
+            </label>
+            <label class="inline-field annotated-field">
+              <div class="inline-field-head">
+                <span data-i18n="tools.advanced.partial_emit">Partial emit</span>
+                <strong class="inline-field-note" data-i18n="tools.advanced.partial_emit.note">def:450 safer:380-450</strong>
+              </div>
+              <input id="rt-partial-emit-interval" type="number" min="60" step="10" />
+            </label>
+            <label class="inline-field annotated-field">
+              <div class="inline-field-head">
+                <span data-i18n="tools.advanced.min_speech">Min speech</span>
+                <strong class="inline-field-note" data-i18n="tools.advanced.min_speech.note">def:180 safer:180-220</strong>
+              </div>
+              <input id="rt-min-speech" type="number" min="0" step="10" />
+            </label>
+          </div>
+          <div class="actions">
+            <label class="inline-field annotated-field">
+              <div class="inline-field-head">
+                <span data-i18n="tools.advanced.silence_hold">Silence hold</span>
+                <strong class="inline-field-note" data-i18n="tools.advanced.silence_hold.note">def:180 safer:160-220</strong>
+              </div>
+              <input id="rt-silence-hold" type="number" min="60" step="10" />
+            </label>
+            <label class="inline-field annotated-field">
+              <div class="inline-field-head">
+                <span data-i18n="tools.advanced.pause_finalize">Pause to finalize</span>
+                <strong class="inline-field-note" data-i18n="tools.advanced.pause_finalize.note">def:350 safer:350-450</strong>
+              </div>
+              <input id="rt-finalization-hold" type="number" min="60" step="10" />
+            </label>
+          </div>
+          <div class="actions">
+            <label class="inline-field annotated-field">
+              <div class="inline-field-head">
+                <span data-i18n="tools.advanced.max_phrase">Hard max phrase</span>
+                <strong class="inline-field-note" data-i18n="tools.advanced.max_phrase.note">def:5500 safer:6000</strong>
+              </div>
+              <input id="rt-max-segment" type="number" min="500" step="50" />
+            </label>
+            <label class="inline-field annotated-field">
+              <div class="inline-field-head">
+                <span data-i18n="tools.advanced.min_delta">Minimum text change before updating (chars)</span>
+                <strong class="inline-field-note" data-i18n="tools.advanced.min_delta.note">def:4 safer:10</strong>
+              </div>
+              <input id="rt-partial-min-delta" type="number" min="0" step="1" />
+            </label>
+          </div>
+          <div class="actions">
+            <label class="inline-field annotated-field">
+              <div class="inline-field-head">
+                <span data-i18n="tools.advanced.coalescing">Partial coalescing</span>
+                <strong class="inline-field-note" data-i18n="tools.advanced.coalescing.note">def:160 safer:140-180</strong>
+              </div>
+              <input id="rt-partial-coalescing" type="number" min="0" step="10" />
+            </label>
+            <label class="inline-field annotated-field">
+              <div class="inline-field-head">
+                <span data-i18n="tools.advanced.chunk_window">Chunk window</span>
+                <strong class="inline-field-note" data-i18n="tools.advanced.chunk_window.note">def:0 safer:0</strong>
+              </div>
+              <input id="rt-chunk-window" type="number" min="0" step="50" />
+            </label>
+          </div>
+          <div class="actions">
+            <label class="inline-field annotated-field">
+              <div class="inline-field-head">
+                <span data-i18n="tools.advanced.chunk_overlap">Chunk overlap</span>
+                <strong class="inline-field-note" data-i18n="tools.advanced.chunk_overlap.note">def:0 safer:0</strong>
+              </div>
+              <input id="rt-chunk-overlap" type="number" min="0" step="50" />
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label class="checkbox-row">
+              <input id="rt-energy-gate-enabled" type="checkbox" />
+              <span data-i18n="tools.advanced.ignore_quiet">Ignore very quiet input before ASR</span>
+            </label>
+          </div>
+          <div class="actions">
+            <label class="inline-field annotated-field">
+              <div class="inline-field-head">
+                <span data-i18n="tools.advanced.min_rms">Min RMS</span>
+                <strong class="inline-field-note" data-i18n="tools.advanced.min_rms.note">def:0.0018 safer:off</strong>
+              </div>
+              <input id="rt-min-rms" type="number" min="0" max="0.05" step="0.0001" />
+            </label>
+            <label class="inline-field annotated-field">
+              <div class="inline-field-head">
+                <span data-i18n="tools.advanced.min_voiced_ratio">Min voiced ratio</span>
+                <strong class="inline-field-note" data-i18n="tools.advanced.min_voiced_ratio.note">def:0.0 safer:0.25</strong>
+              </div>
+              <input id="rt-min-voiced-ratio" type="number" min="0" max="1" step="0.01" />
+            </label>
+          </div>
+          <div class="actions">
+            <label class="inline-field annotated-field">
+              <div class="inline-field-head">
+                <span data-i18n="tools.advanced.first_partial">First partial speech</span>
+                <strong class="inline-field-note" data-i18n="tools.advanced.first_partial.note">def:180 safer:180-250</strong>
+              </div>
+              <input id="rt-first-partial-min-speech" type="number" min="0" step="10" />
+            </label>
+          </div>
+          </article>
+          <article>
+            <h2 data-i18n="tools.notes.title">Recognition Notes</h2>
+            <p class="muted" data-i18n="tools.notes.1">Lower partial emit and silence hold values feel faster, but can increase flicker.</p>
+            <p class="muted" data-i18n="tools.notes.2">`Pause to finalize` controls when a spoken phrase becomes one completed subtitle block.</p>
+            <p class="muted" data-i18n="tools.notes.3">`Chunk window` and `chunk overlap` remain advanced compatibility controls. Leave them at `0` unless you are testing a specific backend tuning case.</p>
+            <p class="muted" data-i18n="tools.notes.4">`Min RMS` and `Min voiced ratio` are optional filters for quiet room noise and weak false starts. If recognition quality drops, turn the quiet-input gate back off.</p>
+            <p class="muted" data-i18n="tools.notes.vad">VAD modes: 0 = fastest and most sensitive, 1 = responsive balanced, 2 = stricter and calmer, 3 = strictest and least likely to trigger on noise.</p>
+          </article>
+        </div>
+      </details>
+
+      <section class="panel grid">
+        <article>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow" data-i18n="tools.events.eyebrow">Runtime Feed</p>
+              <h2 data-i18n="tools.events.title">Live Events</h2>
+            </div>
+          </div>
+          <textarea id="log-box" readonly spellcheck="false"></textarea>
+        </article>
+        <article>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow" data-i18n="tools.config.eyebrow">Current Session</p>
+              <h2 data-i18n="tools.config.title">Local Config</h2>
+            </div>
+          </div>
+          <div class="actions">
+            <button id="config-save-btn" data-i18n="tools.config.save">Save Current Config</button>
+            <button id="config-export-btn" class="secondary" data-i18n="tools.config.export">Export Config</button>
+          </div>
+          <div class="actions">
+            <input id="config-import-input" type="file" accept="application/json,.json" />
+            <button id="config-import-btn" class="secondary" data-i18n="tools.config.import">Import Config</button>
+          </div>
+          <textarea id="config-json" class="mono code-box" spellcheck="false"></textarea>
+        </article>
+        <article>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow" data-i18n="tools.profiles.eyebrow">Saved Sets</p>
+              <h2 data-i18n="tools.profiles.title">Profiles</h2>
+            </div>
+          </div>
+          <div class="actions">
+            <select id="profiles-select"></select>
+            <button id="profile-load-btn" class="secondary" data-i18n="tools.profiles.load">Load Profile</button>
+          </div>
+          <div class="actions">
+            <input id="profile-name-input" type="text" placeholder="profile name" data-i18n-placeholder="tools.profiles.placeholder" />
+            <button id="profile-save-btn" data-i18n="tools.profiles.save">Save Profile</button>
+            <button id="profile-delete-btn" class="secondary" data-i18n="tools.profiles.delete">Delete Profile</button>
+          </div>
+        </article>
+      </section>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <span>Powered by Kiriuru</span>
+    </footer>
+    <div class="project-version-tag" title="Project version">v2.8.0</div>
+
+    <script src="/static/js/state.js?v=20260422a"></script>
+    <script src="/static/js/api.js?v=20260422c"></script>
+    <script src="/static/js/desktop.js?v=20260422a"></script>
+    <script src="/static/js/ws.js?v=20260422a"></script>
+    <script src="/static/js/remote.js?v=20260422e"></script>
+    <script src="/static/js/subtitle-style.js?v=20260422a"></script>
+    <script src="/static/js/i18n.js?v=20260422b"></script>
+    <script src="/static/js/app.js?v=20260423a"></script>
+  </body>
+</html>

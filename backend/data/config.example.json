@@ -1,0 +1,220 @@
+{
+  "profile": "default",
+  "source_lang": "auto",
+  "targets": [
+    "en"
+  ],
+  "asr": {
+    "mode": "local",
+    "provider_preference": "official_eu_parakeet_realtime",
+    "prefer_gpu": true,
+    "rnnoise_enabled": false,
+    "rnnoise_strength": 70,
+    "browser": {
+      "recognition_language": "ru-RU",
+      "interim_results": true,
+      "continuous_results": false,
+      "force_finalization_enabled": true,
+      "force_finalization_timeout_ms": 1600
+    },
+    "realtime": {
+      "vad_mode": 3,
+      "energy_gate_enabled": false,
+      "min_rms_for_recognition": 0.0018,
+      "min_voiced_ratio": 0.0,
+      "first_partial_min_speech_ms": 180,
+      "partial_emit_interval_ms": 450,
+      "min_speech_ms": 180,
+      "max_segment_ms": 5500,
+      "silence_hold_ms": 180,
+      "finalization_hold_ms": 350,
+      "chunk_window_ms": 0,
+      "chunk_overlap_ms": 0,
+      "partial_min_delta_chars": 4,
+      "partial_coalescing_ms": 160
+    }
+  },
+  "overlay": {
+    "preset": "single",
+    "compact": false
+  },
+  "obs_closed_captions": {
+    "enabled": false,
+    "output_mode": "disabled",
+    "connection": {
+      "host": "127.0.0.1",
+      "port": 4455,
+      "password": ""
+    },
+    "debug_mirror": {
+      "enabled": false,
+      "input_name": "CC_DEBUG",
+      "send_partials": true
+    },
+    "timing": {
+      "send_partials": true,
+      "partial_throttle_ms": 250,
+      "min_partial_delta_chars": 3,
+      "final_replace_delay_ms": 0,
+      "clear_after_ms": 2500,
+      "avoid_duplicate_text": true
+    }
+  },
+  "audio": {
+    "input_device_id": null
+  },
+  "remote": {
+    "enabled": false,
+    "role": "disabled",
+    "session_id": "",
+    "pair_code": "",
+    "lan": {
+      "bind_enabled": false,
+      "bind_host": "0.0.0.0",
+      "port": 8876
+    },
+    "controller": {
+      "worker_url": "",
+      "connect_timeout_ms": 8000,
+      "reconnect_delay_ms": 2000
+    },
+    "worker": {
+      "allow_unpaired": false,
+      "heartbeat_timeout_ms": 15000
+    }
+  },
+  "updates": {
+    "enabled": false,
+    "provider": "github_releases",
+    "github_repo": "",
+    "release_channel": "stable",
+    "check_interval_hours": 12,
+    "last_checked_utc": "",
+    "latest_known_version": ""
+  },
+  "translation": {
+    "enabled": false,
+    "provider": "google_translate_v2",
+    "target_languages": [
+      "en"
+    ],
+    "provider_settings": {
+      "google_translate_v2": {
+        "api_key": ""
+      },
+      "google_gas_url": {
+        "gas_url": ""
+      },
+      "google_web": {},
+      "azure_translator": {
+        "api_key": "",
+        "endpoint": "https://api.cognitive.microsofttranslator.com",
+        "region": ""
+      },
+      "deepl": {
+        "api_key": "",
+        "api_url": "https://api-free.deepl.com/v2/translate"
+      },
+      "libretranslate": {
+        "api_key": "",
+        "api_url": "https://libretranslate.com/translate"
+      },
+      "openai": {
+        "api_key": "",
+        "base_url": "https://api.openai.com/v1",
+        "model": "",
+        "custom_prompt": ""
+      },
+      "openrouter": {
+        "api_key": "",
+        "base_url": "https://openrouter.ai/api/v1",
+        "model": "",
+        "custom_prompt": ""
+      },
+      "lm_studio": {
+        "api_key": "",
+        "base_url": "http://127.0.0.1:1234/v1",
+        "model": "",
+        "custom_prompt": ""
+      },
+      "ollama": {
+        "api_key": "",
+        "base_url": "http://127.0.0.1:11434/v1",
+        "model": "",
+        "custom_prompt": ""
+      },
+      "mymemory": {},
+      "public_libretranslate_mirror": {
+        "api_url": "https://translate.fedilab.app/translate"
+      },
+      "free_web_translate": {}
+    }
+  },
+  "subtitle_output": {
+    "show_source": true,
+    "show_translations": true,
+    "max_translation_languages": 2,
+    "display_order": [
+      "source",
+      "en"
+    ]
+  },
+  "subtitle_style": {
+    "preset": "clean_default",
+    "label": "Clean Default",
+    "description": "Balanced white subtitles with readable outline and no extra effects.",
+    "built_in": true,
+    "base": {
+      "font_family": "\"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif",
+      "font_size_px": 30,
+      "font_weight": 700,
+      "fill_color": "#ffffff",
+      "stroke_color": "#000000",
+      "stroke_width_px": 2,
+      "shadow_color": "#000000",
+      "shadow_blur_px": 10,
+      "shadow_offset_x_px": 0,
+      "shadow_offset_y_px": 3,
+      "background_color": "#000000",
+      "background_opacity": 0,
+      "background_padding_x_px": 12,
+      "background_padding_y_px": 4,
+      "background_radius_px": 10,
+      "line_spacing_em": 1.15,
+      "letter_spacing_em": 0.0,
+      "text_align": "center",
+      "line_gap_px": 8,
+      "effect": "none"
+    },
+    "line_slots": {
+      "source": {
+        "enabled": false
+      },
+      "translation_1": {
+        "enabled": false
+      },
+      "translation_2": {
+        "enabled": false
+      },
+      "translation_3": {
+        "enabled": false
+      },
+      "translation_4": {
+        "enabled": false
+      },
+      "translation_5": {
+        "enabled": false
+      }
+    },
+    "custom_presets": {}
+  },
+  "subtitle_lifecycle": {
+    "completed_block_ttl_ms": 4500,
+    "completed_source_ttl_ms": 4500,
+    "completed_translation_ttl_ms": 4500,
+    "pause_to_finalize_ms": 350,
+    "allow_early_replace_on_next_final": true,
+    "sync_source_and_translation_expiry": true,
+    "hard_max_phrase_ms": 5500
+  }
+}
