@@ -312,7 +312,7 @@
             <span data-i18n="worker.interim">Return interim results</span>
           </label>
           <label class="toggle">
-            <input id="continuous-results" type="checkbox" checked disabled />
+            <input id="continuous-results" type="checkbox" checked />
             <span data-i18n="worker.continuous">Return continuous results</span>
           </label>
           <label class="toggle">
@@ -461,12 +461,8 @@
           forceFinalizationTimeoutMs: 1600,
         });
 
-        function enforceContinuousResultsToggle() {
-          if (!continuousResultsToggle) {
-            return true;
-          }
-          continuousResultsToggle.checked = true;
-          return true;
+        function getContinuousResultsEnabled() {
+          return continuousResultsToggle ? continuousResultsToggle.checked : workerDefaults.continuousResults;
         }
 
         function formatNow() {
@@ -553,11 +549,10 @@
         }
 
         function readWorkerSettingsFromControls() {
-          enforceContinuousResultsToggle();
           return {
             recognition_language: String(state.configuredLanguage || workerDefaults.recognitionLanguage),
             interim_results: interimResultsToggle.checked,
-            continuous_results: true,
+            continuous_results: getContinuousResultsEnabled(),
             force_finalization_enabled: forceFinalizationToggle.checked,
             force_finalization_timeout_ms: state.forceFinalizationTimeoutMs,
           };
@@ -594,6 +589,7 @@
           const backend = backendBrowserConfig && typeof backendBrowserConfig === "object" ? backendBrowserConfig : {};
           const stored = storedWorkerSettings && typeof storedWorkerSettings === "object" ? storedWorkerSettings : {};
           const hasStoredInterim = Object.prototype.hasOwnProperty.call(stored, "interim_results");
+          const hasStoredContinuous = Object.prototype.hasOwnProperty.call(stored, "continuous_results");
           const hasStoredForceFinalization = Object.prototype.hasOwnProperty.call(stored, "force_finalization_enabled");
           const hasStoredForceTimeout = Object.prototype.hasOwnProperty.call(stored, "force_finalization_timeout_ms");
           return {
@@ -603,7 +599,9 @@
             interim_results: hasStoredInterim
               ? stored.interim_results !== false
               : backend.interim_results !== false,
-            continuous_results: true,
+            continuous_results: hasStoredContinuous
+              ? stored.continuous_results !== false
+              : backend.continuous_results !== false,
             force_finalization_enabled: hasStoredForceFinalization
               ? stored.force_finalization_enabled !== false
               : backend.force_finalization_enabled !== false,
@@ -625,17 +623,15 @@
           if (!state.recognition) {
             return;
           }
-          enforceContinuousResultsToggle();
           state.recognition.lang = state.configuredLanguage;
           state.recognition.interimResults = interimResultsToggle.checked;
-          state.recognition.continuous = true;
+          state.recognition.continuous = getContinuousResultsEnabled();
         }
 
         function maybeRestartRecognitionAfterSettingsChange() {
           if (!state.desiredRunning || !state.recognition) {
             return;
           }
-          enforceContinuousResultsToggle();
           appendLog("worker settings changed; restarting recognition to apply them immediately");
           state.restartAttemptsWithoutAudio = 0;
           state.restartRequestedAfterStop = true;
@@ -681,7 +677,7 @@
                 state.configuredLanguage.split("-", 1)[0] || "ru"
               ).toLowerCase();
               interimResultsToggle.checked = savedBrowser.interim_results !== false;
-              enforceContinuousResultsToggle();
+              continuousResultsToggle.checked = savedBrowser.continuous_results !== false;
               forceFinalizationToggle.checked = savedBrowser.force_finalization_enabled !== false;
               state.forceFinalizationTimeoutMs = Math.max(
                 300,
@@ -927,7 +923,7 @@
             );
             state.sourceLang = String(state.configuredLanguage.split("-", 1)[0] || "ru").toLowerCase();
             interimResultsToggle.checked = effectiveBrowserConfig.interim_results !== false;
-            enforceContinuousResultsToggle();
+            continuousResultsToggle.checked = effectiveBrowserConfig.continuous_results !== false;
             forceFinalizationToggle.checked = effectiveBrowserConfig.force_finalization_enabled !== false;
             state.forceFinalizationTimeoutMs = Math.max(
               300,
@@ -947,7 +943,7 @@
             state.configuredLanguage = effectiveBrowserConfig.recognition_language || workerDefaults.recognitionLanguage;
             state.sourceLang = String(state.configuredLanguage.split("-", 1)[0] || "ru").toLowerCase();
             interimResultsToggle.checked = effectiveBrowserConfig.interim_results !== false;
-            enforceContinuousResultsToggle();
+            continuousResultsToggle.checked = effectiveBrowserConfig.continuous_results !== false;
             forceFinalizationToggle.checked = effectiveBrowserConfig.force_finalization_enabled !== false;
             state.forceFinalizationTimeoutMs = effectiveBrowserConfig.force_finalization_timeout_ms;
             updateCounters();
@@ -1106,7 +1102,6 @@
           }
           try {
             const recognition = ensureRecognition();
-            enforceContinuousResultsToggle();
             applyRecognitionSettingsToRuntime();
             state.lastRecognitionStartAt = Date.now();
             state.recognitionState = "starting";
@@ -1200,7 +1195,6 @@
 
         if (continuousResultsToggle) {
           continuousResultsToggle.addEventListener("change", () => {
-            enforceContinuousResultsToggle();
             applyRecognitionSettingsToRuntime();
             queueBrowserSettingsSave("continuous_results");
             maybeRestartRecognitionAfterSettingsChange();

@@ -1,6 +1,6 @@
-# SST Desktop 2.8.0 - Полная техническая документация
+# SST Desktop 2.8.3 - Полная техническая документация
 
-Актуально для кода в ветке/снимке, где `backend/versioning.py` содержит `PROJECT_VERSION = "2.8.0"`.
+Актуально для кода в ветке/снимке, где `backend/versioning.py` содержит `PROJECT_VERSION = "2.8.3"`.
 
 ## 1. Назначение и границы системы
 
@@ -83,6 +83,10 @@ flowchart LR
 - `overlay/overlay.html|css|js` — OBS browser source overlay (автореконнект, рендер payload).
 - `desktop/launcher.py` — splash launcher и desktop orchestration.
 - `desktop/runtime_bootstrap.py` — desktop bootstrap Python/venv/requirements.
+
+Текущие уточнения по поведению:
+- browser worker сохраняет и применяет `continuous_results` из настроек, без runtime-принуждения внутри страницы;
+- overlay broadcast подавляет быстрые дубли идентичных payload, чтобы перевод не переотправлялся пачкой при TTL/republish гонках.
 
 ## 5. Режимы работы и роли
 
@@ -487,4 +491,3 @@ Runtime metrics (`RuntimeMetrics`) включают:
    - controller/worker bridge соединяются;
    - worker получает non-zero inbound audio + PCM tx;
    - controller получает transcript/translation events.
-

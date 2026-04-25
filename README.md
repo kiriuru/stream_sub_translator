@@ -1,4 +1,4 @@
-# SST Desktop 2.8.2
+# SST Desktop 2.8.3
 
 SST Desktop is a local Windows application for real-time speech recognition, optional translation, subtitle routing, and OBS-ready output.
 
@@ -143,6 +143,7 @@ The main window includes:
 - Uses a separate Chrome/Chromium/Edge worker window (`/google-asr`) with the normal address bar available for microphone permission and device selection.
 - Requires browser microphone permission.
 - For stable operation, keep the worker window visible while active.
+- Browser worker settings now honor the saved `continuous_results` flag instead of forcing it on inside the page runtime.
 
 ## Overlay and OBS URLs
 - Dashboard: `http://127.0.0.1:8765/`
@@ -252,13 +253,18 @@ To update SST Desktop:
 - OBS output missing:
   - verify OBS websocket settings and selected output mode.
 
+## 2.8.3 Notes
+- Integrated the fixed browser worker behavior from the working desktop runtime snapshot.
+- Browser worker no longer force-overrides `continuous_results` after loading settings.
+- Overlay duplicate payload bursts are suppressed so translated lines are not re-sent multiple times in rapid succession.
+
 ## Privacy and Runtime Scope
 - SST Desktop is local-first.
 - Dashboard, API, websocket events, overlay, logs, profiles, cache, and exports run on the same machine.
 - Default bind target is localhost (`127.0.0.1`).
 
 ## Release Version
-- `2.8.2`
+- `2.8.3`
 - Single runtime source of truth: `backend/versioning.py` (`PROJECT_VERSION`).
 - Future GitHub release sync scaffold:
   - config section: `updates` in `backend/data/config.example.json` and local `config.json`;
