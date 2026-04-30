@@ -1,4 +1,4 @@
-# SST Desktop 0.2.9.0
+# SST Desktop 0.2.9.1
 
 SST Desktop is a local Windows application for real-time speech recognition, optional translation, subtitle routing, and OBS-ready output.
 
@@ -9,6 +9,8 @@ This release README is focused on the desktop product only.
 
 ## Technical Documentation
 - Full technical architecture document: [docs/TECHNICAL_ARCHITECTURE.md](./docs/TECHNICAL_ARCHITECTURE.md)
+- Full changelog for `0.2.9.0`: [docs/DESKTOP_RELEASE_CHANGELOG_0.2.9.0.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.2.9.0.md)
+- Delta changelog for `0.2.9.1`: [docs/DESKTOP_RELEASE_CHANGELOG_0.2.9.1.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.2.9.1.md)
 
 ## Release Package
 The primary desktop release now ships as:
@@ -18,15 +20,14 @@ On first launch the bootstrap launcher extracts the managed runtime next to itse
 
 ## Quick Start
 1. Extract the archive to a writable folder.
-2. Confirm both items are present:
-   - `Stream Subtitle Translator.exe`
-   - `app-runtime/`
+2. Confirm `Stream Subtitle Translator.exe` is present.
 3. Launch `Stream Subtitle Translator.exe`.
-4. In the splash launcher choose one startup profile:
+4. Wait for the bootstrap launcher to extract the managed runtime on first start.
+5. In the splash launcher choose one startup profile:
    - `Quick Start (Browser Speech)`
    - `Local AI (NVIDIA GPU)`
    - `Local AI (CPU)`
-5. Wait for the local dashboard to open.
+6. Wait for the local dashboard to open.
 
 ## Bootstrap Launcher
 The bootstrap launcher is now the primary desktop release flow.
@@ -183,7 +184,12 @@ The main window includes:
 - CPU fallback is available when needed.
 
 ### Browser Speech
-- Uses a separate Chrome/Chromium/Edge worker window (`/google-asr`) with the normal address bar available for microphone permission and device selection.
+- Uses a separate dedicated Chrome/Chromium/Edge worker window (`/google-asr`).
+- Desktop behavior is fixed:
+  - SST always opens Browser Speech as a separate browser window with an address bar.
+  - The launcher uses an isolated browser profile for this worker window.
+  - There is no browser-window mode toggle in the desktop UI. Address-bar mode is the only supported desktop behavior.
+  - This behavior is intentional and must not be replaced with `--app`, popup-launcher pages, hidden bootstrap windows, or in-tab navigation.
 - Requires browser microphone permission.
 - For stable operation, keep the worker window visible while active.
 - Normal Web Speech `onend` now re-arms quickly when listening is still desired, while repeated `start()` failures use backoff instead of adding long pauses to ordinary restarts.
@@ -292,10 +298,11 @@ To update SST Desktop:
 - Run the current regression tests with:
   - `.venv\Scripts\python.exe -m unittest discover -s tests`
 
-## 0.2.9.0 Notes
-- Removed the broken `MyMemory` translation provider from the supported provider list.
-- Added `Google Cloud Translation - Advanced (v3)` as a separate provider from `Google Translate v2`.
-- Versioning now uses the four-part release number `0.2.9.0` consistently across the runtime, API, and docs.
+## 0.2.9.1 Notes
+- Desktop Browser Speech is now hard-fixed again to the old dedicated window behavior: a separate Chrome/Chromium/Edge window with a visible address bar and isolated worker profile.
+- The browser worker window-mode selector was removed from the desktop UI. Address-bar mode is the only supported desktop behavior.
+- Clean portable AI bootstrap now seeds offline `lightning 2.4.0` before NeMo ASR dependency installation, which avoids the recent fresh-install failure on missing `lightning`.
+- Versioning now uses the four-part release number `0.2.9.1` consistently across the runtime, API, and docs.
 
 ## Privacy and Runtime Scope
 - SST Desktop is local-first.
@@ -303,7 +310,7 @@ To update SST Desktop:
 - Default bind target is localhost (`127.0.0.1`).
 
 ## Release Version
-- `0.2.9.0`
+- `0.2.9.1`
 - Single runtime source of truth: `backend/versioning.py` (`PROJECT_VERSION`).
 - Future GitHub release sync scaffold:
   - config section: `updates` in `backend/data/config.example.json` and local `config.json`;

@@ -88,6 +88,5 @@ class ConfigTranslationProviderTests(unittest.TestCase):
 
         self.assertEqual(normalized["translation"]["provider"], "google_translate_v2")
 
-
 if __name__ == "__main__":
     unittest.main()

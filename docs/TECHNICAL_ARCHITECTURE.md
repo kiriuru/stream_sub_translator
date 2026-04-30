@@ -1,6 +1,6 @@
-# SST Desktop 0.2.9.0 - Полная техническая документация
+# SST Desktop 0.2.9.1 - Полная техническая документация
 
-Актуально для кода в ветке/снимке, где `backend/versioning.py` содержит `PROJECT_VERSION = "0.2.9.0"`.
+Актуально для кода в ветке/снимке, где `backend/versioning.py` содержит `PROJECT_VERSION = "0.2.9.1"`.
 
 ## 1. Назначение и границы системы
 
@@ -82,6 +82,12 @@ flowchart LR
 - `frontend/js/browser-asr-session-manager.js` — lifecycle browser recognition, websocket reconnect, watchdog, force-finalization, recovery logic.
 - `frontend/remote_controller_bridge.html` + `remote-controller-bridge.js` — controller bridge.
 - `frontend/remote_worker_bridge.html` + `remote-worker-bridge.js` — worker bridge.
+
+Desktop Browser Speech launch invariant:
+- desktop launcher must open `/google-asr` as a separate Chrome/Chromium/Edge window with a visible address bar;
+- launcher must use an isolated browser profile directory for that worker window;
+- there is no user-facing desktop toggle for browser window chrome here; address-bar mode is fixed;
+- do not replace this with `--app`, popup-launcher pages, hidden bootstrap windows, or in-tab navigation.
 - `frontend/js/remote-worker-audio-worklet.js` — AudioWorklet обработка входящего WebRTC-аудио.
 - `overlay/overlay.html|css|js` — OBS browser source overlay (автореконнект, рендер payload).
 - `desktop/launcher.py` — splash launcher и desktop orchestration.

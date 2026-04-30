@@ -886,12 +886,23 @@ class DesktopLauncher:
                 f"See launcher log:\n{self._log_path}",
             )
             return False
+        isolated_profile_dir = self._paths.runtime_root / "browser-worker-profile"
+        try:
+            isolated_profile_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self._set_browser_worker_error(
+                f"Failed to prepare browser worker profile directory '{isolated_profile_dir}': {type(exc).__name__}: {exc}"
+            )
+            return False
         args = [
             str(browser_path),
-            f"--app={normalized_url}",
             "--new-window",
+            "--no-first-run",
+            "--disable-default-apps",
+            f"--user-data-dir={isolated_profile_dir}",
             "--disable-session-crashed-bubble",
             "--window-size=980,860",
+            normalized_url,
         ]
         self._write_log(f"[browser-worker] launch args: {args}")
         try:
@@ -900,7 +911,9 @@ class DesktopLauncher:
                 cwd=str(browser_path.parent),
                 creationflags=getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             )
-            self._write_log(f"[browser-worker] launched app window via {browser_path}")
+            self._write_log(
+                f"[browser-worker] launched isolated worker window with address bar via {browser_path}; profile={isolated_profile_dir}"
+            )
             return True
         except Exception as exc:
             self._set_browser_worker_error(
@@ -908,7 +921,7 @@ class DesktopLauncher:
             )
             _show_error_dialog(
                 f"{APP_NAME} Browser Speech Error",
-                "Browser Speech could not open a dedicated Chrome/Chromium window.\n\n"
+                "Browser Speech could not open the dedicated Chrome/Chromium worker window.\n\n"
                 f"Reason: {type(exc).__name__}: {exc}\n\n"
                 f"See launcher log:\n{self._log_path}",
             )

@@ -125,6 +125,27 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(payload["remote"]["role"], "worker")
         self.assertTrue(payload["remote"]["lan"]["bind_enabled"])
 
+    def test_browser_worker_window_keeps_address_bar(self) -> None:
+        launcher = self._launcher()
+        browser_path = self.root / "chrome.exe"
+        browser_path.write_text("", encoding="utf-8")
+
+        with (
+            mock.patch.object(launcher, "_find_chromium_browser", return_value=browser_path),
+            mock.patch("desktop.launcher.subprocess.Popen") as popen_mock,
+        ):
+            launched = launcher._open_browser_worker_window("http://127.0.0.1:8765/google-asr")
+
+        self.assertTrue(launched)
+        args = popen_mock.call_args.args[0]
+        self.assertIn("--new-window", args)
+        self.assertIn("--no-first-run", args)
+        self.assertIn("--disable-default-apps", args)
+        self.assertIn("--window-size=980,860", args)
+        self.assertIn("http://127.0.0.1:8765/google-asr", args)
+        self.assertTrue(any(str(item).startswith("--user-data-dir=") for item in args))
+        self.assertNotIn("--app=http://127.0.0.1:8765/google-asr", args)
+
 
 if __name__ == "__main__":
     unittest.main()
