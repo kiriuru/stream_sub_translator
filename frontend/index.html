@@ -174,42 +174,42 @@
           </div>
           <div class="actions" id="translation-api-key-row">
             <label class="stack-field grow">
-              <span data-i18n="translation.api_key">API key</span>
+              <span id="translation-api-key-label" data-i18n="translation.api_key">API key</span>
               <input id="translation-api-key" type="password" placeholder="API key" data-i18n-placeholder="translation.api_key" />
             </label>
             <button id="translation-api-key-toggle" class="secondary secret-toggle" type="button" data-i18n="security.show">Show</button>
           </div>
           <div class="actions" id="translation-base-url-row">
             <label class="stack-field grow">
-              <span data-i18n="translation.base_url">Base URL</span>
+              <span id="translation-base-url-label" data-i18n="translation.base_url">Base URL</span>
               <input id="translation-base-url" type="text" placeholder="Base URL" data-i18n-placeholder="translation.base_url" />
             </label>
           </div>
           <div class="actions" id="translation-gas-url-row">
             <label class="stack-field grow">
-              <span data-i18n="translation.gas_url">Google Apps Script URL</span>
+              <span id="translation-gas-url-label" data-i18n="translation.gas_url">Google Apps Script URL</span>
               <input id="translation-gas-url" type="text" placeholder="Google Apps Script web app URL" data-i18n-placeholder="translation.gas_url" />
             </label>
           </div>
           <div class="actions" id="translation-endpoint-row">
             <label class="stack-field grow">
-              <span data-i18n="translation.endpoint">Endpoint</span>
+              <span id="translation-endpoint-label" data-i18n="translation.endpoint">Endpoint</span>
               <input id="translation-endpoint" type="text" placeholder="Endpoint" data-i18n-placeholder="translation.endpoint" />
             </label>
             <label class="stack-field grow" id="translation-region-row">
-              <span data-i18n="translation.region">Region</span>
+              <span id="translation-region-label" data-i18n="translation.region">Region</span>
               <input id="translation-region" type="text" placeholder="Region" data-i18n-placeholder="translation.region" />
             </label>
           </div>
           <div class="actions" id="translation-api-url-row">
             <label class="stack-field grow">
-              <span data-i18n="translation.provider_url">Provider URL</span>
+              <span id="translation-api-url-label" data-i18n="translation.provider_url">Provider URL</span>
               <input id="translation-api-url" type="text" placeholder="Provider URL" data-i18n-placeholder="translation.provider_url" />
             </label>
           </div>
           <div class="actions" id="translation-model-row">
             <label class="stack-field grow">
-              <span data-i18n="translation.model">Model</span>
+              <span id="translation-model-label" data-i18n="translation.model">Model</span>
               <input id="translation-model" type="text" placeholder="Model" data-i18n-placeholder="translation.model" />
             </label>
           </div>
@@ -872,7 +872,10 @@
         <p id="latency-metrics-text" class="muted" data-i18n="tools.runtime.loading.latency">Latency metrics loading...</p>
         <p id="asr-diagnostics-text" class="muted" data-i18n="tools.runtime.loading.asr">ASR diagnostics loading...</p>
         <p id="translation-diagnostics-text" class="muted" data-i18n="tools.runtime.loading.translation">Translation diagnostics loading...</p>
+        <p id="translation-runtime-text" class="muted">Translation queue idle.</p>
+        <p id="browser-worker-diagnostics-text" class="muted">Browser worker not connected.</p>
         <p id="obs-cc-diagnostics-text" class="muted" data-i18n="tools.runtime.loading.obs">OBS Closed Captions diagnostics loading...</p>
+        <p id="logs-discoverability-text" class="muted">Logs are stored in logs/: translation-dispatcher.log, browser-recognition.log, overlay-events.log, dashboard-live-events.log.</p>
       </section>
 
       <details class="panel advanced-panel">
@@ -1060,7 +1063,7 @@
     <footer class="app-footer">
       <span>Powered by Kiriuru</span>
     </footer>
-    <div class="project-version-tag" title="Project version">v2.8.0</div>
+    <div class="project-version-tag" title="Project version">v0.2.9.0</div>
 
     <script src="/static/js/state.js?v=20260422a"></script>
     <script src="/static/js/api.js?v=20260422c"></script>

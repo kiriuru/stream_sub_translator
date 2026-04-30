@@ -95,6 +95,7 @@ class ObsCaptionOutput:
         self._last_debug_input_name: str | None = None
         self._last_partial_text: str = ""
         self._last_partial_sent_monotonic: float = 0.0
+        self._last_payload_signature: tuple[int, str, str] | None = None
         self._reconnect_attempt_count: int = 0
         self._last_send_used_active_connection: bool = False
         self._last_send_waited_for_connection: bool = False
@@ -218,6 +219,7 @@ class ObsCaptionOutput:
         self._set_connection_state("disconnected")
         self._last_partial_text = ""
         self._last_partial_sent_monotonic = 0.0
+        self._last_payload_signature = None
         self._stream_output_active = None
         self._stream_output_reconnecting = None
         self._native_caption_status = None
@@ -393,6 +395,7 @@ class ObsCaptionOutput:
             return
         self._last_partial_text = ""
         self._last_partial_sent_monotonic = 0.0
+        self._last_payload_signature = None
         await self._schedule_final_send(
             normalized,
             send_stream_caption=send_stream_caption,
@@ -415,6 +418,10 @@ class ObsCaptionOutput:
         normalized = self._normalize_text(selected_text)
         if not normalized:
             return
+        payload_signature = (int(payload.sequence), mode, normalized)
+        if bool(settings["timing"]["avoid_duplicate_text"]) and payload_signature == self._last_payload_signature:
+            return
+        self._last_payload_signature = payload_signature
         await self._schedule_final_send(
             normalized,
             send_stream_caption=send_stream_caption,
@@ -845,6 +852,7 @@ class ObsCaptionOutput:
         websocket = self._websocket
         self._websocket = None
         self._connected = False
+        self._last_payload_signature = None
         if self._connected_event is not None:
             self._connected_event.clear()
         self._stream_output_active = None

@@ -102,6 +102,12 @@
       "google_translate_v2": {
         "api_key": ""
       },
+      "google_cloud_translation_v3": {
+        "project_id": "",
+        "access_token": "",
+        "location": "global",
+        "model": ""
+      },
       "google_gas_url": {
         "gas_url": ""
       },
@@ -143,7 +149,6 @@
         "model": "",
         "custom_prompt": ""
       },
-      "mymemory": {},
       "public_libretranslate_mirror": {
         "api_url": "https://translate.fedilab.app/translate"
       },

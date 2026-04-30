@@ -396,6 +396,7 @@
     </footer>
 
     <script src="/static/js/i18n.js?v=20260423c"></script>
+    <script src="/static/js/browser-asr-session-manager.js?v=20260430a"></script>
     <script>
       (() => {
         const t = (key, variables) => (window.I18n?.t ? window.I18n.t(key, variables) : key);
@@ -449,6 +450,17 @@
           lastAudioActivityAt: 0,
           lastErrorCode: "",
           lastErrorMessage: "",
+          lastRecognitionEventAt: 0,
+          lastPartialAt: 0,
+          lastFinalAt: 0,
+          lastWatchdogRearmAt: 0,
+          rearmCount: 0,
+          restartCount: 0,
+          watchdogRearmCount: 0,
+          lastRearmDelayMs: 0,
+          consecutiveStartFailures: 0,
+          degradedReason: null,
+          visibilityState: document.hidden ? "hidden" : "visible",
           logLines: [],
           settingsSavePromise: Promise.resolve(),
         };
@@ -620,37 +632,11 @@
         }
 
         function applyRecognitionSettingsToRuntime() {
-          if (!state.recognition) {
-            return;
-          }
-          state.recognition.lang = state.configuredLanguage;
-          state.recognition.interimResults = interimResultsToggle.checked;
-          state.recognition.continuous = getContinuousResultsEnabled();
+          sessionManager.applyRecognitionSettings();
         }
 
         function maybeRestartRecognitionAfterSettingsChange() {
-          if (!state.desiredRunning || !state.recognition) {
-            return;
-          }
-          appendLog("worker settings changed; restarting recognition to apply them immediately");
-          state.restartAttemptsWithoutAudio = 0;
-          state.restartRequestedAfterStop = true;
-          clearForceFinalizeTimer();
-          clearRestartTimer();
-          setStatus("restarting");
-          if (state.recognitionState === "stopping") {
-            return;
-          }
-          state.recognitionState = "stopping";
-          try {
-            state.recognition.stop();
-          } catch (_error) {
-            state.recognitionState = "idle";
-            window.setTimeout(() => {
-              state.restartRequestedAfterStop = false;
-              tryStartRecognition();
-            }, 120);
-          }
+          sessionManager.maybeRestartAfterSettingsChange();
         }
 
         function queueBrowserSettingsSave(reason) {
@@ -884,31 +870,7 @@
         }
 
         function connectSocket() {
-          clearTimeout(state.reconnectTimer);
-          const protocol = location.protocol === "https:" ? "wss" : "ws";
-          const socket = new WebSocket(`${protocol}://${location.host}/ws/asr_worker`);
-          state.socket = socket;
-          socket.addEventListener("open", () => {
-            state.websocketReady = true;
-            updateCounters();
-            appendLog("websocket connected");
-            setStatus(state.desiredRunning ? "ready" : "idle");
-          });
-          socket.addEventListener("close", () => {
-            state.websocketReady = false;
-            updateCounters();
-            appendLog("websocket closed");
-            if (state.desiredRunning) {
-              setStatus("socket-reconnecting");
-              state.reconnectTimer = window.setTimeout(connectSocket, 1000);
-            }
-          });
-          socket.addEventListener("error", () => {
-            state.websocketReady = false;
-            updateCounters();
-            appendLog("websocket error");
-            setStatus("socket-error");
-          });
+          sessionManager.ensureSocketConnected();
         }
 
         async function loadSettings() {
@@ -1088,6 +1050,47 @@
           stream.getTracks().forEach((track) => track.stop());
         }
 
+        function clearPartialText() {
+          partialBox.value = "";
+        }
+
+        const sessionManager = new window.BrowserAsrSessionManager({
+          state,
+          SpeechRecognitionCtor,
+          locale,
+          appendLog,
+          setStatus,
+          updateCounters,
+          ensureMicrophonePermission,
+          getRecognitionSettings: () => ({
+            language: state.configuredLanguage,
+            interimResults: interimResultsToggle.checked,
+            continuous: getContinuousResultsEnabled(),
+          }),
+          clearForceFinalizeTimer,
+          scheduleForceFinalize,
+          clearPartialText,
+          applyInterimText: (interimText) => {
+            partialBox.value = interimText;
+            sendUpdate({
+              partial: interimText,
+              final: "",
+              is_final: false,
+              source_lang: state.sourceLang,
+            });
+          },
+          applyFinalText: (finalText) => {
+            finalBox.value = finalText;
+            partialBox.value = "";
+            sendUpdate({
+              partial: "",
+              final: finalText,
+              is_final: true,
+              source_lang: state.sourceLang,
+            });
+          },
+        });
+
         async function tryStartRecognition() {
           if (!state.desiredRunning) {
             return;
@@ -1126,49 +1129,11 @@
         }
 
         async function startRecognition() {
-          if (!SpeechRecognitionCtor) {
-            setStatus("unsupported-browser");
-            return;
-          }
-          state.desiredRunning = true;
-          state.restartRequestedAfterStop = false;
-          state.lastErrorCode = "";
-          state.lastErrorMessage = "";
-          state.restartAttemptsWithoutAudio = 0;
-          clearRestartTimer();
-          try {
-            await ensureMicrophonePermission();
-          } catch (error) {
-            const message = error instanceof Error ? error.message : (locale() === "ru" ? "Доступ к микрофону не был выдан." : "Microphone permission was denied.");
-            appendLog(`microphone permission failed: ${message}`);
-            setStatus(locale() === "ru" ? `ошибка микрофона: ${message}` : `mic-error: ${message}`);
-            state.desiredRunning = false;
-            return;
-          }
-          if (!state.socket || state.socket.readyState > WebSocket.OPEN) {
-            connectSocket();
-          }
-          await tryStartRecognition();
+          await sessionManager.start();
         }
 
         function stopRecognition() {
-          appendLog("stop requested by user");
-          state.desiredRunning = false;
-          state.restartRequestedAfterStop = false;
-          clearForceFinalizeTimer();
-          clearRestartTimer();
-          state.currentPartial = "";
-          state.hasOpenSentence = false;
-          if (state.recognition) {
-            state.recognitionState = "stopping";
-            try {
-              state.recognition.stop();
-            } catch (_error) {
-              state.recognitionState = "idle";
-              // no-op
-            }
-          }
-          setStatus("stopping");
+          sessionManager.stop();
         }
 
         startButton.addEventListener("click", async () => {
@@ -1222,14 +1187,17 @@
         document.addEventListener("visibilitychange", () => {
           appendLog(`document visibility changed: ${document.hidden ? "hidden" : "visible"}`);
           updateVisibilityWarning();
+          sessionManager.handleVisibilityChange();
         });
 
         window.addEventListener("blur", () => {
           appendLog("window blur");
+          sessionManager.handleVisibilityChange();
         });
 
         window.addEventListener("focus", () => {
           appendLog("window focus");
+          sessionManager.handleVisibilityChange();
         });
 
         if (window.I18n) {

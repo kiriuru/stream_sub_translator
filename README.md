@@ -1,4 +1,4 @@
-# SST Desktop 2.8.3
+# SST Desktop 0.2.9.0
 
 SST Desktop is a local Windows application for real-time speech recognition, optional translation, subtitle routing, and OBS-ready output.
 
@@ -82,8 +82,12 @@ The main window includes:
 - Enable/disable translation.
 - Select provider.
 - Configure provider credentials/endpoints/model/prompt where applicable.
+- `Google Cloud Translation - Advanced (v3)` is available as a separate provider and uses `project_id` plus OAuth access token instead of a v2 API key.
 - Manage target language list and order.
 - Review latest translated output.
+- Runtime translation now stays off the live subtitle path: source finals are published first, translation fan-out runs asynchronously per target language, and slow targets are bounded by timeout.
+- Late translation results are merged only while the related subtitle sequence is still lifecycle-relevant, which prevents stale jobs from catching up over newer overlay text.
+- Tools & Data now also exposes dispatcher runtime counters for queue depth, cancellations, stale drops, and the latest queue/provider latency without changing subtitle lifecycle behavior.
 
 ### Subtitles
 - Configure overlay layout preset:
@@ -143,12 +147,16 @@ The main window includes:
 - Uses a separate Chrome/Chromium/Edge worker window (`/google-asr`) with the normal address bar available for microphone permission and device selection.
 - Requires browser microphone permission.
 - For stable operation, keep the worker window visible while active.
+- Normal Web Speech `onend` now re-arms quickly when listening is still desired, while repeated `start()` failures use backoff instead of adding long pauses to ordinary restarts.
+- The browser worker now reports reconnect/degraded/watchdog status to backend diagnostics so the dashboard can distinguish worker disconnects, hidden-window throttling, and repeated rearm failures.
 - Browser worker settings now honor the saved `continuous_results` flag instead of forcing it on inside the page runtime.
+- Structured browser-recognition diagnostics are written on meaningful worker status transitions so pauses, watchdog rearms, visibility throttling, and terminal browser errors can be inspected after the fact.
 
 ## Overlay and OBS URLs
 - Dashboard: `http://127.0.0.1:8765/`
 - Overlay page: `http://127.0.0.1:8765/overlay`
 - Browser Speech worker page: `http://127.0.0.1:8765/google-asr`
+- Overlay clears stale text on websocket disconnect and replays the latest subtitle payload after reconnect while the local backend is still running.
 
 Overlay query examples:
 - `?profile=default`
@@ -220,9 +228,19 @@ Created next to the executable:
   - `cache/`
 - `logs/`
   - `desktop-launcher.log`
-  - `overlay-events.log`
+  - `translation-dispatcher.log`
   - `browser-recognition.log`
+  - `browser-recognition-live.log`
+  - `overlay-events.log`
   - `dashboard-live-events.log`
+
+When checking the new hot paths:
+- translation delays/timeouts/stale drops:
+  - inspect `logs/translation-dispatcher.log`
+- browser speech pauses/rearms/hidden-window degradation:
+  - inspect `logs/browser-recognition.log`
+- overlay/dashboard human-readable event trail:
+  - inspect `logs/overlay-events.log` and `logs/dashboard-live-events.log`
 
 Runtime cache/temp paths are managed automatically. First start may take longer due to initialization.
 
@@ -243,6 +261,8 @@ To update SST Desktop:
 ## Troubleshooting
 - App does not start:
   - verify `app-runtime/` is present next to `.exe`.
+- Second desktop window refuses to start:
+  - close the already running launcher instance first.
 - UI is unreachable:
   - ensure local port `8765` is not occupied by another process.
 - Browser Speech returns no text:
@@ -253,10 +273,14 @@ To update SST Desktop:
 - OBS output missing:
   - verify OBS websocket settings and selected output mode.
 
-## 2.8.3 Notes
-- Integrated the fixed browser worker behavior from the working desktop runtime snapshot.
-- Browser worker no longer force-overrides `continuous_results` after loading settings.
-- Overlay duplicate payload bursts are suppressed so translated lines are not re-sent multiple times in rapid succession.
+## Automated Tests
+- Run the current regression tests with:
+  - `.venv\Scripts\python.exe -m unittest discover -s tests`
+
+## 0.2.9.0 Notes
+- Removed the broken `MyMemory` translation provider from the supported provider list.
+- Added `Google Cloud Translation - Advanced (v3)` as a separate provider from `Google Translate v2`.
+- Versioning now uses the four-part release number `0.2.9.0` consistently across the runtime, API, and docs.
 
 ## Privacy and Runtime Scope
 - SST Desktop is local-first.
@@ -264,7 +288,7 @@ To update SST Desktop:
 - Default bind target is localhost (`127.0.0.1`).
 
 ## Release Version
-- `2.8.3`
+- `0.2.9.0`
 - Single runtime source of truth: `backend/versioning.py` (`PROJECT_VERSION`).
 - Future GitHub release sync scaffold:
   - config section: `updates` in `backend/data/config.example.json` and local `config.json`;

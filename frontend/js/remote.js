@@ -30,7 +30,13 @@
     pollTimer: null,
     pollInFlight: false,
     lastAppliedConfigKey: "",
+    remoteEnabled: false,
+    lastKnownSessionId: "",
   };
+
+  function shouldPollRemoteStatus() {
+    return state.remoteEnabled || Boolean(state.lastKnownSessionId) || hasRequiredRemotePairingFields();
+  }
 
   function appLog(message) {
     if (typeof window.__appLog === "function") {
@@ -116,6 +122,8 @@
       const active = Boolean(pairing.is_active);
       const controllerOnline = Boolean(pairing.controller_online);
       const workerOnline = Boolean(pairing.worker_online);
+      state.remoteEnabled = enabled;
+      state.lastKnownSessionId = enabled ? sessionId : "";
       if (sessionId && !sessionIdInput.value) {
         sessionIdInput.value = sessionId;
       }
@@ -423,7 +431,7 @@
   }
 
   async function pollRemoteStatus() {
-    if (document.hidden || state.pollInFlight) {
+    if (document.hidden || state.pollInFlight || !shouldPollRemoteStatus()) {
       return;
     }
     state.pollInFlight = true;
@@ -436,6 +444,10 @@
   }
 
   function startAutoPoll() {
+    if (!shouldPollRemoteStatus()) {
+      stopAutoPoll();
+      return;
+    }
     if (state.pollTimer !== null) {
       window.clearInterval(state.pollTimer);
     }
@@ -454,7 +466,14 @@
   }
 
   [workerUrlInput, sessionIdInput, pairCodeInput].forEach((element) => {
-    element.addEventListener("input", persistValues);
+    element.addEventListener("input", () => {
+      persistValues();
+      if (shouldPollRemoteStatus()) {
+        startAutoPoll();
+      } else {
+        stopAutoPoll();
+      }
+    });
   });
   createPairBtn?.addEventListener("click", () => {
     createPair().catch((error) => {
@@ -509,10 +528,14 @@
 
   loadPersistedValues();
   setRemoteWorkerText("Worker runtime: not loaded.");
-  pollRemoteStatus().catch(() => {
-    setRemoteStateText("Remote state: initial load failed.");
-  });
-  startAutoPoll();
+  refreshRemoteState()
+    .then(() => {
+      startAutoPoll();
+    })
+    .catch(() => {
+      setRemoteStateText("Remote state: initial load failed.");
+      stopAutoPoll();
+    });
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
       pollRemoteStatus().catch(() => {

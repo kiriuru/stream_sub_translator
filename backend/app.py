@@ -23,6 +23,7 @@ from backend.core.remote_signaling import RemoteSignalingManager
 from backend.core.remote_session import RemoteSessionManager
 from backend.core.dictionary_manager import DictionaryManager
 from backend.core.session_logger import SessionLogManager
+from backend.core.structured_runtime_logger import StructuredRuntimeLogger
 from backend.core.audio_devices import AudioDeviceManager
 from backend.core.profile_manager import ProfileManager
 from backend.core.subtitle_router import RuntimeOrchestrator
@@ -59,6 +60,7 @@ app.state.profile_manager = ProfileManager(settings.data_dir / "profiles")
 app.state.profile_manager.ensure_default_profile()
 app.state.cache_manager = CacheManager(settings.data_dir / "cache")
 app.state.dictionary_manager = DictionaryManager(settings.data_dir)
+app.state.structured_runtime_logger = StructuredRuntimeLogger(settings.logs_dir)
 app.state.session_logger = SessionLogManager(settings.logs_dir)
 app.state.runtime_orchestrator = RuntimeOrchestrator(
     app.state.ws_manager,
@@ -66,6 +68,7 @@ app.state.runtime_orchestrator = RuntimeOrchestrator(
     cache_manager=app.state.cache_manager,
     export_dir=settings.data_dir / "exports",
     models_dir=settings.models_dir,
+    structured_logger=app.state.structured_runtime_logger,
 )
 
 app.include_router(settings_router)
@@ -155,6 +158,14 @@ async def ws_events(websocket: WebSocket) -> None:
     manager: WebSocketManager = app.state.ws_manager
     await manager.connect(websocket)
     await websocket.send_json({"type": "hello", "message": "connected"})
+    await manager.replay_last(
+        websocket,
+        message_types=[
+            "runtime_update",
+            "subtitle_payload_update",
+            "overlay_update",
+        ],
+    )
     try:
         while True:
             _ = await websocket.receive_text()
@@ -172,14 +183,17 @@ async def ws_asr_worker(websocket: WebSocket) -> None:
             message = await websocket.receive_json()
             if not isinstance(message, dict):
                 continue
-            if str(message.get("type", "")).strip().lower() != "external_asr_update":
+            message_type = str(message.get("type", "")).strip().lower()
+            if message_type == "external_asr_update":
+                await app.state.runtime_orchestrator.ingest_external_asr_update(
+                    partial=str(message.get("partial", "") or ""),
+                    final=str(message.get("final", "") or ""),
+                    is_final=bool(message.get("is_final", False)),
+                    source_lang=str(message.get("source_lang", "") or "") or None,
+                )
                 continue
-            await app.state.runtime_orchestrator.ingest_external_asr_update(
-                partial=str(message.get("partial", "") or ""),
-                final=str(message.get("final", "") or ""),
-                is_final=bool(message.get("is_final", False)),
-                source_lang=str(message.get("source_lang", "") or "") or None,
-            )
+            if message_type == "browser_asr_status":
+                await app.state.runtime_orchestrator.update_browser_asr_worker_status(message)
     except WebSocketDisconnect:
         pass
     finally:

@@ -3,15 +3,17 @@ from __future__ import annotations
 import re
 from typing import Any
 
-PROJECT_VERSION = "2.8.3"
+PROJECT_VERSION = "0.2.9.0"
 RELEASE_TRACK = "stable"
 DEFAULT_UPDATE_PROVIDER = "github_releases"
 DEFAULT_RELEASE_CHANNEL = "stable"
 
-_SEMVER_RE = re.compile(r"^v?(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(?:[-+].*)?$")
+_SEMVER_RE = re.compile(
+    r"^v?(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(?:\.(?P<build>\d+))?(?:[-+].*)?$"
+)
 
 
-def _parse_semver(value: str) -> tuple[int, int, int] | None:
+def _parse_semver(value: str) -> tuple[int, int, int, int] | None:
     text = str(value or "").strip()
     if not text:
         return None
@@ -22,6 +24,7 @@ def _parse_semver(value: str) -> tuple[int, int, int] | None:
         int(match.group("major")),
         int(match.group("minor")),
         int(match.group("patch")),
+        int(match.group("build") or 0),
     )
 
 

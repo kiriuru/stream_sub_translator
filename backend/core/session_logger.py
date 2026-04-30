@@ -10,7 +10,7 @@ class SessionLogManager:
     _CHANNEL_FILES = {
         "dashboard": "dashboard-live-events.log",
         "overlay": "overlay-events.log",
-        "browser_worker": "browser-recognition.log",
+        "browser_worker": "browser-recognition-live.log",
     }
 
     def __init__(self, logs_dir: Path) -> None:

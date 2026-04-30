@@ -1,6 +1,6 @@
-# SST Desktop 2.8.3 - Полная техническая документация
+# SST Desktop 0.2.9.0 - Полная техническая документация
 
-Актуально для кода в ветке/снимке, где `backend/versioning.py` содержит `PROJECT_VERSION = "2.8.3"`.
+Актуально для кода в ветке/снимке, где `backend/versioning.py` содержит `PROJECT_VERSION = "0.2.9.0"`.
 
 ## 1. Назначение и границы системы
 
@@ -287,6 +287,7 @@ sequenceDiagram
 
 - stable/recommended:
   - `google_translate_v2` (primary)
+  - `google_cloud_translation_v3`
   - `azure_translator`
   - `deepl`
   - `libretranslate`
@@ -299,9 +300,13 @@ sequenceDiagram
 - experimental/emergency:
   - `google_gas_url`
   - `google_web`
-  - `mymemory`
   - `public_libretranslate_mirror`
   - `free_web_translate`
+
+Уточнение по Google Cloud:
+- `google_cloud_translation_v3` использует Cloud Translation - Advanced (v3) REST API;
+- для него нужны `project_id` и OAuth `access_token`;
+- API key из `google_translate_v2` для него не подходит.
 
 Translation cache:
 

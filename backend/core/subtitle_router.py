@@ -5,11 +5,12 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import time
-from typing import Awaitable, Callable, Literal
+from typing import Any, Awaitable, Callable, Literal
 
 from backend.core.asr_engine import AsrEngine
 from backend.core.cache_manager import CacheManager
 from backend.core.audio_capture import AudioCapture, RNNoiseRecognitionProcessor
+from backend.core.browser_asr_gateway import BrowserAsrGateway
 from backend.core.exporter import Exporter
 from backend.core.obs_caption_output import ObsCaptionOutput
 from backend.core.overlay_broadcaster import OverlayBroadcaster
@@ -21,7 +22,9 @@ from backend.core.remote_mode import (
     resolve_effective_remote_role,
 )
 from backend.core.segment_queue import AsrWorkItem, SegmentQueue
+from backend.core.structured_runtime_logger import StructuredRuntimeLogger
 from backend.core.subtitle_style import resolve_effective_subtitle_style
+from backend.core.translation_dispatcher import TranslationDispatcher
 from backend.core.translation_engine import TranslationEngine
 from backend.core.vad import VadEngine
 from backend.models import (
@@ -186,15 +189,27 @@ class SubtitleRouter:
         record["source_text"] = event.source_text
         record["source_lang"] = event.source_lang
         record["provider"] = event.provider
-        record["translation_received"] = True
-        record["translations"] = {
-            item.target_lang: {
+        translations = dict(record.get("translations", {}))
+        for item in event.translations:
+            translations[item.target_lang] = {
                 "text": item.text,
                 "success": item.success,
                 "error": item.error,
             }
-            for item in event.translations
-        }
+        record["translations"] = translations
+        config = self.config_getter()
+        translation_config = config.get("translation", {}) if isinstance(config, dict) else {}
+        target_languages = [
+            str(item).strip().lower()
+            for item in translation_config.get("target_languages", [])
+            if str(item).strip()
+        ] if isinstance(translation_config, dict) else []
+        received_targets = {str(item).strip().lower() for item in translations.keys() if str(item).strip()}
+        record["translation_received"] = bool(
+            event.is_complete
+            or not target_languages
+            or all(target_lang in received_targets for target_lang in target_languages)
+        )
         was_exported = event.sequence in self._exported_sequences
         should_promote = (
             self._pending_final_sequence == event.sequence
@@ -330,6 +345,18 @@ class SubtitleRouter:
         source_expiry_monotonic = float(finalized_at_monotonic) + (int(lifecycle["completed_source_ttl_ms"]) / 1000.0)
         return current >= source_expiry_monotonic
 
+    def _translation_ttl_expired_for_sequence(self, sequence: int, now_monotonic: float | None = None) -> bool:
+        record = self._records.get(sequence)
+        if record is None:
+            return False
+        finalized_at_monotonic = record.get("finalized_at_monotonic")
+        if not isinstance(finalized_at_monotonic, (int, float)):
+            return False
+        lifecycle = self._subtitle_lifecycle_config()
+        current = now_monotonic if now_monotonic is not None else time.perf_counter()
+        translation_expiry_monotonic = float(finalized_at_monotonic) + (int(lifecycle["completed_translation_ttl_ms"]) / 1000.0)
+        return current >= translation_expiry_monotonic
+
     def _sequence_awaits_translation(self, sequence: int | None) -> bool:
         if sequence is None or not self._translation_required_for_display():
             return False
@@ -343,15 +370,58 @@ class SubtitleRouter:
             return False
         return True
 
+    def _sequence_can_accept_late_translation(self, sequence: int | None) -> bool:
+        if sequence is None or not self._translation_required_for_display():
+            return False
+        record = self._records.get(sequence)
+        if record is None:
+            return False
+        if bool(record.get("translation_received")):
+            return False
+        if self._translation_ttl_expired_for_sequence(sequence):
+            return False
+        return True
+
+    def is_sequence_relevant_for_presentation(self, sequence: int) -> bool:
+        if sequence not in self._records:
+            return False
+        if self._pending_final_sequence == sequence:
+            return True
+        if self._completed_sequence == sequence:
+            if self._current_completed_payload() is not None:
+                return True
+            return self._sequence_can_accept_late_translation(sequence)
+        if (
+            self._completed_sequence is None
+            and self._pending_final_sequence is None
+            and self._latest_final_sequence == sequence
+        ):
+            payload = self._promotion_payload(sequence)
+            return payload is not None and bool(payload.visible_items)
+        return False
+
+    def is_sequence_relevant_for_translation(self, sequence: int) -> bool:
+        if sequence not in self._records:
+            return False
+        if self.is_sequence_relevant_for_presentation(sequence):
+            return True
+        if self._pending_final_sequence == sequence:
+            return True
+        if self._completed_sequence == sequence and self._sequence_awaits_translation(sequence):
+            return True
+        if self._latest_final_sequence == sequence and self._sequence_can_accept_late_translation(sequence):
+            return True
+        return False
+
     def _promotion_payload(self, sequence: int) -> SubtitlePayloadEvent | None:
         payload = self._build_payload(sequence)
         if payload is None:
             return None
         if (
-            self._completed_sequence is None
-            and self._pending_final_sequence is None
+            self._pending_final_sequence is None
             and self._latest_final_sequence == sequence
             and self._source_ttl_expired_for_sequence(sequence)
+            and (self._completed_sequence is None or self._completed_sequence == sequence)
         ):
             remapped_items: list[SubtitleLineItem] = []
             remapped_visible: list[SubtitleLineItem] = []
@@ -689,17 +759,47 @@ class SubtitleRouter:
         active_partial_source_lang = str(self._active_partial.get("source_lang", "auto")) if self._active_partial else None
         display_partial_source = not self._should_suppress_source_partial_display()
         visible_partial_text = active_partial_text if display_partial_source else ""
-
         completed_translation_payload = self._current_completed_payload(hide_source=True) if active_partial_text else completed_payload
 
-        if completed_translation_payload is not None and active_partial_text:
+        if active_partial_text and completed_translation_payload is not None:
             lifecycle_state: Literal["idle", "partial_only", "completed_only", "completed_with_partial"] = "completed_with_partial"
-        elif completed_payload is not None:
-            lifecycle_state = "completed_only"
         elif active_partial_text:
             lifecycle_state = "partial_only"
+        elif completed_payload is not None:
+            lifecycle_state = "completed_only"
         else:
             lifecycle_state = "idle"
+
+        config = self.config_getter()
+        overlay = config.get("overlay", {}) if isinstance(config, dict) else {}
+        translation_config = config.get("translation", {}) if isinstance(config, dict) else {}
+        subtitle_output = config.get("subtitle_output", {}) if isinstance(config, dict) else {}
+        display_order = [
+            str(item).lower()
+            for item in subtitle_output.get("display_order", ["source", *translation_config.get("target_languages", [])])
+        ] if isinstance(subtitle_output, dict) and isinstance(translation_config, dict) else []
+        if active_partial_text and completed_payload is None:
+            return SubtitlePayloadEvent(
+                sequence=active_partial_sequence or 0,
+                source_lang=active_partial_source_lang or str(config.get("source_lang", "auto")) if isinstance(config, dict) else "auto",
+                source_text=active_partial_text,
+                provider=str(self._active_partial.get("provider")) if self._active_partial and self._active_partial.get("provider") else None,
+                preset=str(overlay.get("preset", "single")) if isinstance(overlay, dict) else "single",
+                compact=bool(overlay.get("compact", False)) if isinstance(overlay, dict) else False,
+                display_order=display_order,
+                show_source=bool(subtitle_output.get("show_source", True)) if isinstance(subtitle_output, dict) else True,
+                show_translations=bool(subtitle_output.get("show_translations", True)) if isinstance(subtitle_output, dict) else True,
+                max_translation_languages=max(0, min(5, int(subtitle_output.get("max_translation_languages", 0) or 0))) if isinstance(subtitle_output, dict) else 0,
+                style=resolve_effective_subtitle_style(config.get("subtitle_style", {}) if isinstance(config, dict) else {}),
+                lifecycle_state=lifecycle_state,
+                completed_block_visible=False,
+                completed_expires_at_utc=self._completed_expires_at_utc,
+                active_partial_text=visible_partial_text,
+                active_partial_sequence=active_partial_sequence,
+                active_partial_source_lang=active_partial_source_lang,
+                line1=visible_partial_text,
+                line2="",
+            )
 
         if completed_translation_payload is not None and active_partial_text:
             payload_for_display = self._build_partial_plus_completed_payload(
@@ -731,14 +831,6 @@ class SubtitleRouter:
                 }
             )
 
-        config = self.config_getter()
-        overlay = config.get("overlay", {}) if isinstance(config, dict) else {}
-        translation_config = config.get("translation", {}) if isinstance(config, dict) else {}
-        subtitle_output = config.get("subtitle_output", {}) if isinstance(config, dict) else {}
-        display_order = [
-            str(item).lower()
-            for item in subtitle_output.get("display_order", ["source", *translation_config.get("target_languages", [])])
-        ] if isinstance(subtitle_output, dict) and isinstance(translation_config, dict) else []
         return SubtitlePayloadEvent(
             sequence=0,
             source_lang=active_partial_source_lang or str(config.get("source_lang", "auto")) if isinstance(config, dict) else "auto",
@@ -830,6 +922,7 @@ class RuntimeOrchestrator:
         cache_manager: CacheManager,
         export_dir: Path,
         models_dir: Path,
+        structured_logger: StructuredRuntimeLogger | None = None,
     ) -> None:
         self.ws_manager = ws_manager
         self.config_getter = config_getter
@@ -853,10 +946,9 @@ class RuntimeOrchestrator:
         )
         self._translation_engine = TranslationEngine(cache_manager)
         self._exporter = Exporter(export_dir)
+        self._structured_runtime_logger = structured_logger
         self._capture_task: asyncio.Task | None = None
         self._asr_task: asyncio.Task | None = None
-        self._translation_task: asyncio.Task | None = None
-        self._translation_queue: asyncio.Queue[tuple[int, str, str, float, float]] | None = None
         self._remote_audio_queue: asyncio.Queue[bytes] | None = None
         self._device_id: str | None = None
         self._sequence = 0
@@ -882,10 +974,20 @@ class RuntimeOrchestrator:
         self._last_partial_text_by_segment: dict[str, str] = {}
         self._last_partial_emit_monotonic_by_segment: dict[str, float] = {}
         self._external_worker_connected = False
+        self._browser_asr_gateway = BrowserAsrGateway(structured_logger=structured_logger)
         self._active_runtime_mode: str | None = None
         self._remote_audio_connected = False
         self._remote_audio_session_id: str | None = None
         self._remote_audio_last_chunk_monotonic: float | None = None
+        self._translation_dispatcher_snapshot: dict[str, Any] = {}
+        self._translation_dispatcher = TranslationDispatcher(
+            self._translation_engine,
+            self.config_getter,
+            self._publish_translation_dispatch_event,
+            self.subtitle_router.is_sequence_relevant_for_translation,
+            self._apply_translation_dispatcher_metrics,
+            structured_logger=structured_logger,
+        )
         self._apply_vad_tuning()
         self._apply_recognition_processing_settings()
         self._translation_engine.apply_live_settings(self.config_getter().get("translation", {}))
@@ -962,6 +1064,12 @@ class RuntimeOrchestrator:
 
     async def _broadcast_translation(self, event: TranslationEvent) -> None:
         await self.ws_manager.broadcast({"type": "translation_update", "payload": event.model_dump()})
+
+    async def _publish_translation_dispatch_event(self, event: TranslationEvent) -> None:
+        await self.subtitle_router.handle_translation(event)
+        if self.subtitle_router.is_sequence_relevant_for_presentation(event.sequence):
+            await self._broadcast_translation(event)
+        await self._broadcast_runtime()
 
     async def _handle_obs_caption_payload(self, payload: SubtitlePayloadEvent) -> None:
         await self._obs_caption_output.publish_subtitle_payload(payload)
@@ -1075,6 +1183,25 @@ class RuntimeOrchestrator:
             else:
                 updates[key] = round(float(value), 2)
         self._metrics = self._metrics.model_copy(update=updates)
+
+    def _apply_translation_dispatcher_metrics(self, metrics: dict) -> None:
+        if not isinstance(metrics, dict):
+            return
+        self._translation_dispatcher_snapshot = dict(metrics)
+        updates: dict[str, float | int | None] = {}
+        for key in (
+            "translation_queue_depth",
+            "translation_jobs_started",
+            "translation_jobs_cancelled",
+            "translation_stale_results_dropped",
+            "translation_queue_latency_ms",
+            "translation_provider_latency_ms",
+        ):
+            if key in metrics:
+                updates[key] = metrics.get(key)
+        if metrics.get("translation_provider_latency_ms") is not None:
+            updates["translation_ms"] = metrics.get("translation_provider_latency_ms")
+        self._record_metrics(**updates)
 
     def _increment_metric(self, key: Literal["partial_updates_emitted", "finals_emitted", "suppressed_partial_updates"]) -> None:
         current = getattr(self._metrics, key, 0) or 0
@@ -1473,16 +1600,11 @@ class RuntimeOrchestrator:
                         self._clear_partial_tracking(work_item.segment_id)
                         await self.subtitle_router.handle_transcript(transcript_event)
                         await self._obs_caption_output.publish_source_event(transcript_event)
-                        if self._translation_queue is not None:
-                            await self._translation_queue.put(
-                                (
-                                    self._sequence,
-                                    text,
-                                    segment.source_lang,
-                                    work_item.created_at_monotonic,
-                                    work_item.vad_ms,
-                                )
-                            )
+                        await self._translation_dispatcher.submit_final(
+                            sequence=self._sequence,
+                            source_text=text,
+                            source_lang=segment.source_lang,
+                        )
                         await self._broadcast_runtime()
                     else:
                         await self.subtitle_router.handle_transcript(transcript_event)
@@ -1502,115 +1624,6 @@ class RuntimeOrchestrator:
                 started_at_utc=self._state.started_at_utc,
                 last_error=str(exc),
             )
-
-    async def _translation_loop(self) -> None:
-        try:
-            while self._state.is_running:
-                translation_queue = self._translation_queue
-                if translation_queue is None:
-                    await asyncio.sleep(0.05)
-                    continue
-                sequence, source_text, source_lang, created_at_monotonic, vad_ms = await translation_queue.get()
-                try:
-                    config = self.config_getter()
-                    translation_config = config.get("translation", {})
-                    if not isinstance(translation_config, dict):
-                        continue
-                    if not translation_config.get("enabled"):
-                        continue
-
-                    target_languages = translation_config.get("target_languages", [])
-                    if not isinstance(target_languages, list) or not target_languages:
-                        continue
-
-                    provider_name = str(translation_config.get("provider", "google_translate_v2"))
-                    provider_settings_map = translation_config.get("provider_settings", {})
-                    if not isinstance(provider_settings_map, dict):
-                        provider_settings_map = {}
-                    provider_settings = provider_settings_map.get(provider_name, {})
-                    if not isinstance(provider_settings, dict):
-                        provider_settings = {}
-
-                    await self._set_runtime_state(
-                        is_running=True,
-                        status="translating",
-                        started_at_utc=self._state.started_at_utc,
-                    )
-                    translation_started = time.perf_counter()
-                    batch = await self._translation_engine.translate_targets(
-                        source_text=source_text,
-                        source_lang=str(source_lang or "auto"),
-                        provider_name=provider_name,
-                        provider_settings=provider_settings,
-                        target_languages=[str(item).lower() for item in target_languages if str(item).strip()],
-                    )
-                    translation_ms = (time.perf_counter() - translation_started) * 1000.0
-                    total_ms = (time.perf_counter() - created_at_monotonic) * 1000.0
-                    self._record_metrics(
-                        vad_ms=vad_ms,
-                        translation_ms=translation_ms,
-                        total_ms=total_ms,
-                    )
-                    await self._broadcast_translation(
-                        TranslationEvent(
-                            sequence=sequence,
-                            source_text=source_text,
-                            source_lang=batch.source_lang,
-                            translations=batch.items,
-                            provider=batch.provider,
-                            provider_group=batch.provider_group,
-                            experimental=batch.experimental,
-                            local_provider=batch.local_provider,
-                            used_default_prompt=batch.used_default_prompt,
-                            status_message=batch.status_message,
-                        )
-                    )
-                    await self.subtitle_router.handle_translation(
-                        TranslationEvent(
-                            sequence=sequence,
-                            source_text=source_text,
-                            source_lang=batch.source_lang,
-                            translations=batch.items,
-                            provider=batch.provider,
-                            provider_group=batch.provider_group,
-                            experimental=batch.experimental,
-                            local_provider=batch.local_provider,
-                            used_default_prompt=batch.used_default_prompt,
-                            status_message=batch.status_message,
-                        )
-                    )
-                    await self._broadcast_runtime()
-                except Exception as exc:
-                    config = self.config_getter()
-                    translation_config = config.get("translation", {}) if isinstance(config, dict) else {}
-                    failed_targets = translation_config.get("target_languages", []) if isinstance(translation_config, dict) else []
-                    failed_event = TranslationEvent(
-                        sequence=sequence,
-                        source_text=source_text,
-                        source_lang=str(source_lang or "auto"),
-                        translations=[
-                            TranslationItem(
-                                target_lang=str(target_lang),
-                                text="",
-                                provider=str(translation_config.get("provider", "error")) if isinstance(translation_config, dict) else "error",
-                                cached=False,
-                                success=False,
-                                error=str(exc),
-                            )
-                            for target_lang in failed_targets
-                        ],
-                        provider="error",
-                        provider_group="error",
-                        status_message=f"Translation failed: {exc}",
-                    )
-                    await self._broadcast_translation(failed_event)
-                    await self.subtitle_router.handle_translation(failed_event)
-                    await self._set_listening_if_current("translating", last_error=f"Translation error: {exc}")
-                    continue
-
-                await self._set_listening_if_current("translating")
-        except asyncio.CancelledError:
-            raise
 
     async def _broadcast_external_segment_started(
         self,
@@ -1667,6 +1680,7 @@ class RuntimeOrchestrator:
 
     async def browser_asr_worker_connected(self) -> None:
         self._external_worker_connected = True
+        self._browser_asr_gateway.worker_connected()
         if self._state.is_running and self._current_asr_mode() == "browser_google":
             await self._set_runtime_state(
                 is_running=True,
@@ -1678,6 +1692,7 @@ class RuntimeOrchestrator:
 
     async def browser_asr_worker_disconnected(self) -> None:
         self._external_worker_connected = False
+        self._browser_asr_gateway.worker_disconnected()
         segment_id = self._active_segment_id
         self._active_segment_id = None
         self._active_segment_revision = 0
@@ -1690,6 +1705,11 @@ class RuntimeOrchestrator:
                 started_at_utc=self._state.started_at_utc,
                 status_message="Browser speech worker disconnected. Reopen or restart the browser recognition window.",
             )
+
+    async def update_browser_asr_worker_status(self, payload: dict[str, Any]) -> None:
+        self._browser_asr_gateway.update_status(payload)
+        if self._state.is_running and self._current_asr_mode() == "browser_google":
+            await self._broadcast_runtime()
 
     async def ingest_external_asr_update(
         self,
@@ -1735,6 +1755,11 @@ class RuntimeOrchestrator:
                     source_lang=normalized_source_lang,
                 ),
             )
+            self._browser_asr_gateway.note_partial(
+                text_len=len(partial_text),
+                source_lang=normalized_source_lang,
+                sequence=transcript_event.sequence,
+            )
             await self._broadcast_transcript(transcript_event)
             await self.subtitle_router.handle_transcript(transcript_event)
             await self._obs_caption_output.publish_source_event(transcript_event)
@@ -1755,7 +1780,6 @@ class RuntimeOrchestrator:
                 )
             self._clear_partial_tracking(segment_id)
             self._sequence += 1
-            created_at_monotonic = time.perf_counter()
             transcript_event = TranscriptEvent(
                 event="final",
                 text=final_text,
@@ -1770,20 +1794,20 @@ class RuntimeOrchestrator:
                     source_lang=normalized_source_lang,
                 ),
             )
+            self._browser_asr_gateway.note_final(
+                text_len=len(final_text),
+                source_lang=normalized_source_lang,
+                sequence=transcript_event.sequence,
+            )
             await self._broadcast_transcript(transcript_event)
             self._increment_metric("finals_emitted")
             await self.subtitle_router.handle_transcript(transcript_event)
             await self._obs_caption_output.publish_source_event(transcript_event)
-            if self._translation_queue is not None:
-                await self._translation_queue.put(
-                    (
-                        self._sequence,
-                        final_text,
-                        normalized_source_lang,
-                        created_at_monotonic,
-                        0.0,
-                    )
-                )
+            await self._translation_dispatcher.submit_final(
+                sequence=self._sequence,
+                source_text=final_text,
+                source_lang=normalized_source_lang,
+            )
             self._active_segment_id = None
             self._active_segment_revision = 0
             await self._set_listening_if_current(
@@ -1799,7 +1823,15 @@ class RuntimeOrchestrator:
         self._runtime_loop = asyncio.get_running_loop()
         self._latest_runtime_status_message = None
         self._metrics = RuntimeMetrics()
-        self._translation_queue = asyncio.Queue()
+        self._translation_dispatcher_snapshot = {}
+        self._translation_dispatcher = TranslationDispatcher(
+            self._translation_engine,
+            self.config_getter,
+            self._publish_translation_dispatch_event,
+            self.subtitle_router.is_sequence_relevant_for_translation,
+            self._apply_translation_dispatcher_metrics,
+            structured_logger=self._structured_runtime_logger,
+        )
         self._remote_audio_queue = asyncio.Queue(maxsize=256)
         asr_mode = self._current_asr_mode()
         if self._current_remote_role() == REMOTE_ROLE_WORKER and asr_mode == "browser_google":
@@ -1891,8 +1923,6 @@ class RuntimeOrchestrator:
             if asr_mode != "browser_google" and not use_remote_event_source:
                 self._capture_task = asyncio.create_task(self._capture_loop())
                 self._asr_task = asyncio.create_task(self._asr_loop())
-            if not use_remote_event_source:
-                self._translation_task = asyncio.create_task(self._translation_loop())
         except Exception as exc:
             await self._safe_stop_audio()
             await self._obs_caption_output.stop()
@@ -1913,7 +1943,7 @@ class RuntimeOrchestrator:
     async def stop(self) -> RuntimeState:
         self._latest_runtime_status_message = None
         self._set_state(is_running=False, status="idle", started_at_utc=None, last_error=None)
-        tasks = [task for task in (self._capture_task, self._asr_task, self._translation_task) if task is not None]
+        tasks = [task for task in (self._capture_task, self._asr_task) if task is not None]
         for task in tasks:
             task.cancel()
         for task in tasks:
@@ -1923,7 +1953,6 @@ class RuntimeOrchestrator:
                 pass
         self._capture_task = None
         self._asr_task = None
-        self._translation_task = None
         self._external_worker_connected = False
         self._active_runtime_mode = None
         self._remote_audio_connected = False
@@ -1938,13 +1967,13 @@ class RuntimeOrchestrator:
         except Exception as exc:
             export_error = str(exc)
         await self.subtitle_router.reset()
+        await self._translation_dispatcher.stop()
         self._segment_queue.clear()
         self._vad.reset()
         await asyncio.to_thread(self._asr_engine.unload_runtime_state)
         self._last_partial_text_by_segment.clear()
         self._last_partial_emit_monotonic_by_segment.clear()
         self._clear_remote_audio_queue()
-        self._translation_queue = None
         self._remote_audio_queue = None
         self._reset_export_session()
         self._metrics = RuntimeMetrics()
@@ -2114,8 +2143,21 @@ class RuntimeOrchestrator:
         try:
             config = self.config_getter()
             translation_config = config.get("translation", {}) if isinstance(config, dict) else {}
-            return self._translation_engine.summarize_readiness(
+            diagnostics = self._translation_engine.summarize_readiness(
                 translation_config if isinstance(translation_config, dict) else {}
+            )
+            snapshot = self._translation_dispatcher_snapshot if isinstance(self._translation_dispatcher_snapshot, dict) else {}
+            runtime_reason = snapshot.get("translation_last_runtime_reason")
+            return diagnostics.model_copy(
+                update={
+                    "queue_depth": int(snapshot.get("translation_queue_depth", 0) or 0),
+                    "jobs_started": int(snapshot.get("translation_jobs_started", 0) or 0),
+                    "jobs_cancelled": int(snapshot.get("translation_jobs_cancelled", 0) or 0),
+                    "stale_results_dropped": int(snapshot.get("translation_stale_results_dropped", 0) or 0),
+                    "last_queue_latency_ms": snapshot.get("translation_queue_latency_ms"),
+                    "last_provider_latency_ms": snapshot.get("translation_provider_latency_ms"),
+                    "last_runtime_reason": str(runtime_reason).strip() or None if runtime_reason is not None else None,
+                }
             )
         except Exception as exc:
             return TranslationDiagnostics(
@@ -2134,6 +2176,7 @@ class RuntimeOrchestrator:
             if self._current_asr_mode() == "browser_google":
                 browser_config = self._browser_asr_config()
                 browser_lang = str(browser_config.get("recognition_language", "ru-RU") or "ru-RU")
+                browser_worker = self._browser_asr_gateway.diagnostics()
                 worker_message = (
                     "Browser speech worker is connected."
                     if self._external_worker_connected
@@ -2152,7 +2195,7 @@ class RuntimeOrchestrator:
                     torch_built_with_cuda=False,
                     torch_cuda_is_available=False,
                     torch_device_count=0,
-                    degraded_mode=False,
+                    degraded_mode=bool(browser_worker.degraded_reason),
                     selected_device="browser",
                     selected_execution_provider="webkitSpeechRecognition",
                     partials_supported=True,
@@ -2164,6 +2207,7 @@ class RuntimeOrchestrator:
                     rnnoise_message="RNNoise is not used in browser speech mode.",
                     message=f"{worker_message} Recognition language: {browser_lang}.",
                     runtime_initialized=self._state.is_running,
+                    browser_worker=browser_worker,
                 )
             diagnostics = self._asr_engine.diagnostics()
             rnnoise_status = self._rnnoise_processor.status()

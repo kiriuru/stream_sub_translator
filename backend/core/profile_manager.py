@@ -52,7 +52,7 @@ class ProfileManager:
                 continue
             current_provider_config = dict(provider_config)
             for key, value in list(current_provider_config.items()):
-                if key == "api_key":
+                if key in {"api_key", "access_token"}:
                     if provider_name == "google_translate_v2":
                         current_provider_config[key] = normalize_google_translate_api_key(value)
                     else:

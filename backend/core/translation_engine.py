@@ -228,6 +228,82 @@ class GoogleTranslateV2Provider(BaseTranslationProvider):
         return unescape(str(translated)), diagnostics
 
 
+class GoogleCloudTranslationV3Provider(BaseTranslationProvider):
+    info = TranslationProviderInfo(
+        name="google_cloud_translation_v3",
+        group=PROVIDER_GROUP_STABLE,
+        stable=True,
+    )
+
+    async def translate(
+        self,
+        *,
+        text: str,
+        source_lang: str,
+        target_lang: str,
+        provider_settings: dict[str, str],
+    ) -> tuple[str, dict[str, Any]]:
+        project_id = provider_settings.get("project_id", "").strip()
+        access_token = provider_settings.get("access_token", "").strip()
+        location = provider_settings.get("location", "").strip() or "global"
+        model = provider_settings.get("model", "").strip()
+
+        if not project_id:
+            raise TranslationProviderError("Google Cloud Translation v3 project ID is missing.")
+        if not access_token:
+            raise TranslationProviderError("Google Cloud Translation v3 access token is missing.")
+
+        endpoint = f"https://translation.googleapis.com/v3/projects/{project_id}/locations/{location}:translateText"
+        payload: dict[str, Any] = {
+            "contents": [text],
+            "targetLanguageCode": target_lang,
+            "mimeType": "text/plain",
+        }
+        normalized_source = self._normalize_source_lang(source_lang)
+        if normalized_source != "auto":
+            payload["sourceLanguageCode"] = normalized_source
+        if model:
+            payload["model"] = model
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json; charset=utf-8",
+            "x-goog-user-project": project_id,
+        }
+        diagnostics = self.diagnostics(provider_settings)
+        diagnostics.update(
+            {
+                "endpoint_used": endpoint,
+                "http_method": "POST",
+                "location": location,
+                "project_id_present": True,
+                "access_token_present": True,
+                "access_token_masked_preview": self._mask_secret(access_token),
+                "model_requested": model or None,
+                "status_message": (
+                    "Cloud Translation - Advanced (v3) via REST. "
+                    "Requires OAuth access token; API keys are not supported."
+                ),
+            }
+        )
+
+        async with httpx.AsyncClient() as client:
+            data = await self._get_json(
+                client,
+                url=endpoint,
+                method="POST",
+                json=payload,
+                headers=headers,
+                error_prefix="Google Cloud Translation v3 request failed",
+            )
+
+        translations = data.get("translations", [])
+        translated = translations[0].get("translatedText") if translations else None
+        if not translated:
+            raise TranslationProviderError("Google Cloud Translation v3 returned an empty translation.")
+        return unescape(str(translated)), diagnostics
+
+
 class GoogleGasUrlProvider(BaseTranslationProvider):
     info = TranslationProviderInfo(
         name="google_gas_url",
@@ -590,42 +666,6 @@ class OpenAICompatibleChatProvider(BaseTranslationProvider):
         return str(content).strip(), diagnostics
 
 
-class MyMemoryProvider(BaseTranslationProvider):
-    info = TranslationProviderInfo(
-        name="mymemory",
-        group=PROVIDER_GROUP_EXPERIMENTAL,
-        experimental=True,
-    )
-
-    async def translate(
-        self,
-        *,
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        provider_settings: dict[str, str],
-    ) -> tuple[str, dict[str, Any]]:
-        normalized_source = self._normalize_source_lang(source_lang)
-        langpair = f"{normalized_source if normalized_source != 'auto' else 'auto'}|{target_lang}"
-        params = {"q": text, "langpair": langpair}
-
-        async with httpx.AsyncClient() as client:
-            payload = await self._get_json(
-                client,
-                url="https://api.mymemory.translated.net/get",
-                method="GET",
-                params=params,
-                error_prefix="MyMemory request failed",
-            )
-
-        translated = payload.get("responseData", {}).get("translatedText")
-        if not translated:
-            raise TranslationProviderError("MyMemory returned an empty translation.")
-        diagnostics = self.diagnostics(provider_settings)
-        diagnostics["status_message"] = "Experimental public provider. Reliability is not guaranteed."
-        return unescape(str(translated)), diagnostics
-
-
 class PublicLibreTranslateMirrorProvider(BaseTranslationProvider):
     info = TranslationProviderInfo(
         name="public_libretranslate_mirror",
@@ -722,11 +762,23 @@ class TranslationBatch:
     status_message: str | None = None
 
 
+@dataclass
+class PreparedTranslationRequest:
+    provider_name: str
+    provider: BaseTranslationProvider | None
+    provider_settings: dict[str, str]
+    target_languages: list[str]
+    provider_group: str
+    experimental: bool = False
+    local_provider: bool = False
+
+
 class TranslationEngine:
     def __init__(self, cache_manager: CacheManager) -> None:
         self.cache_manager = cache_manager
         self.providers: dict[str, BaseTranslationProvider] = {
             GoogleTranslateV2Provider.info.name: GoogleTranslateV2Provider(),
+            GoogleCloudTranslationV3Provider.info.name: GoogleCloudTranslationV3Provider(),
             GoogleGasUrlProvider.info.name: GoogleGasUrlProvider(),
             GoogleWebProvider.info.name: GoogleWebProvider(),
             AzureTranslatorProvider.info.name: AzureTranslatorProvider(),
@@ -758,7 +810,6 @@ class TranslationEngine:
                 requires_api_key=False,
                 local_provider=True,
             ),
-            MyMemoryProvider.info.name: MyMemoryProvider(),
             PublicLibreTranslateMirrorProvider.info.name: PublicLibreTranslateMirrorProvider(),
             FreeWebTranslateProvider.info.name: FreeWebTranslateProvider(),
         }
@@ -767,6 +818,8 @@ class TranslationEngine:
     def _required_fields_for_provider(self, provider_name: str) -> list[str]:
         if provider_name == "google_translate_v2":
             return ["api_key"]
+        if provider_name == "google_cloud_translation_v3":
+            return ["project_id", "access_token"]
         if provider_name == "google_gas_url":
             return ["gas_url"]
         if provider_name == "azure_translator":
@@ -782,6 +835,12 @@ class TranslationEngine:
     def _provider_endpoint_for_summary(self, provider_name: str, provider_settings: dict[str, str]) -> str | None:
         if provider_name == "google_translate_v2":
             return "https://translation.googleapis.com/language/translate/v2"
+        if provider_name == "google_cloud_translation_v3":
+            project_id = provider_settings.get("project_id", "").strip()
+            location = provider_settings.get("location", "").strip() or "global"
+            if not project_id:
+                return None
+            return f"https://translation.googleapis.com/v3/projects/{project_id}/locations/{location}:translateText"
         if provider_name == "google_gas_url":
             return provider_settings.get("gas_url", "").strip() or None
         if provider_name == "azure_translator":
@@ -974,6 +1033,95 @@ class TranslationEngine:
             self.cache_manager.clear_translation_cache()
         self._last_settings_signature = new_signature
 
+    @staticmethod
+    def _normalize_target_languages(target_languages: list[str]) -> list[str]:
+        clean_target_languages = [
+            str(item).strip().lower()
+            for item in target_languages
+            if str(item).strip()
+        ]
+        return list(dict.fromkeys(clean_target_languages))
+
+    def prepare_request(self, translation_config: dict[str, Any]) -> PreparedTranslationRequest:
+        provider_name = str(translation_config.get("provider", "google_translate_v2"))
+        provider_settings_map = translation_config.get("provider_settings", {})
+        if not isinstance(provider_settings_map, dict):
+            provider_settings_map = {}
+        provider_settings = provider_settings_map.get(provider_name, {})
+        if not isinstance(provider_settings, dict):
+            provider_settings = {}
+        provider = self.providers.get(provider_name)
+        target_languages = self._normalize_target_languages(translation_config.get("target_languages", []))
+        provider_group = provider.info.group if provider is not None else PROVIDER_GROUP_EXPERIMENTAL
+        experimental = bool(provider.info.experimental) if provider is not None else True
+        local_provider = bool(provider.info.local_provider) if provider is not None else False
+        return PreparedTranslationRequest(
+            provider_name=provider_name,
+            provider=provider,
+            provider_settings={str(k): str(v) for k, v in provider_settings.items()},
+            target_languages=target_languages,
+            provider_group=provider_group,
+            experimental=experimental,
+            local_provider=local_provider,
+        )
+
+    async def translate_target(
+        self,
+        *,
+        source_text: str,
+        source_lang: str,
+        provider_name: str,
+        provider_settings: dict[str, Any],
+        target_lang: str,
+        retries: int = 2,
+    ) -> tuple[TranslationItem, dict[str, Any]]:
+        provider = self.providers.get(provider_name)
+        normalized_target_lang = str(target_lang).strip().lower()
+        normalized_settings = {str(k): str(v) for k, v in provider_settings.items()}
+        if provider is None:
+            diagnostics = {
+                "provider": provider_name,
+                "provider_group": PROVIDER_GROUP_EXPERIMENTAL,
+                "experimental": True,
+                "local_provider": False,
+                "status_message": f"Unsupported translation provider: {provider_name}",
+                "used_default_prompt": False,
+            }
+            return (
+                TranslationItem(
+                    target_lang=normalized_target_lang,
+                    text="",
+                    provider=provider_name,
+                    cached=False,
+                    success=False,
+                    error=diagnostics["status_message"],
+                ),
+                diagnostics,
+            )
+        cached = self.cache_manager.get_translation(source_text, source_lang, normalized_target_lang)
+        if cached is not None:
+            return (
+                TranslationItem(
+                    target_lang=normalized_target_lang,
+                    text=cached,
+                    provider=provider_name,
+                    cached=True,
+                    success=True,
+                ),
+                provider.diagnostics(normalized_settings),
+            )
+        translated_item, diagnostics = await self._translate_with_retry(
+            provider=provider,
+            source_text=source_text,
+            source_lang=source_lang,
+            target_lang=normalized_target_lang,
+            provider_settings=normalized_settings,
+            retries=retries,
+        )
+        if translated_item.success and translated_item.text:
+            self.cache_manager.set_translation(source_text, source_lang, normalized_target_lang, translated_item.text)
+        return translated_item, diagnostics
+
     async def translate_targets(
         self,
         *,
@@ -985,12 +1133,7 @@ class TranslationEngine:
         retries: int = 2,
     ) -> TranslationBatch:
         provider = self.providers.get(provider_name)
-        clean_target_languages = [
-            str(item).strip().lower()
-            for item in target_languages
-            if str(item).strip()
-        ]
-        clean_target_languages = list(dict.fromkeys(clean_target_languages))
+        clean_target_languages = self._normalize_target_languages(target_languages)
 
         if provider is None:
             return self._failed_batch(
@@ -1000,36 +1143,35 @@ class TranslationEngine:
                 error=f"Unsupported translation provider: {provider_name}",
             )
 
-        normalized_settings = {str(k): str(v) for k, v in provider_settings.items()}
         items: list[TranslationItem] = []
+        normalized_settings = {str(k): str(v) for k, v in provider_settings.items()}
         batch_diagnostics = provider.diagnostics(normalized_settings)
 
-        for target_lang in clean_target_languages:
-            cached = self.cache_manager.get_translation(source_text, source_lang, target_lang)
-            if cached is not None:
-                items.append(
-                    TranslationItem(
-                        target_lang=target_lang,
-                        text=cached,
-                        provider=provider_name,
-                        cached=True,
-                    )
+        translated_by_lang: dict[str, tuple[TranslationItem, dict[str, Any]]] = {}
+        if clean_target_languages:
+            async def _translate_target(target_lang: str) -> tuple[str, TranslationItem, dict[str, Any]]:
+                translated_item, item_diagnostics = await self.translate_target(
+                    source_text=source_text,
+                    source_lang=source_lang,
+                    provider_name=provider_name,
+                    provider_settings=normalized_settings,
+                    target_lang=target_lang,
+                    retries=retries,
                 )
-                continue
+                return target_lang, translated_item, item_diagnostics
 
-            translated_item, item_diagnostics = await self._translate_with_retry(
-                provider=provider,
-                source_text=source_text,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                provider_settings=normalized_settings,
-                retries=retries,
+            translated_results = await asyncio.gather(
+                *(_translate_target(target_lang) for target_lang in clean_target_languages)
             )
-            if translated_item.success and translated_item.text:
-                self.cache_manager.set_translation(source_text, source_lang, target_lang, translated_item.text)
-            if item_diagnostics.get("status_message"):
-                batch_diagnostics["status_message"] = item_diagnostics["status_message"]
-            batch_diagnostics["used_default_prompt"] = bool(item_diagnostics.get("used_default_prompt", False))
+            for target_lang, translated_item, item_diagnostics in translated_results:
+                if item_diagnostics.get("status_message"):
+                    batch_diagnostics["status_message"] = item_diagnostics["status_message"]
+                if item_diagnostics.get("used_default_prompt", False):
+                    batch_diagnostics["used_default_prompt"] = True
+                translated_by_lang[target_lang] = (translated_item, item_diagnostics)
+
+        for target_lang in clean_target_languages:
+            translated_item, _item_diagnostics = translated_by_lang[target_lang]
             items.append(translated_item)
 
         return TranslationBatch(

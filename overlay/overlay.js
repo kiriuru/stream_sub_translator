@@ -109,6 +109,16 @@
     overlayState.finals = [];
   }
 
+  function clearOverlayPresentation(reason) {
+    clearLegacyTranscriptState();
+    overlayState.completedItems = [];
+    overlayState.activePartialText = "";
+    if (reason) {
+      writeDebug("text hidden", reason);
+    }
+    render();
+  }
+
   function buildPresentationPayload() {
     const completedItems = overlayState.completedItems.map((item) => ({
       kind: item.kind || "source",
@@ -265,6 +275,7 @@
     });
 
     ws.addEventListener("close", () => {
+      clearOverlayPresentation("websocket disconnected");
       writeDebug("ws disconnected", "reconnecting in 1s");
       setTimeout(connect, 1000);
     });

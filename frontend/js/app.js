@@ -7,6 +7,21 @@
       fields: ["api_key"],
       status: "Stable machine-translation provider.",
     },
+    google_cloud_translation_v3: {
+      label: "Google Cloud Translation - Advanced (v3)",
+      group: "Stable / Recommended",
+      hint: "Official Google Cloud Translation - Advanced REST API. Requires project ID and OAuth access token, not a v2 API key.",
+      fields: ["api_key", "endpoint", "region", "model"],
+      apiKeyLabel: { en: "Access token", ru: "Access token" },
+      apiKeyPlaceholder: "OAuth access token",
+      endpointLabel: { en: "Project ID", ru: "Project ID" },
+      endpointPlaceholder: "my-gcp-project",
+      regionLabel: { en: "Location", ru: "Location" },
+      regionPlaceholder: "global",
+      modelLabel: { en: "Model (optional)", ru: "Model (опционально)" },
+      modelPlaceholder: "general/nmt or general/translation-llm",
+      status: "Stable cloud MT provider. Uses the Advanced v3 endpoint.",
+    },
     google_gas_url: {
       label: "Google GAS URL",
       group: "Experimental / Emergency",
@@ -76,13 +91,6 @@
       fields: ["base_url", "model", "custom_prompt"],
       baseUrlPlaceholder: "http://127.0.0.1:11434/v1",
       status: "Local model-quality-dependent provider.",
-    },
-    mymemory: {
-      label: "MyMemory",
-      group: "Experimental / Emergency",
-      hint: "Experimental public web provider. Best-effort only. Do not treat as a stable production path.",
-      fields: [],
-      status: "Experimental public provider. Reliability is not guaranteed.",
     },
     public_libretranslate_mirror: {
       label: "Public LibreTranslate Mirror",
@@ -223,6 +231,16 @@
         ru: "Стабильный провайдер машинного перевода.",
       },
     },
+    google_cloud_translation_v3: {
+      hint: {
+        en: "Official Cloud Translation - Advanced (v3). Requires Google Cloud project ID and OAuth access token. API keys are not supported.",
+        ru: "Официальный Cloud Translation - Advanced (v3). Нужны Google Cloud project ID и OAuth access token. API-ключи v2 не поддерживаются.",
+      },
+      status: {
+        en: "Stable cloud MT provider using the Advanced v3 endpoint.",
+        ru: "Стабильный облачный MT-провайдер на Advanced v3 endpoint.",
+      },
+    },
     google_gas_url: {
       hint: {
         en: "Google Apps Script bridge. Reliability depends on your own script and deployment.",
@@ -311,16 +329,6 @@
       status: {
         en: "Local provider. Quality depends on the local model.",
         ru: "Локальный провайдер. Качество зависит от локальной модели.",
-      },
-    },
-    mymemory: {
-      hint: {
-        en: "Public web provider. Good only as a temporary emergency fallback.",
-        ru: "Публичный веб-провайдер. Подходит только как временный запасной вариант.",
-      },
-      status: {
-        en: "Experimental public provider. Reliability is not guaranteed.",
-        ru: "Экспериментальный публичный провайдер. Надёжность не гарантируется.",
       },
     },
     public_libretranslate_mirror: {
@@ -423,8 +431,11 @@
   const obsCcBadge = document.getElementById("obs-cc-badge");
   const asrDiagnosticsText = document.getElementById("asr-diagnostics-text");
   const translationDiagnosticsText = document.getElementById("translation-diagnostics-text");
+  const translationRuntimeText = document.getElementById("translation-runtime-text");
+  const browserWorkerDiagnosticsText = document.getElementById("browser-worker-diagnostics-text");
   const obsCcDiagnosticsText = document.getElementById("obs-cc-diagnostics-text");
   const latencyMetricsText = document.getElementById("latency-metrics-text");
+  const logsDiscoverabilityText = document.getElementById("logs-discoverability-text");
   const overlayText = document.getElementById("overlay-url");
   const overlayLink = document.getElementById("overlay-link");
   const audioInputsList = document.getElementById("audio-inputs");
@@ -445,15 +456,22 @@
   const translationEnabled = document.getElementById("translation-enabled");
   const translationProvider = document.getElementById("translation-provider");
   const translationApiKey = document.getElementById("translation-api-key");
+  const translationApiKeyLabel = document.getElementById("translation-api-key-label");
   const translationApiKeyToggleBtn = document.getElementById("translation-api-key-toggle");
   const translationApiKeyRow = document.getElementById("translation-api-key-row");
   const translationBaseUrl = document.getElementById("translation-base-url");
+  const translationBaseUrlLabel = document.getElementById("translation-base-url-label");
   const translationGasUrl = document.getElementById("translation-gas-url");
+  const translationGasUrlLabel = document.getElementById("translation-gas-url-label");
   const translationEndpoint = document.getElementById("translation-endpoint");
+  const translationEndpointLabel = document.getElementById("translation-endpoint-label");
   const translationRegion = document.getElementById("translation-region");
+  const translationRegionLabel = document.getElementById("translation-region-label");
   const translationRegionRow = document.getElementById("translation-region-row");
   const translationApiUrl = document.getElementById("translation-api-url");
+  const translationApiUrlLabel = document.getElementById("translation-api-url-label");
   const translationModel = document.getElementById("translation-model");
+  const translationModelLabel = document.getElementById("translation-model-label");
   const translationCustomPrompt = document.getElementById("translation-custom-prompt");
   const translationProviderHint = document.getElementById("translation-provider-hint");
   const translationProviderStatus = document.getElementById("translation-provider-status");
@@ -681,7 +699,54 @@
       group: localizePair(PROVIDER_GROUP_KEYS, provider.group, provider.group),
       hint: localizePair({ value: copy.hint }, "value", provider.hint),
       status: localizePair({ value: copy.status }, "value", provider.status),
+      apiKeyLabel: localizePair({ value: provider.apiKeyLabel }, "value", t("translation.api_key")),
+      endpointLabel: localizePair({ value: provider.endpointLabel }, "value", t("translation.endpoint")),
+      regionLabel: localizePair({ value: provider.regionLabel }, "value", t("translation.region")),
+      modelLabel: localizePair({ value: provider.modelLabel }, "value", t("translation.model")),
     };
+  }
+
+  function getTranslationProviderSettingValue(providerName, providerSettings, fieldName) {
+    const settings = providerSettings || {};
+    if (providerName === "google_cloud_translation_v3") {
+      if (fieldName === "api_key") {
+        return settings.access_token || "";
+      }
+      if (fieldName === "endpoint") {
+        return settings.project_id || "";
+      }
+      if (fieldName === "region") {
+        return settings.location || "global";
+      }
+    }
+    return settings[fieldName] || "";
+  }
+
+  function setTranslationProviderSettingValue(providerName, targetSettings, fieldName, value) {
+    if (!targetSettings) return;
+    if (providerName === "google_cloud_translation_v3") {
+      if (fieldName === "api_key") {
+        targetSettings.access_token = value;
+        targetSettings.api_key = "";
+        return;
+      }
+      if (fieldName === "endpoint") {
+        targetSettings.project_id = value;
+        targetSettings.endpoint = "";
+        return;
+      }
+      if (fieldName === "region") {
+        targetSettings.location = value || "global";
+        targetSettings.region = "";
+        return;
+      }
+    }
+    targetSettings[fieldName] = value;
+  }
+
+  function setTranslationFieldLabel(labelElement, fallbackKey, overrideText) {
+    if (!labelElement) return;
+    labelElement.textContent = overrideText || t(fallbackKey);
   }
 
   function getLocalizedStylePresetMeta(presetName, preset) {
@@ -1536,6 +1601,22 @@
     });
     translation.provider_settings.google_translate_v2.api_key =
       String(translation.provider_settings.google_translate_v2.api_key || "");
+    translation.provider_settings.google_cloud_translation_v3.project_id =
+      String(translation.provider_settings.google_cloud_translation_v3.project_id || "");
+    translation.provider_settings.google_cloud_translation_v3.access_token =
+      String(
+        translation.provider_settings.google_cloud_translation_v3.access_token ||
+          translation.provider_settings.google_cloud_translation_v3.api_key ||
+          ""
+      );
+    translation.provider_settings.google_cloud_translation_v3.location =
+      String(
+        translation.provider_settings.google_cloud_translation_v3.location ||
+          translation.provider_settings.google_cloud_translation_v3.region ||
+          PROVIDERS.google_cloud_translation_v3.regionPlaceholder
+      );
+    translation.provider_settings.google_cloud_translation_v3.model =
+      String(translation.provider_settings.google_cloud_translation_v3.model || "");
     translation.provider_settings.google_gas_url.gas_url =
       String(translation.provider_settings.google_gas_url.gas_url || "");
     translation.provider_settings.google_web = {};
@@ -1576,7 +1657,6 @@
     translation.provider_settings.ollama.model = String(translation.provider_settings.ollama.model || "");
     translation.provider_settings.ollama.custom_prompt =
       String(translation.provider_settings.ollama.custom_prompt || "");
-    translation.provider_settings.mymemory = {};
     translation.provider_settings.public_libretranslate_mirror.api_url =
       String(
         translation.provider_settings.public_libretranslate_mirror.api_url ||
@@ -2130,7 +2210,24 @@
     return typeof value === "number" ? `${value.toFixed(1)} ms` : "n/a";
   }
 
+  function formatAgeFromUtc(isoText) {
+    const raw = String(isoText || "").trim();
+    if (!raw) {
+      return getCurrentLocale() === "ru" ? "нет данных" : "not available";
+    }
+    const timestamp = Date.parse(raw);
+    if (!Number.isFinite(timestamp)) {
+      return getCurrentLocale() === "ru" ? "нет данных" : "not available";
+    }
+    return `${Math.max(0, Math.round(Date.now() - timestamp))} ms`;
+  }
+
+  function formatOptionalMetric(value) {
+    return typeof value === "number" ? `${Number(value).toFixed(1)} ms` : (getCurrentLocale() === "ru" ? "нет данных" : "not available");
+  }
+
   function renderDiagnostics(diagnostics, translationDiagnostics, metrics, obsCaptionDiagnostics) {
+    const browserWorker = diagnostics?.browser_worker || null;
     if (asrProviderBadge) {
       asrProviderBadge.textContent = t("runtime.badge.asr", { value: diagnostics?.provider || t("common.unknown").toLowerCase() });
     }
@@ -2279,6 +2376,47 @@
       }
       translationDiagnosticsText.textContent = parts.join(" | ");
     }
+    if (translationRuntimeText) {
+      if (!translationDiagnostics || translationDiagnostics.status === "disabled") {
+        translationRuntimeText.textContent = getCurrentLocale() === "ru" ? "translation queue idle" : "translation queue idle";
+      } else {
+        const parts = [
+          `queue: ${translationDiagnostics?.queue_depth ?? metrics?.translation_queue_depth ?? 0}`,
+          `started: ${translationDiagnostics?.jobs_started ?? metrics?.translation_jobs_started ?? 0}`,
+          `cancelled: ${translationDiagnostics?.jobs_cancelled ?? metrics?.translation_jobs_cancelled ?? 0}`,
+          `stale dropped: ${translationDiagnostics?.stale_results_dropped ?? metrics?.translation_stale_results_dropped ?? 0}`,
+          `provider latency: ${formatOptionalMetric(translationDiagnostics?.last_provider_latency_ms ?? metrics?.translation_provider_latency_ms)}`,
+          `queue latency: ${formatOptionalMetric(translationDiagnostics?.last_queue_latency_ms ?? metrics?.translation_queue_latency_ms)}`,
+        ];
+        if (translationDiagnostics?.last_runtime_reason) {
+          parts.push(`last issue: ${translationDiagnostics.last_runtime_reason}`);
+        }
+        translationRuntimeText.textContent = parts.join(" | ");
+      }
+    }
+    if (browserWorkerDiagnosticsText) {
+      if (diagnostics?.provider !== "browser_google" && !browserWorker) {
+        browserWorkerDiagnosticsText.textContent = getCurrentLocale() === "ru" ? "not available" : "not available";
+      } else if (!browserWorker?.worker_connected) {
+        browserWorkerDiagnosticsText.textContent = getCurrentLocale() === "ru" ? "browser worker not connected" : "browser worker not connected";
+      } else {
+        const parts = [
+          `worker connected: ${browserWorker?.worker_connected ? "yes" : "no"}`,
+          `desired: ${browserWorker?.desired_running === true ? "running" : browserWorker?.desired_running === false ? "stopped" : "not available"}`,
+          `recognition: ${browserWorker?.recognition_state || "not available"}`,
+          `visibility: ${browserWorker?.visibility_state || "not available"}`,
+          `last partial age: ${browserWorker?.last_partial_age_ms != null ? `${browserWorker.last_partial_age_ms} ms` : formatAgeFromUtc(browserWorker?.last_partial_at_utc)}`,
+          `last final age: ${browserWorker?.last_final_age_ms != null ? `${browserWorker.last_final_age_ms} ms` : formatAgeFromUtc(browserWorker?.last_final_at_utc)}`,
+          `rearms: ${browserWorker?.rearm_count ?? 0}`,
+          `watchdog rearms: ${browserWorker?.watchdog_rearm_count ?? 0}`,
+          `last error: ${normalizeExternalMessage(browserWorker?.last_error) || "none"}`,
+        ];
+        if (browserWorker?.degraded_reason) {
+          parts.push(`degraded: ${browserWorker.degraded_reason}`);
+        }
+        browserWorkerDiagnosticsText.textContent = parts.join(" | ");
+      }
+    }
     if (obsCcDiagnosticsText) {
       const parts = [
         `enabled: ${obsCaptionDiagnostics?.enabled ? "yes" : "no"}`,
@@ -2411,6 +2549,11 @@
         `suppressed ${metrics?.suppressed_partial_updates ?? 0}`,
         `vad dropped ${metrics?.vad_dropped_segments ?? 0}`,
       ].join(" | ");
+    }
+    if (logsDiscoverabilityText) {
+      logsDiscoverabilityText.textContent = getCurrentLocale() === "ru"
+        ? "Logs are stored in logs/: translation-dispatcher.log, browser-recognition.log, overlay-events.log, dashboard-live-events.log."
+        : "Logs are stored in logs/: translation-dispatcher.log, browser-recognition.log, overlay-events.log, dashboard-live-events.log.";
     }
   }
 
@@ -3316,10 +3459,17 @@
     const usesApiUrl = providerMeta.fields.includes("api_url");
     const usesModel = providerMeta.fields.includes("model");
     const usesPrompt = providerMeta.fields.includes("custom_prompt");
+    setTranslationFieldLabel(translationApiKeyLabel, "translation.api_key", providerMeta.apiKeyLabel);
+    setTranslationFieldLabel(translationBaseUrlLabel, "translation.base_url", providerMeta.baseUrlLabel);
+    setTranslationFieldLabel(translationGasUrlLabel, "translation.gas_url", providerMeta.gasUrlLabel);
+    setTranslationFieldLabel(translationEndpointLabel, "translation.endpoint", providerMeta.endpointLabel);
+    setTranslationFieldLabel(translationRegionLabel, "translation.region", providerMeta.regionLabel);
+    setTranslationFieldLabel(translationApiUrlLabel, "translation.provider_url", providerMeta.apiUrlLabel);
+    setTranslationFieldLabel(translationModelLabel, "translation.model", providerMeta.modelLabel);
     if (translationApiKey) {
-      translationApiKey.value = providerSettings.api_key || "";
+      translationApiKey.value = getTranslationProviderSettingValue(provider, providerSettings, "api_key");
       translationApiKey.placeholder = usesApiKey
-        ? t("translation.api_key")
+        ? (providerMeta.apiKeyPlaceholder || t("translation.api_key"))
         : (getCurrentLocale() === "ru" ? "Для этого провайдера не используется" : "Not used for this provider");
       translationApiKey.disabled = !usesApiKey;
     }
@@ -3334,14 +3484,14 @@
       translationGasUrl.disabled = !usesGasUrl;
     }
     if (translationEndpoint) {
-      translationEndpoint.value = providerSettings.endpoint || providerMeta.endpointPlaceholder || "";
+      translationEndpoint.value = getTranslationProviderSettingValue(provider, providerSettings, "endpoint") || providerMeta.endpointPlaceholder || "";
       translationEndpoint.placeholder = providerMeta.endpointPlaceholder || t("translation.endpoint");
       translationEndpoint.disabled = !usesEndpoint;
     }
     if (translationRegion) {
-      translationRegion.value = providerSettings.region || "";
+      translationRegion.value = getTranslationProviderSettingValue(provider, providerSettings, "region") || "";
       translationRegion.placeholder = usesRegion
-        ? t("translation.region")
+        ? (providerMeta.regionPlaceholder || t("translation.region"))
         : (getCurrentLocale() === "ru" ? "Для этого провайдера не используется" : "Not used for this provider");
       translationRegion.disabled = !usesRegion;
     }
@@ -3351,8 +3501,8 @@
       translationApiUrl.disabled = !usesApiUrl;
     }
     if (translationModel) {
-      translationModel.value = providerSettings.model || "";
-      translationModel.placeholder = t("translation.model");
+      translationModel.value = getTranslationProviderSettingValue(provider, providerSettings, "model");
+      translationModel.placeholder = providerMeta.modelPlaceholder || t("translation.model");
       translationModel.disabled = !usesModel;
     }
     if (translationCustomPrompt) {
@@ -3503,30 +3653,54 @@
     const provider = translation.provider;
     const providerMeta = PROVIDERS[provider];
     translation.provider_settings[provider] = translation.provider_settings[provider] || {};
-    translation.provider_settings[provider].api_key = providerMeta.fields.includes("api_key")
-      ? translationApiKey?.value || ""
-      : "";
-    translation.provider_settings[provider].base_url = providerMeta.fields.includes("base_url")
-      ? translationBaseUrl?.value || providerMeta.baseUrlPlaceholder || ""
-      : "";
-    translation.provider_settings[provider].gas_url = providerMeta.fields.includes("gas_url")
-      ? translationGasUrl?.value || ""
-      : "";
-    translation.provider_settings[provider].endpoint = providerMeta.fields.includes("endpoint")
-      ? translationEndpoint?.value || providerMeta.endpointPlaceholder || ""
-      : "";
-    translation.provider_settings[provider].region = providerMeta.fields.includes("region")
-      ? translationRegion?.value || ""
-      : "";
-    translation.provider_settings[provider].api_url = providerMeta.fields.includes("api_url")
-      ? translationApiUrl?.value || providerMeta.apiUrlPlaceholder || ""
-      : "";
-    translation.provider_settings[provider].model = providerMeta.fields.includes("model")
-      ? translationModel?.value || ""
-      : "";
-    translation.provider_settings[provider].custom_prompt = providerMeta.fields.includes("custom_prompt")
-      ? translationCustomPrompt?.value || ""
-      : "";
+    setTranslationProviderSettingValue(
+      provider,
+      translation.provider_settings[provider],
+      "api_key",
+      providerMeta.fields.includes("api_key") ? translationApiKey?.value || "" : ""
+    );
+    setTranslationProviderSettingValue(
+      provider,
+      translation.provider_settings[provider],
+      "base_url",
+      providerMeta.fields.includes("base_url") ? translationBaseUrl?.value || providerMeta.baseUrlPlaceholder || "" : ""
+    );
+    setTranslationProviderSettingValue(
+      provider,
+      translation.provider_settings[provider],
+      "gas_url",
+      providerMeta.fields.includes("gas_url") ? translationGasUrl?.value || "" : ""
+    );
+    setTranslationProviderSettingValue(
+      provider,
+      translation.provider_settings[provider],
+      "endpoint",
+      providerMeta.fields.includes("endpoint") ? translationEndpoint?.value || providerMeta.endpointPlaceholder || "" : ""
+    );
+    setTranslationProviderSettingValue(
+      provider,
+      translation.provider_settings[provider],
+      "region",
+      providerMeta.fields.includes("region") ? translationRegion?.value || providerMeta.regionPlaceholder || "" : ""
+    );
+    setTranslationProviderSettingValue(
+      provider,
+      translation.provider_settings[provider],
+      "api_url",
+      providerMeta.fields.includes("api_url") ? translationApiUrl?.value || providerMeta.apiUrlPlaceholder || "" : ""
+    );
+    setTranslationProviderSettingValue(
+      provider,
+      translation.provider_settings[provider],
+      "model",
+      providerMeta.fields.includes("model") ? translationModel?.value || "" : ""
+    );
+    setTranslationProviderSettingValue(
+      provider,
+      translation.provider_settings[provider],
+      "custom_prompt",
+      providerMeta.fields.includes("custom_prompt") ? translationCustomPrompt?.value || "" : ""
+    );
     window.AppState.config.targets = [...translation.target_languages];
     const subtitleOrder = window.AppState.config.subtitle_output.display_order.filter(
       (item) => item === "source" || translation.target_languages.includes(item)

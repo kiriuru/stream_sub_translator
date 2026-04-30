@@ -12,6 +12,12 @@ class RuntimeMetrics(BaseModel):
     asr_final_ms: float | None = None
     translation_ms: float | None = None
     total_ms: float | None = None
+    translation_queue_depth: int = 0
+    translation_jobs_started: int = 0
+    translation_jobs_cancelled: int = 0
+    translation_stale_results_dropped: int = 0
+    translation_queue_latency_ms: float | None = None
+    translation_provider_latency_ms: float | None = None
     partial_updates_emitted: int = 0
     finals_emitted: int = 0
     suppressed_partial_updates: int = 0
@@ -78,6 +84,7 @@ class AsrDiagnostics(BaseModel):
     rnnoise_message: str | None = None
     message: str | None = None
     runtime_initialized: bool = False
+    browser_worker: "BrowserAsrDiagnostics | None" = None
 
 
 class ReleaseSyncStatus(BaseModel):
@@ -306,6 +313,7 @@ class TranslationEvent(BaseModel):
     local_provider: bool = False
     used_default_prompt: bool = False
     status_message: str | None = None
+    is_complete: bool = True
 
 
 class TranslationDiagnostics(BaseModel):
@@ -324,6 +332,34 @@ class TranslationDiagnostics(BaseModel):
     target_languages: list[str] = Field(default_factory=list)
     provider_endpoint: str | None = None
     uses_default_prompt: bool = False
+    queue_depth: int = 0
+    jobs_started: int = 0
+    jobs_cancelled: int = 0
+    stale_results_dropped: int = 0
+    last_queue_latency_ms: float | None = None
+    last_provider_latency_ms: float | None = None
+    last_runtime_reason: str | None = None
+
+
+class BrowserAsrDiagnostics(BaseModel):
+    worker_connected: bool = False
+    desired_running: bool | None = None
+    recognition_running: bool | None = None
+    recognition_state: str | None = None
+    websocket_ready: bool | None = None
+    last_partial_at_utc: str | None = None
+    last_final_at_utc: str | None = None
+    last_partial_age_ms: int | None = None
+    last_final_age_ms: int | None = None
+    last_error: str | None = None
+    error_type: str | None = None
+    rearm_count: int = 0
+    restart_count: int = 0
+    watchdog_rearm_count: int = 0
+    degraded_reason: str | None = None
+    visibility_state: str | None = None
+    last_status_reason: str | None = None
+    last_rearm_delay_ms: int | None = None
 
 
 class ObsCaptionDiagnostics(BaseModel):
