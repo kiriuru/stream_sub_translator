@@ -28,6 +28,15 @@ def collect_project_files(root: Path, prefix: str, *, exclude_dirs: list[str] | 
         entries.append((str(source_file), target_dir))
     return entries
 
+
+def collect_local_site_package(site_packages_root: Path, package_name: str, target_prefix: str):
+    source_path = site_packages_root / package_name
+    if not source_path.exists():
+        raise FileNotFoundError(f"Missing local build dependency for desktop runtime payload: {source_path}")
+    if source_path.is_file():
+        return [(str(source_path), target_prefix)]
+    return collect_project_files(source_path, f"{target_prefix}/{package_name}")
+
 datas = [
     (str(project_root / "bootstrap-python.ps1"), "."),
     (str(project_root / "requirements.txt"), "."),
@@ -40,6 +49,9 @@ datas = [
     (str(project_root / "start.bat"), "."),
     (str(project_root / "update.bat"), "."),
 ]
+site_packages_root = project_root / ".venv" / "Lib" / "site-packages"
+datas += collect_local_site_package(site_packages_root, "lightning", "vendor/python-site-packages")
+datas += collect_local_site_package(site_packages_root, "lightning-2.4.0.dist-info", "vendor/python-site-packages")
 datas += collect_project_files(
     project_root / "backend",
     "backend",

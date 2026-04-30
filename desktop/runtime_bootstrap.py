@@ -13,6 +13,11 @@ from pathlib import Path
 
 PYTHON_VERSION = "3.11.9"
 DESKTOP_USER_DATA_DIRNAME = "user-data"
+OFFLINE_SITE_PACKAGES_DIR = Path("vendor") / "python-site-packages"
+OFFLINE_AI_SEED_PACKAGES = (
+    "lightning",
+    "lightning-2.4.0.dist-info",
+)
 
 
 @dataclass(frozen=True)
@@ -504,12 +509,41 @@ class RuntimeBootstrapper:
             return
         if not self._paths.runtime_ai_requirements.exists():
             raise RuntimeError(f"Missing requirements file: {self._paths.runtime_ai_requirements}")
+        self._seed_offline_ai_packages()
         self._status("Installing local AI recognition dependencies...")
         self._run_command(
             [str(self._paths.venv_python), "-m", "pip", "install", "-r", str(self._paths.runtime_ai_requirements)],
             description="install local AI recognition requirements",
             env=build_runtime_environment(self._paths),
         )
+
+    def _seed_offline_ai_packages(self) -> None:
+        vendor_root = self._paths.bundle_root / OFFLINE_SITE_PACKAGES_DIR
+        if not vendor_root.exists():
+            self._log(f"[deps] No offline AI seed package directory found at {vendor_root}")
+            return
+
+        target_site_packages = self._paths.venv_python.parent.parent / "Lib" / "site-packages"
+        target_site_packages.mkdir(parents=True, exist_ok=True)
+        copied_any = False
+        for package_name in OFFLINE_AI_SEED_PACKAGES:
+            source_path = vendor_root / package_name
+            if not source_path.exists():
+                self._log(f"[deps] Offline AI seed package missing from bundle: {source_path}")
+                continue
+            destination_path = target_site_packages / package_name
+            if destination_path.exists():
+                continue
+            if source_path.is_dir():
+                shutil.copytree(source_path, destination_path, dirs_exist_ok=True)
+            else:
+                destination_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_path, destination_path)
+            copied_any = True
+            self._log(f"[deps] Seeded offline AI package: {package_name}")
+
+        if copied_any:
+            self._log("[deps] Offline AI seed packages were copied into the local .venv before NeMo install.")
 
     def _ensure_model_directory(self) -> None:
         model_dir = self._paths.data_dir / "models"
