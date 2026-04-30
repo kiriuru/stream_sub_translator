@@ -727,17 +727,17 @@
     if (providerName === "google_cloud_translation_v3") {
       if (fieldName === "api_key") {
         targetSettings.access_token = value;
-        targetSettings.api_key = "";
+        delete targetSettings.api_key;
         return;
       }
       if (fieldName === "endpoint") {
         targetSettings.project_id = value;
-        targetSettings.endpoint = "";
+        delete targetSettings.endpoint;
         return;
       }
       if (fieldName === "region") {
         targetSettings.location = value || "global";
-        targetSettings.region = "";
+        delete targetSettings.region;
         return;
       }
     }
@@ -1617,6 +1617,9 @@
       );
     translation.provider_settings.google_cloud_translation_v3.model =
       String(translation.provider_settings.google_cloud_translation_v3.model || "");
+    delete translation.provider_settings.google_cloud_translation_v3.api_key;
+    delete translation.provider_settings.google_cloud_translation_v3.endpoint;
+    delete translation.provider_settings.google_cloud_translation_v3.region;
     translation.provider_settings.google_gas_url.gas_url =
       String(translation.provider_settings.google_gas_url.gas_url || "");
     translation.provider_settings.google_web = {};

@@ -631,14 +631,6 @@
           };
         }
 
-        function applyRecognitionSettingsToRuntime() {
-          sessionManager.applyRecognitionSettings();
-        }
-
-        function maybeRestartRecognitionAfterSettingsChange() {
-          sessionManager.maybeRestartAfterSettingsChange();
-        }
-
         function queueBrowserSettingsSave(reason) {
           const nextWorkerSettings = readWorkerSettingsFromControls();
           setSettingsSaveStatus(
@@ -672,12 +664,8 @@
                   10
                 ) || workerDefaults.forceFinalizationTimeoutMs
               );
-              applyRecognitionSettingsToRuntime();
-              if (!forceFinalizationToggle.checked) {
-                clearForceFinalizeTimer();
-              } else if (state.currentPartial) {
-                scheduleForceFinalize();
-              }
+              sessionManager.applyRecognitionSettings();
+              sessionManager.handleForceFinalizationSettingChange();
               updateCounters();
               appendLog(
                 `worker settings saved to localStorage (${reason}): interim=${interimResultsToggle.checked}, continuous=${continuousResultsToggle.checked}, force_finalization=${forceFinalizationToggle.checked}`
@@ -758,121 +746,6 @@
             : `${state.configuredLanguage} -> source ${state.sourceLang}`;
         }
 
-        function clearForceFinalizeTimer() {
-          if (state.forceFinalizeTimer) {
-            clearTimeout(state.forceFinalizeTimer);
-            state.forceFinalizeTimer = null;
-          }
-        }
-
-        function clearRestartTimer() {
-          if (state.restartTimer) {
-            clearTimeout(state.restartTimer);
-            state.restartTimer = null;
-          }
-        }
-
-        function hasRecentAudioActivity() {
-          return state.lastAudioActivityAt > 0 && (Date.now() - state.lastAudioActivityAt) < 10000;
-        }
-
-        function isTerminalRecognitionError(errorCode) {
-          return ["not-allowed", "service-not-allowed", "audio-capture", "language-not-supported"].includes(
-            String(errorCode || "").trim().toLowerCase()
-          );
-        }
-
-        function markAudioActivity(label) {
-          state.lastAudioActivityAt = Date.now();
-          state.restartAttemptsWithoutAudio = 0;
-          appendLog(`audio activity: ${label}`);
-        }
-
-        function scheduleRecognitionRestart(reason) {
-          clearRestartTimer();
-          if (!state.desiredRunning) {
-            appendLog(`restart skipped: desiredRunning=false (${reason})`);
-            return;
-          }
-          if (state.recognitionState === "starting" || state.recognitionState === "running") {
-            appendLog(`restart skipped: recognition already ${state.recognitionState} (${reason})`);
-            return;
-          }
-          if (isTerminalRecognitionError(state.lastErrorCode)) {
-            state.desiredRunning = false;
-            appendLog(`restart cancelled due to terminal error: ${state.lastErrorCode}`);
-            setStatus(
-              locale() === "ru"
-                ? `остановлено: ошибка ${state.lastErrorCode}`
-                : `stopped: ${state.lastErrorCode}`
-            );
-            return;
-          }
-          if (!hasRecentAudioActivity()) {
-            state.restartAttemptsWithoutAudio += 1;
-          } else {
-            state.restartAttemptsWithoutAudio = 0;
-          }
-          if (state.restartAttemptsWithoutAudio > 0) {
-            appendLog(`restart continuing without recent audio (${state.restartAttemptsWithoutAudio})`);
-          }
-          const delayMs = Math.min(5000, 400 + Math.max(0, state.restartAttemptsWithoutAudio - 1) * 450);
-          appendLog(`restart scheduled in ${delayMs} ms (${reason})`);
-          setStatus("restarting");
-          state.restartTimer = window.setTimeout(() => {
-            tryStartRecognition();
-          }, delayMs);
-        }
-
-        function scheduleForceFinalize() {
-          clearForceFinalizeTimer();
-          if (!forceFinalizationToggle.checked || !state.currentPartial) {
-            return;
-          }
-          state.forceFinalizeTimer = window.setTimeout(() => {
-            if (!state.currentPartial) {
-              return;
-            }
-            state.missingFinalCount += 1;
-            state.forcedCount += 1;
-            sendUpdate({
-              partial: state.currentPartial,
-              final: state.currentPartial,
-              is_final: true,
-              source_lang: state.sourceLang,
-            });
-            finalBox.value = state.currentPartial;
-            partialBox.value = "";
-            state.currentPartial = "";
-            state.hasOpenSentence = false;
-            updateCounters();
-            setStatus("forced-finalized");
-          }, state.forceFinalizationTimeoutMs);
-        }
-
-        function sendUpdate(payload) {
-          if (!state.socket || state.socket.readyState !== WebSocket.OPEN) {
-            setStatus("waiting-for-websocket");
-            appendLog("partial/final skipped: websocket is not open");
-            return;
-          }
-          state.socket.send(
-            JSON.stringify({
-              type: "external_asr_update",
-              partial: payload.partial || "",
-              final: payload.final || "",
-              is_final: Boolean(payload.is_final),
-              source_lang: payload.source_lang || state.sourceLang,
-            })
-          );
-          state.appSendCount += 1;
-          updateCounters();
-        }
-
-        function connectSocket() {
-          sessionManager.ensureSocketConnected();
-        }
-
         async function loadSettings() {
           const storedWorkerSettings = readWorkerSettingsFromLocalStorage();
           try {
@@ -914,132 +787,6 @@
           setSettingsSaveStatus(defaultSettingsSaveStatusText(), false);
         }
 
-        function ensureRecognition() {
-          if (!SpeechRecognitionCtor) {
-            throw new Error(locale() === "ru"
-              ? "Этот браузер не предоставляет SpeechRecognition / webkitSpeechRecognition."
-              : "This browser does not expose SpeechRecognition / webkitSpeechRecognition.");
-          }
-          if (!state.recognition) {
-            state.recognition = new SpeechRecognitionCtor();
-            state.recognition.maxAlternatives = 1;
-            state.recognition.onstart = () => {
-              state.recognitionState = "running";
-              state.restartRequestedAfterStop = false;
-              state.lastErrorCode = "";
-              state.lastErrorMessage = "";
-              appendLog("recognition.onstart");
-              setStatus("listening");
-            };
-            state.recognition.onaudiostart = () => {
-              appendLog("recognition.onaudiostart");
-              setStatus("capturing-audio");
-            };
-            state.recognition.onaudioend = () => {
-              appendLog("recognition.onaudioend");
-            };
-            state.recognition.onsoundstart = () => {
-              state.onSound = true;
-              markAudioActivity("onsoundstart");
-              appendLog("recognition.onsoundstart");
-              updateCounters();
-            };
-            state.recognition.onsoundend = () => {
-              state.onSound = false;
-              appendLog("recognition.onsoundend");
-              updateCounters();
-            };
-            state.recognition.onspeechstart = () => {
-              markAudioActivity("onspeechstart");
-              appendLog("recognition.onspeechstart");
-            };
-            state.recognition.onspeechend = () => {
-              appendLog("recognition.onspeechend");
-              updateCounters();
-            };
-            state.recognition.onnomatch = () => {
-              appendLog("recognition.onnomatch");
-            };
-            state.recognition.onerror = (event) => {
-              state.lastErrorCode = String(event?.error || "").trim().toLowerCase();
-              state.lastErrorMessage = String(event?.message || "");
-              appendLog(`recognition.onerror: ${state.lastErrorCode || "unknown"} ${state.lastErrorMessage}`.trim());
-              setStatus(locale() === "ru" ? `ошибка: ${event.error || "неизвестно"}` : `error: ${event.error || "unknown"}`);
-            };
-            state.recognition.onend = () => {
-              const restartAfterStop = state.restartRequestedAfterStop;
-              state.recognitionState = "idle";
-              state.restartRequestedAfterStop = false;
-              state.onSound = false;
-              updateCounters();
-              appendLog(
-                `recognition.onend (desiredRunning=${state.desiredRunning}, restartAfterStop=${restartAfterStop}, lastError=${state.lastErrorCode || "none"}, noAudioRestarts=${state.restartAttemptsWithoutAudio})`
-              );
-              if (restartAfterStop && state.desiredRunning) {
-                window.setTimeout(() => {
-                  tryStartRecognition();
-                }, 80);
-              } else if (state.desiredRunning) {
-                scheduleRecognitionRestart("onend");
-              } else {
-                setStatus("stopped");
-              }
-            };
-            state.recognition.onresult = (event) => {
-              let interimText = "";
-              let finalText = "";
-              for (let index = event.resultIndex; index < event.results.length; index += 1) {
-                const result = event.results[index];
-                const transcript = String(result?.[0]?.transcript || "").trim();
-                if (!transcript) {
-                  continue;
-                }
-                if (result.isFinal) {
-                  finalText = `${finalText} ${transcript}`.trim();
-                } else {
-                  interimText = `${interimText} ${transcript}`.trim();
-                }
-              }
-              if (interimText) {
-                markAudioActivity("onresult:interim");
-                if (!state.hasOpenSentence) {
-                  state.approxCount += 1;
-                  state.hasOpenSentence = true;
-                }
-                state.currentPartial = interimText;
-                partialBox.value = interimText;
-                sendUpdate({
-                  partial: interimText,
-                  final: "",
-                  is_final: false,
-                  source_lang: state.sourceLang,
-                });
-                scheduleForceFinalize();
-                setStatus("interim");
-              }
-              if (finalText) {
-                markAudioActivity("onresult:final");
-                clearForceFinalizeTimer();
-                state.finalCount += 1;
-                state.currentPartial = "";
-                state.hasOpenSentence = false;
-                finalBox.value = finalText;
-                partialBox.value = "";
-                sendUpdate({
-                  partial: "",
-                  final: finalText,
-                  is_final: true,
-                  source_lang: state.sourceLang,
-                });
-                updateCounters();
-                setStatus("final");
-              }
-            };
-          }
-          applyRecognitionSettingsToRuntime();
-          return state.recognition;
-        }
-
         async function ensureMicrophonePermission() {
           appendLog("requesting microphone permission via getUserMedia");
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1050,8 +797,12 @@
           stream.getTracks().forEach((track) => track.stop());
         }
 
-        function clearPartialText() {
-          partialBox.value = "";
+        function setPartialText(value) {
+          partialBox.value = value;
+        }
+
+        function setFinalText(value) {
+          finalBox.value = value;
         }
 
         const sessionManager = new window.BrowserAsrSessionManager({
@@ -1067,81 +818,17 @@
             interimResults: interimResultsToggle.checked,
             continuous: getContinuousResultsEnabled(),
           }),
-          clearForceFinalizeTimer,
-          scheduleForceFinalize,
-          clearPartialText,
-          applyInterimText: (interimText) => {
-            partialBox.value = interimText;
-            sendUpdate({
-              partial: interimText,
-              final: "",
-              is_final: false,
-              source_lang: state.sourceLang,
-            });
-          },
-          applyFinalText: (finalText) => {
-            finalBox.value = finalText;
-            partialBox.value = "";
-            sendUpdate({
-              partial: "",
-              final: finalText,
-              is_final: true,
-              source_lang: state.sourceLang,
-            });
-          },
+          isForceFinalizationEnabled: () => forceFinalizationToggle.checked,
+          setPartialText,
+          setFinalText,
         });
 
-        async function tryStartRecognition() {
-          if (!state.desiredRunning) {
-            return;
-          }
-          if (state.recognitionState === "starting" || state.recognitionState === "running") {
-            appendLog(`recognition.start skipped: already ${state.recognitionState}`);
-            return;
-          }
-          if (state.recognitionState === "stopping") {
-            appendLog("recognition.start deferred: recognition is stopping");
-            return;
-          }
-          try {
-            const recognition = ensureRecognition();
-            applyRecognitionSettingsToRuntime();
-            state.lastRecognitionStartAt = Date.now();
-            state.recognitionState = "starting";
-            appendLog(
-              `recognition.start lang=${state.configuredLanguage}, interim=${recognition.interimResults}, continuous=${recognition.continuous}`
-            );
-            recognition.start();
-          } catch (error) {
-            const message = error instanceof Error ? error.message : (locale() === "ru" ? "Не удалось запустить браузерное распознавание." : "Could not start browser speech recognition.");
-            const normalizedMessage = String(message).toLowerCase();
-            if (normalizedMessage.includes("already started")) {
-              state.recognitionState = "running";
-              appendLog(`recognition.start skipped: ${message}`);
-              setStatus("listening");
-              return;
-            }
-            state.recognitionState = "idle";
-            appendLog(`recognition.start failed: ${message}`);
-            setStatus(message);
-            scheduleRecognitionRestart("start failed");
-          }
-        }
-
-        async function startRecognition() {
-          await sessionManager.start();
-        }
-
-        function stopRecognition() {
-          sessionManager.stop();
-        }
-
         startButton.addEventListener("click", async () => {
-          await startRecognition();
+          await sessionManager.start();
         });
 
         stopButton.addEventListener("click", () => {
-          stopRecognition();
+          sessionManager.stop();
         });
 
         if (saveSettingsButton) {
@@ -1152,33 +839,29 @@
 
         if (interimResultsToggle) {
           interimResultsToggle.addEventListener("change", () => {
-            applyRecognitionSettingsToRuntime();
+            sessionManager.applyRecognitionSettings();
             queueBrowserSettingsSave("interim_results");
-            maybeRestartRecognitionAfterSettingsChange();
+            sessionManager.maybeRestartAfterSettingsChange();
           });
         }
 
         if (continuousResultsToggle) {
           continuousResultsToggle.addEventListener("change", () => {
-            applyRecognitionSettingsToRuntime();
+            sessionManager.applyRecognitionSettings();
             queueBrowserSettingsSave("continuous_results");
-            maybeRestartRecognitionAfterSettingsChange();
+            sessionManager.maybeRestartAfterSettingsChange();
           });
         }
 
         if (forceFinalizationToggle) {
           forceFinalizationToggle.addEventListener("change", () => {
-            if (!forceFinalizationToggle.checked) {
-              clearForceFinalizeTimer();
-            } else if (state.currentPartial) {
-              scheduleForceFinalize();
-            }
+            sessionManager.handleForceFinalizationSettingChange();
             queueBrowserSettingsSave("force_finalization");
           });
         }
 
         window.addEventListener("beforeunload", () => {
-          stopRecognition();
+          sessionManager.stop();
           if (state.socket && state.socket.readyState <= WebSocket.OPEN) {
             state.socket.close();
           }
@@ -1226,7 +909,7 @@
         }
 
         loadSettings().finally(() => {
-          connectSocket();
+          sessionManager.ensureSocketConnected();
           updateCounters();
           updateVisibilityWarning();
           setSettingsSaveStatus(defaultSettingsSaveStatusText(), false);
@@ -1234,7 +917,7 @@
           appendLog(`worker ready; autostart=${params.get("autostart") === "1" ? "yes" : "no"}`);
           if (params.get("autostart") === "1") {
             window.setTimeout(() => {
-              startRecognition();
+              sessionManager.start();
             }, 150);
           }
         });

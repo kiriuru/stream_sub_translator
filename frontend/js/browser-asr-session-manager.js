@@ -35,6 +35,65 @@
       return this.options.getRecognitionSettings?.() || {};
     }
 
+    _isForceFinalizationEnabled() {
+      return this.options.isForceFinalizationEnabled?.() !== false;
+    }
+
+    _clearForceFinalizeTimer() {
+      if (this.state.forceFinalizeTimer) {
+        clearTimeout(this.state.forceFinalizeTimer);
+        this.state.forceFinalizeTimer = null;
+      }
+    }
+
+    _sendUpdate(payload) {
+      const socket = this.state.socket;
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        this._setStatus("waiting-for-websocket");
+        this._appendLog("partial/final skipped: websocket is not open");
+        return false;
+      }
+      socket.send(
+        JSON.stringify({
+          type: "external_asr_update",
+          partial: payload.partial || "",
+          final: payload.final || "",
+          is_final: Boolean(payload.is_final),
+          source_lang: payload.source_lang || this.state.sourceLang,
+        })
+      );
+      this.state.appSendCount = Number(this.state.appSendCount || 0) + 1;
+      this._updateCounters();
+      return true;
+    }
+
+    _scheduleForceFinalize() {
+      this._clearForceFinalizeTimer();
+      if (!this._isForceFinalizationEnabled() || !this.state.currentPartial) {
+        return;
+      }
+      this.state.forceFinalizeTimer = window.setTimeout(() => {
+        if (!this.state.currentPartial) {
+          return;
+        }
+        this.state.missingFinalCount = Number(this.state.missingFinalCount || 0) + 1;
+        this.state.forcedCount = Number(this.state.forcedCount || 0) + 1;
+        const finalText = this.state.currentPartial;
+        this._sendUpdate({
+          partial: finalText,
+          final: finalText,
+          is_final: true,
+          source_lang: this.state.sourceLang,
+        });
+        this.options.setFinalText?.(finalText);
+        this.options.setPartialText?.("");
+        this.state.currentPartial = "";
+        this.state.hasOpenSentence = false;
+        this._updateCounters();
+        this._setStatus("forced-finalized");
+      }, Number(this.state.forceFinalizationTimeoutMs || 1600));
+    }
+
     _emitWorkerStatus(reason) {
       const socket = this.state.socket;
       if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -121,7 +180,7 @@
       }
       this._appendLog("worker settings changed; restarting recognition to apply them immediately");
       this.state.restartRequestedAfterStop = true;
-      this.options.clearForceFinalizeTimer?.();
+      this._clearForceFinalizeTimer();
       this._clearRestartTimer();
       if (this.state.recognitionState === "stopping") {
         return;
@@ -333,18 +392,31 @@
             this.state.hasOpenSentence = true;
           }
           this.state.currentPartial = interimText;
-          this.options.applyInterimText?.(interimText);
-          this.options.scheduleForceFinalize?.();
+          this.options.setPartialText?.(interimText);
+          this._sendUpdate({
+            partial: interimText,
+            final: "",
+            is_final: false,
+            source_lang: this.state.sourceLang,
+          });
+          this._scheduleForceFinalize();
           this._setStatus("interim");
         }
         if (finalText) {
           this._markActivity("onresult:final");
-          this.options.clearForceFinalizeTimer?.();
+          this._clearForceFinalizeTimer();
           this.state.finalCount = Number(this.state.finalCount || 0) + 1;
           this.state.currentPartial = "";
           this.state.hasOpenSentence = false;
           this.state.lastFinalAt = this._now();
-          this.options.applyFinalText?.(finalText);
+          this.options.setFinalText?.(finalText);
+          this.options.setPartialText?.("");
+          this._sendUpdate({
+            partial: "",
+            final: finalText,
+            is_final: true,
+            source_lang: this.state.sourceLang,
+          });
           this._updateCounters();
           this._setStatus("final");
         }
@@ -487,12 +559,12 @@
       this._appendLog("stop requested by user");
       this.state.desiredRunning = false;
       this.state.restartRequestedAfterStop = false;
-      this.options.clearForceFinalizeTimer?.();
+      this._clearForceFinalizeTimer();
       this._clearRestartTimer();
       this._stopWatchdog();
       this.state.currentPartial = "";
       this.state.hasOpenSentence = false;
-      this.options.clearPartialText?.();
+      this.options.setPartialText?.("");
       if (this.state.recognition) {
         this.state.recognitionState = "stopping";
         try {
@@ -504,6 +576,16 @@
       this._setDegradedReason(null);
       this._setStatus("stopping");
       this._emitWorkerStatus("user-stop");
+    }
+
+    handleForceFinalizationSettingChange() {
+      if (!this._isForceFinalizationEnabled()) {
+        this._clearForceFinalizeTimer();
+        return;
+      }
+      if (this.state.currentPartial) {
+        this._scheduleForceFinalize();
+      }
     }
 
     _startWatchdog() {

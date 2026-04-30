@@ -282,6 +282,48 @@ class SubtitleRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload_after_translation["lifecycle_state"], "completed_only")
         self.assertTrue(payload_after_translation["completed_block_visible"])
 
+    async def test_failed_target_counts_as_received_for_lifecycle(self) -> None:
+        await self.router.handle_transcript(
+            TranscriptEvent(
+                event="final",
+                text="Ошибка перевода",
+                sequence=3,
+                segment=TranscriptSegment(
+                    segment_id="seg-failed-target",
+                    text="Ошибка перевода",
+                    is_final=True,
+                    source_lang="ru",
+                    provider="local",
+                    sequence=3,
+                ),
+            )
+        )
+
+        await self.router.handle_translation(
+            TranslationEvent(
+                sequence=3,
+                source_text="Ошибка перевода",
+                source_lang="ru",
+                provider="google_translate_v2",
+                translations=[
+                    TranslationItem(
+                        target_lang="en",
+                        text="",
+                        provider="google_translate_v2",
+                        cached=False,
+                        success=False,
+                        error="timeout",
+                    )
+                ],
+                is_complete=False,
+            )
+        )
+
+        self.assertTrue(self.router._records[3]["translation_received"])
+        payload = self._last_payload()
+        self.assertEqual(payload["lifecycle_state"], "completed_only")
+        self.assertEqual([item["text"] for item in payload["visible_items"]], ["Ошибка перевода"])
+
 
 if __name__ == "__main__":
     unittest.main()

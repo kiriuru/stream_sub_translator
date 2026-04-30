@@ -20,10 +20,20 @@ _DEFAULT_MAX_CONCURRENT_JOBS = 2
 
 @dataclass(slots=True)
 class _QueuedJob:
+    job_id: int
     sequence: int
     source_text: str
     source_lang: str
     submitted_at_monotonic: float
+
+
+@dataclass(slots=True)
+class _ActiveJob:
+    job_id: int
+    sequence: int
+    source_lang: str
+    source_text_len: int
+    task: asyncio.Task
 
 
 @dataclass(slots=True)
@@ -55,7 +65,8 @@ class TranslationDispatcher:
         self._queue_event = asyncio.Event()
         self._lock = asyncio.Lock()
         self._worker_task: asyncio.Task | None = None
-        self._active_jobs: dict[int, asyncio.Task] = {}
+        self._active_jobs: dict[int, _ActiveJob] = {}
+        self._next_job_id = 0
         self._stopped = False
         self._metrics: dict[str, int | float | str | None] = {
             "translation_queue_depth": 0,
@@ -84,6 +95,7 @@ class TranslationDispatcher:
         await self.cancel_older_than(sequence)
         await self._enqueue(
             _QueuedJob(
+                job_id=self._allocate_job_id(),
                 sequence=sequence,
                 source_text=source_text,
                 source_lang=source_lang,
@@ -102,6 +114,7 @@ class TranslationDispatcher:
                         self._set_runtime_reason_locked("cancelled:replaced_by_newer_sequence")
                         self._log_event_locked(
                             "translation_job_cancelled",
+                            job_id=job.job_id,
                             sequence=job.sequence,
                             source_lang=job.source_lang,
                             source_text_len=len(job.source_text),
@@ -113,14 +126,17 @@ class TranslationDispatcher:
                         continue
                     kept_jobs.append(job)
                 self._queue = deque(kept_jobs)
-            for job_sequence, task in list(self._active_jobs.items()):
-                if job_sequence < sequence and not self._is_sequence_relevant(job_sequence):
-                    tasks_to_cancel.append(task)
+            for active_job in list(self._active_jobs.values()):
+                if active_job.sequence < sequence and not self._is_sequence_relevant(active_job.sequence):
+                    tasks_to_cancel.append(active_job.task)
                     self._increment_metric_locked("translation_jobs_cancelled", 1)
                     self._set_runtime_reason_locked("cancelled:active_job_replaced")
                     self._log_event_locked(
                         "translation_job_cancelled",
-                        sequence=job_sequence,
+                        job_id=active_job.job_id,
+                        sequence=active_job.sequence,
+                        source_lang=active_job.source_lang,
+                        source_text_len=active_job.source_text_len,
                         queue_depth=len(self._queue) + len(self._active_jobs),
                         relevant=False,
                         fresh=False,
@@ -139,7 +155,7 @@ class TranslationDispatcher:
         tasks: list[asyncio.Task] = []
         async with self._lock:
             self._queue.clear()
-            tasks = list(self._active_jobs.values())
+            tasks = [active_job.task for active_job in self._active_jobs.values()]
             self._active_jobs.clear()
             self._metrics["translation_queue_depth"] = 0
             self._emit_metrics_locked()
@@ -161,6 +177,10 @@ class TranslationDispatcher:
         if self._worker_task is not None and not self._worker_task.done():
             return
         self._worker_task = asyncio.create_task(self._worker_loop())
+
+    def _allocate_job_id(self) -> int:
+        self._next_job_id += 1
+        return self._next_job_id
 
     def _translation_config(self) -> dict[str, Any]:
         config = self._config_getter()
@@ -210,6 +230,7 @@ class TranslationDispatcher:
                 is_relevant = self._is_sequence_relevant(dropped_job.sequence)
                 self._log_event_locked(
                     "translation_job_cancelled",
+                    job_id=dropped_job.job_id,
                     sequence=dropped_job.sequence,
                     source_lang=dropped_job.source_lang,
                     source_text_len=len(dropped_job.source_text),
@@ -234,13 +255,20 @@ class TranslationDispatcher:
                         timeout_ms = int(self._provider_timeout_seconds() * 1000)
                         self._metrics["translation_queue_latency_ms"] = round(queue_latency_ms, 2)
                         task = asyncio.create_task(self._run_job(job))
-                        self._active_jobs[job.sequence] = task
+                        self._active_jobs[job.job_id] = _ActiveJob(
+                            job_id=job.job_id,
+                            sequence=job.sequence,
+                            source_lang=job.source_lang,
+                            source_text_len=len(job.source_text),
+                            task=task,
+                        )
                         self._increment_metric_locked("translation_jobs_started", 1)
                         self._set_runtime_reason_locked(None)
                         self._emit_metrics_locked()
                         is_relevant = self._is_sequence_relevant(job.sequence)
                         self._log_event_locked(
                             "translation_job_started",
+                            job_id=job.job_id,
                             sequence=job.sequence,
                             source_lang=job.source_lang,
                             source_text_len=len(job.source_text),
@@ -257,12 +285,15 @@ class TranslationDispatcher:
             raise
 
     async def _run_job(self, job: _QueuedJob) -> None:
+        translation_config: dict[str, Any] | None = None
+        prepared: PreparedTranslationRequest | None = None
         target_tasks: list[asyncio.Task] = []
         try:
             translation_config = self._translation_config()
             if not translation_config.get("enabled"):
                 self._log_event(
                     "translation_publish_skipped",
+                    job_id=job.job_id,
                     sequence=job.sequence,
                     source_lang=job.source_lang,
                     source_text_len=len(job.source_text),
@@ -277,6 +308,7 @@ class TranslationDispatcher:
             if not prepared.target_languages:
                 self._log_event(
                     "translation_publish_skipped",
+                    job_id=job.job_id,
                     sequence=job.sequence,
                     source_lang=job.source_lang,
                     source_text_len=len(job.source_text),
@@ -294,6 +326,7 @@ class TranslationDispatcher:
                     self._emit_metrics_locked()
                 self._log_event(
                     "translation_stale_dropped",
+                    job_id=job.job_id,
                     sequence=job.sequence,
                     source_lang=job.source_lang,
                     source_text_len=len(job.source_text),
@@ -320,6 +353,7 @@ class TranslationDispatcher:
             for target_lang in prepared.target_languages:
                 self._log_event(
                     "translation_target_started",
+                    job_id=job.job_id,
                     sequence=job.sequence,
                     source_lang=job.source_lang,
                     source_text_len=len(job.source_text),
@@ -344,6 +378,7 @@ class TranslationDispatcher:
                     self._emit_metrics_locked()
                 is_relevant = self._is_sequence_relevant(job.sequence)
                 event_fields = {
+                    "job_id": job.job_id,
                     "sequence": job.sequence,
                     "source_lang": job.source_lang,
                     "source_text_len": len(job.source_text),
@@ -365,6 +400,7 @@ class TranslationDispatcher:
                 if self._stopped:
                     self._log_event(
                         "translation_publish_skipped",
+                        job_id=job.job_id,
                         sequence=job.sequence,
                         source_lang=job.source_lang,
                         source_text_len=len(job.source_text),
@@ -383,6 +419,7 @@ class TranslationDispatcher:
                         self._emit_metrics_locked()
                     self._log_event(
                         "translation_stale_dropped",
+                        job_id=job.job_id,
                         sequence=job.sequence,
                         source_lang=job.source_lang,
                         source_text_len=len(job.source_text),
@@ -397,6 +434,7 @@ class TranslationDispatcher:
                     )
                     self._log_event(
                         "translation_publish_skipped",
+                        job_id=job.job_id,
                         sequence=job.sequence,
                         source_lang=job.source_lang,
                         source_text_len=len(job.source_text),
@@ -423,6 +461,7 @@ class TranslationDispatcher:
                 await self._publish_event(event)
                 self._log_event(
                     "translation_publish_accepted",
+                    job_id=job.job_id,
                     sequence=job.sequence,
                     source_lang=job.source_lang,
                     source_text_len=len(job.source_text),
@@ -436,6 +475,7 @@ class TranslationDispatcher:
             if self._stopped or not final_relevant:
                 self._log_event(
                     "translation_publish_skipped",
+                    job_id=job.job_id,
                     sequence=job.sequence,
                     source_lang=job.source_lang,
                     source_text_len=len(job.source_text),
@@ -461,6 +501,7 @@ class TranslationDispatcher:
             await self._publish_event(event)
             self._log_event(
                 "translation_publish_accepted",
+                job_id=job.job_id,
                 sequence=job.sequence,
                 source_lang=job.source_lang,
                 source_text_len=len(job.source_text),
@@ -474,13 +515,44 @@ class TranslationDispatcher:
                 task.cancel()
             await asyncio.gather(*target_tasks, return_exceptions=True)
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("Translation dispatcher job failed for sequence=%s", job.sequence)
+            error_reason = str(exc).strip() or exc.__class__.__name__
+            async with self._lock:
+                self._set_runtime_reason_locked(f"job_error:{error_reason}")
+                self._emit_metrics_locked()
+            target_languages = (
+                list(prepared.target_languages)
+                if prepared is not None
+                else self._normalize_target_languages(translation_config.get("target_languages", []))
+                if isinstance(translation_config, dict)
+                else []
+            )
+            provider_name = (
+                prepared.provider_name
+                if prepared is not None
+                else str(translation_config.get("provider", "")).strip() or None
+                if isinstance(translation_config, dict)
+                else None
+            )
+            self._log_event(
+                "translation_job_error",
+                job_id=job.job_id,
+                sequence=job.sequence,
+                source_lang=job.source_lang,
+                source_text_len=len(job.source_text),
+                provider=provider_name,
+                target_languages=target_languages,
+                relevant=self._is_sequence_relevant(job.sequence),
+                fresh=self._is_sequence_relevant(job.sequence),
+                error_type=exc.__class__.__name__,
+                reason=error_reason,
+            )
         finally:
             async with self._lock:
-                current_task = self._active_jobs.get(job.sequence)
-                if current_task is asyncio.current_task():
-                    self._active_jobs.pop(job.sequence, None)
+                current_job = self._active_jobs.get(job.job_id)
+                if current_job is not None and current_job.task is asyncio.current_task():
+                    self._active_jobs.pop(job.job_id, None)
                 self._emit_metrics_locked()
                 if self._queue:
                     self._queue_event.set()
@@ -609,3 +681,9 @@ class TranslationDispatcher:
             self._metrics_callback(snapshot)
         except Exception:
             logger.exception("Translation dispatcher metrics callback failed")
+
+    @staticmethod
+    def _normalize_target_languages(target_languages: Any) -> list[str]:
+        if not isinstance(target_languages, list):
+            return []
+        return [str(item).strip().lower() for item in target_languages if str(item).strip()]

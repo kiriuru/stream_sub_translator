@@ -16,12 +16,28 @@ class StructuredRuntimeLogger:
     _REDACTED = "[redacted]"
     _SENSITIVE_KEYS = {
         "api_key",
+        "access_token",
+        "refresh_token",
+        "client_secret",
         "password",
         "token",
         "authorization",
         "secret",
+        "bearer",
+        "credential",
+        "credentials",
         "pair_code",
     }
+    _SENSITIVE_KEY_SUBSTRINGS = (
+        "api_key",
+        "token",
+        "secret",
+        "password",
+        "authorization",
+        "bearer",
+        "credential",
+        "pair_code",
+    )
 
     def __init__(
         self,
@@ -68,7 +84,7 @@ class StructuredRuntimeLogger:
 
     def _redact_value(self, key: str | None, value: Any) -> Any:
         normalized_key = str(key or "").strip().lower()
-        if normalized_key in self._SENSITIVE_KEYS:
+        if self._is_sensitive_key(normalized_key):
             return self._REDACTED
         if isinstance(value, Mapping):
             return {str(child_key): self._redact_value(str(child_key), child_value) for child_key, child_value in value.items()}
@@ -77,6 +93,13 @@ class StructuredRuntimeLogger:
         if isinstance(value, tuple):
             return [self._redact_value(None, item) for item in value]
         return value
+
+    def _is_sensitive_key(self, normalized_key: str) -> bool:
+        if not normalized_key:
+            return False
+        if normalized_key in self._SENSITIVE_KEYS:
+            return True
+        return any(fragment in normalized_key for fragment in self._SENSITIVE_KEY_SUBSTRINGS)
 
     def _normalize_channel(self, channel: str) -> str:
         normalized = str(channel or "").strip().lower()

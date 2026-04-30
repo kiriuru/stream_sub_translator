@@ -19,11 +19,21 @@ class _PreparedRequest:
 
 
 class _StubTranslationEngine:
-    def __init__(self, *, delays: dict[str, float] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        delays: dict[str, float] | None = None,
+        fail_prepare: Exception | None = None,
+        target_errors: dict[str, Exception] | None = None,
+    ) -> None:
         self.delays = delays or {}
+        self.fail_prepare = fail_prepare
+        self.target_errors = target_errors or {}
         self.cancelled_targets: list[str] = []
 
     def prepare_request(self, translation_config: dict) -> _PreparedRequest:
+        if self.fail_prepare is not None:
+            raise self.fail_prepare
         return _PreparedRequest(
             provider_name=str(translation_config.get("provider", "stub")),
             provider_settings={},
@@ -45,6 +55,8 @@ class _StubTranslationEngine:
         except asyncio.CancelledError:
             self.cancelled_targets.append(target_lang)
             raise
+        if target_lang in self.target_errors:
+            raise self.target_errors[target_lang]
         return (
             TranslationItem(
                 target_lang=target_lang,
@@ -214,6 +226,50 @@ class TranslationDispatcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("do not leak this sentence", serialized_records)
         self.assertNotIn("top-secret-key", serialized_records)
         self.assertIn("source_text_len", serialized_records)
+
+    async def test_timeout_emits_structured_event_and_job_still_completes(self) -> None:
+        self.config["translation"]["timeout_ms"] = 1000
+        engine = _StubTranslationEngine(delays={"en": 1.2})
+        self.relevant_sequences.add(8)
+        dispatcher = TranslationDispatcher(
+            engine,
+            lambda: self.config,
+            self._publish,
+            lambda sequence: sequence in self.relevant_sequences,
+            self._metrics_callback,
+            structured_logger=self.structured_logger,
+        )
+        await dispatcher.submit_final(sequence=8, source_text="slow target", source_lang="en")
+        await asyncio.sleep(1.35)
+        await dispatcher.stop()
+
+        translation_events = [event for event in self.published_events if event.sequence == 8 and event.translations]
+        self.assertEqual(len(translation_events), 1)
+        self.assertFalse(translation_events[0].translations[0].success)
+        self.assertTrue(any(event.sequence == 8 and event.is_complete for event in self.published_events))
+        self.assertIn("translation_target_timeout", [record["event"] for record in self.structured_logger.records])
+
+    async def test_prepare_request_failure_emits_structured_job_error(self) -> None:
+        engine = _StubTranslationEngine(fail_prepare=RuntimeError("prepare_request exploded"))
+        self.relevant_sequences.add(11)
+        dispatcher = TranslationDispatcher(
+            engine,
+            lambda: self.config,
+            self._publish,
+            lambda sequence: sequence in self.relevant_sequences,
+            self._metrics_callback,
+            structured_logger=self.structured_logger,
+        )
+        await dispatcher.submit_final(sequence=11, source_text="boom", source_lang="en")
+        await asyncio.sleep(0.08)
+        await dispatcher.stop()
+
+        job_error_records = [record for record in self.structured_logger.records if record["event"] == "translation_job_error"]
+        self.assertEqual(len(job_error_records), 1)
+        self.assertEqual(job_error_records[0]["payload"]["sequence"], 11)
+        self.assertEqual(job_error_records[0]["payload"]["error_type"], "RuntimeError")
+        self.assertEqual(job_error_records[0]["payload"]["reason"], "prepare_request exploded")
+        self.assertEqual(self.metrics[-1]["translation_last_runtime_reason"], "job_error:prepare_request exploded")
 
 
 if __name__ == "__main__":

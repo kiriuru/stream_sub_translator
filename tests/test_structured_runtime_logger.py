@@ -38,9 +38,13 @@ class StructuredRuntimeLoggerTests(unittest.TestCase):
                 payload={
                     "api_key": "secret-value",
                     "token": "secret-token",
+                    "access_token": "oauth-token",
+                    "refresh_token": "refresh-me",
                     "nested": {
                         "pair_code": "123456",
                         "authorization": "Bearer abc",
+                        "client_secret": "client-secret-value",
+                        "credentials_blob": "serialized-secret",
                     },
                 },
             )
@@ -48,8 +52,12 @@ class StructuredRuntimeLoggerTests(unittest.TestCase):
             record = json.loads((Path(temp_dir) / "browser-recognition.log").read_text(encoding="utf-8").splitlines()[0])
             self.assertEqual(record["api_key"], "[redacted]")
             self.assertEqual(record["token"], "[redacted]")
+            self.assertEqual(record["access_token"], "[redacted]")
+            self.assertEqual(record["refresh_token"], "[redacted]")
             self.assertEqual(record["nested"]["pair_code"], "[redacted]")
             self.assertEqual(record["nested"]["authorization"], "[redacted]")
+            self.assertEqual(record["nested"]["client_secret"], "[redacted]")
+            self.assertEqual(record["nested"]["credentials_blob"], "[redacted]")
 
     def test_write_failures_are_best_effort(self) -> None:
         with TemporaryDirectory() as temp_dir:

@@ -22,6 +22,14 @@ class BrowserWorkerContractTests(unittest.TestCase):
     def test_worker_page_loads_external_session_manager(self) -> None:
         self.assertIn('/static/js/browser-asr-session-manager.js', self.html)
 
+    def test_worker_page_keeps_only_ui_glue_and_uses_session_manager_for_runtime(self) -> None:
+        self.assertNotIn("function ensureRecognition()", self.html)
+        self.assertNotIn("function sendUpdate(payload)", self.html)
+        self.assertNotIn("async function tryStartRecognition()", self.html)
+        self.assertIn("sessionManager.applyRecognitionSettings()", self.html)
+        self.assertIn("sessionManager.handleForceFinalizationSettingChange()", self.html)
+        self.assertIn("sessionManager.ensureSocketConnected()", self.html)
+
     def test_terminal_errors_cancel_automatic_restart_but_audio_capture_is_recoverable(self) -> None:
         self.assertIn('"not-allowed"', self.manager_js)
         self.assertIn('"service-not-allowed"', self.manager_js)

@@ -65,18 +65,21 @@ flowchart LR
 - `vad.py` — `VadEngine`, partial/final сегментация.
 - `asr_engine.py`, `parakeet_provider.py` — выбор/инициализация ASR-провайдеров.
 - `translation_engine.py` — multi-provider перевод + диагностика.
+- `translation_dispatcher.py` — очередь translation jobs, per-target fan-out, timeout/error handling, structured runtime events.
 - `subtitle_router.py` — orchestration, lifecycle субтитров, broadcast, export hooks.
 - `obs_caption_output.py` — отправка caption в OBS websocket.
 - `overlay_broadcaster.py` — отправка overlay payload в общий WS.
 - `cache_manager.py` — translation cache (`source_lang::target_lang::text`).
 - `profile_manager.py` — CRUD профилей.
 - `session_logger.py` — канализированные логи dashboard/overlay/browser worker.
+- `structured_runtime_logger.py` — JSONL runtime logging с redaction чувствительных полей.
 - `remote_mode.py`, `remote_session.py`, `remote_signaling.py`, `remote_diagnostics.py` — remote foundation.
 
 ### 4.2 Frontend/Overlay/Desktop
 
 - `frontend/index.html` + `frontend/js/*.js` — основной dashboard.
-- `frontend/google_asr.html` — browser speech worker окно.
+- `frontend/google_asr.html` — browser speech worker окно; содержит UI glue и wiring.
+- `frontend/js/browser-asr-session-manager.js` — lifecycle browser recognition, websocket reconnect, watchdog, force-finalization, recovery logic.
 - `frontend/remote_controller_bridge.html` + `remote-controller-bridge.js` — controller bridge.
 - `frontend/remote_worker_bridge.html` + `remote-worker-bridge.js` — worker bridge.
 - `frontend/js/remote-worker-audio-worklet.js` — AudioWorklet обработка входящего WebRTC-аудио.
@@ -86,6 +89,7 @@ flowchart LR
 
 Текущие уточнения по поведению:
 - browser worker сохраняет и применяет `continuous_results` из настроек, без runtime-принуждения внутри страницы;
+- legacy inline recognition/runtime helpers вынесены из `google_asr.html` в `browser-asr-session-manager.js`;
 - overlay broadcast подавляет быстрые дубли идентичных payload, чтобы перевод не переотправлялся пачкой при TTL/republish гонках.
 
 ## 5. Режимы работы и роли
@@ -131,7 +135,7 @@ sequenceDiagram
   VAD-->>Or: partial/final segments
   Or->>ASR: transcribe_chunk
   ASR-->>Or: text partial/final
-  Or->>TR: translate_targets (optional)
+  Or->>TR: submit_final -> TranslationDispatcher -> TranslationEngine (optional)
   Or->>WS: runtime_update/transcript_update/translation_update/subtitle_payload_update/overlay_update
 ```
 
@@ -306,7 +310,25 @@ sequenceDiagram
 Уточнение по Google Cloud:
 - `google_cloud_translation_v3` использует Cloud Translation - Advanced (v3) REST API;
 - для него нужны `project_id` и OAuth `access_token`;
+- UI/backend сохраняют именно `project_id` / `access_token` / `location` / `model`;
 - API key из `google_translate_v2` для него не подходит.
+
+`backend/core/translation_dispatcher.py`:
+
+- принимает только finalized source segments;
+- держит bounded queue и ограничение на concurrent jobs;
+- запускает отдельные async target tasks на каждый target language;
+- публикует `TranslationEvent(is_complete=True)` даже если target завершился timeout/error, чтобы subtitle lifecycle не зависал;
+- пишет structured events:
+  - `translation_job_started`
+  - `translation_target_started`
+  - `translation_target_done`
+  - `translation_target_timeout`
+  - `translation_target_error`
+  - `translation_job_error`
+  - `translation_publish_accepted`
+  - `translation_stale_dropped`
+- active jobs отслеживаются по внутреннему `job_id`, а не только по `sequence`, чтобы повторный submit того же sequence не затирал task bookkeeping.
 
 Translation cache:
 
@@ -368,12 +390,20 @@ Translation cache:
 - `logs/dashboard-live-events.log`
 - `logs/overlay-events.log`
 - `logs/browser-recognition.log`
+- `logs/translation-dispatcher.log`
+- `logs/runtime-metrics.log`
 - `logs/desktop-launcher.log` (desktop build)
 
 `SessionLogManager`:
 
 - пишет channel-aware события;
 - схлопывает повторяющиеся строки (`[repeat] previous line repeated ...`).
+
+`StructuredRuntimeLogger`:
+
+- пишет JSONL runtime-логи по каналам `translation_dispatcher`, `browser_recognition`, `runtime_metrics`;
+- редактирует чувствительные поля не только по точному имени ключа, но и по substring-match (`token`, `secret`, `password`, `authorization`, `credential`, `pair_code`, `api_key`);
+- это покрывает `access_token`, `refresh_token`, `client_secret`, `credentials` и похожие payload-поля.
 
 Runtime metrics (`RuntimeMetrics`) включают:
 
