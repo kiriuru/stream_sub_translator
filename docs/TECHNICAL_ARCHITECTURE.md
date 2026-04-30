@@ -467,11 +467,36 @@ Runtime metrics (`RuntimeMetrics`) включают:
 
 ## 16. Desktop launcher (exe сборка)
 
+Primary desktop release flow now uses a bootstrap one-file launcher.
+
+`desktop/bootstrap_launcher.py`:
+
+- основной публичный `Stream Subtitle Translator.exe`;
+- содержит embedded managed payload;
+- при первом запуске распаковывает рядом:
+  - `.sst-runtime.exe`
+  - `app-runtime/`
+  - затем запускает legacy desktop runtime с диска;
+- умеет:
+  - install
+  - verify
+  - repair
+  - reset managed runtime
+- не запускает Python runtime прямо из onefile resources.
+
+`desktop/bootstrap_payload.py`:
+
+- строит SHA256 manifest embedded payload;
+- проверяет managed runtime файлы;
+- делает staged reinstall/repair `app-runtime/` и hidden runtime exe;
+- не трогает `user-data/` и `logs/`.
+
 `desktop/launcher.py`:
 
+- legacy managed desktop runtime launcher, который запускается уже после bootstrap extraction;
 - splash-экран выбора запуска:
   - Local Mode: Browser/NVIDIA/CPU
-  - Remote Mode: Main PC / AI Processing PC
+  - secondary Remote modes: Controller / Worker
 - сохраняет startup-предпочтения в config/install-profile;
 - запускает backend subprocess с нужными env:
   - `SST_REMOTE_ROLE`
@@ -488,9 +513,16 @@ Runtime metrics (`RuntimeMetrics`) включают:
 ### 17.1 Desktop build
 
 - `build-desktop.bat`
+  - собирает legacy managed desktop runtime;
+  - output нужен как внутренний managed payload для bootstrap release;
   - ставит `requirements.desktop.txt`;
   - запускает PyInstaller (`Stream Subtitle Translator.spec`);
   - опционально сидирует `.python/.venv/user-data`.
+
+- `build-bootstrap-launcher.bat`
+  - сначала строит clean managed desktop runtime;
+  - затем собирает embedded payload archive + manifest;
+  - затем собирает основной one-file bootstrap launcher (`Stream Subtitle Translator Bootstrap.spec`).
 
 ### 17.2 Release publishing
 
@@ -498,7 +530,9 @@ Runtime metrics (`RuntimeMetrics`) включают:
   - обновляет две папки релиза:
     - installed release
     - clean release
-  - чистит transient/runtime-зависимые папки в clean-варианте.
+  - primary release source теперь `dist/bootstrap-launcher/`;
+  - публикует один публичный `Stream Subtitle Translator.exe`;
+  - clean release намеренно начинается без `app-runtime/`, чтобы runtime раскладывался bootstrap launcher-ом при первом запуске.
 
 ### 17.3 Remote lite package
 

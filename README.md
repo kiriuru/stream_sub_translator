@@ -11,11 +11,10 @@ This release README is focused on the desktop product only.
 - Full technical architecture document: [docs/TECHNICAL_ARCHITECTURE.md](./docs/TECHNICAL_ARCHITECTURE.md)
 
 ## Release Package
-This clean release contains only:
+The primary desktop release now ships as:
 - `Stream Subtitle Translator.exe`
-- `app-runtime/`
 
-Do not remove or rename `app-runtime/`. The executable expects it next to the `.exe`.
+On first launch the bootstrap launcher extracts the managed runtime next to itself and then starts the legacy desktop runtime from disk.
 
 ## Quick Start
 1. Extract the archive to a writable folder.
@@ -23,19 +22,59 @@ Do not remove or rename `app-runtime/`. The executable expects it next to the `.
    - `Stream Subtitle Translator.exe`
    - `app-runtime/`
 3. Launch `Stream Subtitle Translator.exe`.
-4. In splash launcher:
-   - Step 1: choose `Local Mode` or `Remote Mode`
-   - Step 2: choose startup profile/role
-5. Wait for the dashboard to open.
+4. In the splash launcher choose one startup profile:
+   - `Quick Start (Browser Speech)`
+   - `Local AI (NVIDIA GPU)`
+   - `Local AI (CPU)`
+5. Wait for the local dashboard to open.
+
+## Bootstrap Launcher
+The bootstrap launcher is now the primary desktop release flow.
+
+What it does:
+- ships as a single public `Stream Subtitle Translator.exe`;
+- contains an embedded managed payload built from the clean desktop runtime;
+- extracts and verifies the legacy managed runtime next to itself on first launch;
+- repairs managed runtime files when `app-runtime/` or the internal runtime executable become corrupted.
+
+Current extracted layout:
+- public launcher: `Stream Subtitle Translator.exe`
+- managed runtime folder: `app-runtime/`
+- hidden internal runtime executable: `.sst-runtime.exe`
+- user data: `user-data/`
+- logs: `logs/`
+
+Build it from source with:
+- `build-bootstrap-launcher.bat`
+
+Bootstrap output:
+- `dist\bootstrap-launcher\Stream Subtitle Translator.exe`
 
 ## Startup Profiles
-- Local mode:
-  - `Quick Start (Browser Speech)` for fastest startup
-  - `Local AI (NVIDIA GPU)` for GPU-first local recognition
-  - `Local AI (CPU)` for CPU-only local recognition
-- Remote mode:
-  - `Main PC (Control & Captions)` for controller relay role
-  - `AI Processing PC` for worker AI role (LAN bind enabled)
+- `Quick Start (Browser Speech)`:
+  - fastest startup path;
+  - keeps recognition in the browser worker window;
+  - skips local AI dependency installation.
+- `Local AI (NVIDIA GPU)`:
+  - provisions the local CUDA PyTorch stack;
+  - intended for NVIDIA systems.
+- `Local AI (CPU)`:
+  - provisions the CPU-only PyTorch stack;
+  - intended for AMD, Intel, or no-GPU systems.
+
+## First Launch Behavior
+The public release starts with only:
+- `Stream Subtitle Translator.exe`
+
+On first launch the bootstrap launcher extracts and/or creates:
+- `.sst-runtime.exe`
+- `app-runtime/`
+- `.python/`
+- `.venv/`
+- `user-data/`
+- `logs/`
+
+These folders are normal for the legacy desktop flow and should be kept next to the executable.
 
 ## Core Features
 - Real-time microphone recognition.
@@ -162,61 +201,11 @@ Overlay query examples:
 - `?profile=default`
 - `?compact=1`
 
-## LAN Remote Foundation (Phase 1)
-This branch now includes an isolated remote foundation that does not change default local behavior.
-
-- Default startup remains local-only on `127.0.0.1`.
-- Remote role can be selected at startup:
-  - `start-remote-controller.bat`
-  - `start-remote-worker.bat`
-- `start-remote-controller.bat` uses lightweight bootstrap by default:
-  - no GPU/CPU profile prompt
-  - no forced local AI/NeMo bootstrap
-  - intended for controller relay mode with remote worker execution
-- Worker launcher enables LAN bind explicitly through runtime flags.
-- API endpoint for diagnostics:
-  - `GET /api/remote/state`
-- API endpoints for LAN pairing baseline:
-  - `POST /api/remote/pair/create`
-  - `POST /api/remote/pair/verify`
-  - `POST /api/remote/heartbeat`
-- Controller endpoints for worker control/sync:
-  - `POST /api/remote/worker/settings/sync`
-  - `POST /api/remote/worker/runtime/start`
-  - `POST /api/remote/worker/runtime/stop`
-  - `GET /api/remote/worker/runtime/status`
-  - `GET /api/remote/worker/health`
-
-Current scope of this phase:
-- remote config normalization
-- runtime role wiring (`disabled|controller|worker`)
-- LAN-bind startup controls
-- remote diagnostics in health/runtime responses
-
-Current LAN bridge baseline:
-- WebRTC signaling websocket:
-  - `WS /ws/remote/signaling?session_id=...&pair_code=...&role=controller|worker`
-- Worker audio ingest websocket:
-  - `WS /ws/remote/audio_ingest?session_id=...&pair_code=...`
-- Controller local result ingest websocket:
-  - `WS /ws/remote/result_ingest`
-- Bridge pages:
-  - `GET /remote/controller-bridge`
-  - `GET /remote/worker-bridge`
-- Bridge pages now include automatic reconnect with exponential backoff for transient LAN disconnects.
-
-Quick LAN test flow:
-1. On worker machine, run `start-remote-worker.bat`.
-2. Open dashboard, go to `Tools & Data -> Remote LAN`, click `Create Local Pair`.
-3. On worker machine, open `Open Local Worker Bridge`.
-4. On controller machine, run `start-remote-controller.bat`.
-5. In controller dashboard `Remote LAN`, set `Worker Base URL` to worker host URL and fill the same session/pair values.
-6. Open `Open Controller Bridge`, choose the required microphone in `Microphone Input`, then click `Start Stream`.
-7. Click `Prepare Remote Run` on controller dashboard `Remote LAN` to run:
-   - worker settings sync
-   - worker runtime start
-   - controller bridge open
-8. Start runtime on the controller dashboard in remote-enabled controller role to route incoming remote transcript/translation events to local preview/overlay/OBS output.
+## Remote Notes
+The source repository still contains optional LAN remote controller/worker support, and the desktop splash now exposes it as a secondary flow:
+- default desktop launch stays on `127.0.0.1`;
+- `Remote Controller` and `Remote Worker` live under the compact secondary `Remote modes` block in the splash launcher;
+- remote tools inside `Tools & Data` are collapsed at the bottom of the dashboard by default.
 
 ## Local Data and Logs
 Created next to the executable:
@@ -253,16 +242,42 @@ Runtime cache/temp paths are managed automatically. First start may take longer 
 ## Update Procedure
 To update SST Desktop:
 1. Close the app.
-2. Replace:
-   - `Stream Subtitle Translator.exe`
-   - `app-runtime/`
-3. Keep existing `user-data/` and `logs/` if you want to preserve settings/history.
+2. Replace the public `Stream Subtitle Translator.exe`.
+3. Keep existing `.python/`, `.venv/`, `user-data/`, and `logs/` if you want to preserve local runtime state, settings, and history.
+4. If `app-runtime/` or `.sst-runtime.exe` were damaged, use:
+   - `--repair`
+   - `--reset-runtime`
+   or the matching maintenance buttons in the bootstrap splash window.
+
+## Building From Source
+- Provision the local dev runtime with `start.bat`.
+- Build the desktop one-folder package with `build-desktop.bat`.
+- Build the experimental bootstrap one-file launcher with `build-bootstrap-launcher.bat`.
+- Publish clean release folders with `publish-desktop-releases.ps1`.
+- Build output:
+  - `dist\Stream Subtitle Translator\`
+  - bootstrap launcher:
+    - `dist\bootstrap-launcher\`
+  - clean release mirror:
+    - `...\stream-sub-translator-desktop-release-clean\`
+
+## Bootstrap Roadmap
+- Install / verify / repair is implemented first.
+- Runtime update from release assets and launcher self-update are tracked in:
+  - [docs/desktop-bootstrap-roadmap.md](./docs/desktop-bootstrap-roadmap.md)
 
 ## Troubleshooting
 - App does not start:
-  - verify `app-runtime/` is present next to `.exe`.
-- Second desktop window refuses to start:
-  - close the already running launcher instance first.
+  - run the bootstrap launcher again and let it recreate `app-runtime/`.
+- Managed runtime looks corrupted:
+  - use the `Repair Runtime` button in the bootstrap window;
+  - or run `Stream Subtitle Translator.exe --repair`.
+- Managed runtime must be rebuilt from scratch:
+  - use the `Reset Runtime` button in the bootstrap window;
+  - or run `Stream Subtitle Translator.exe --reset-runtime`.
+- Desktop window fails during initialization:
+  - review `logs\desktop-launcher.log`;
+  - verify the local `pywebview/pythonnet` runtime inside `app-runtime/`.
 - UI is unreachable:
   - ensure local port `8765` is not occupied by another process.
 - Browser Speech returns no text:

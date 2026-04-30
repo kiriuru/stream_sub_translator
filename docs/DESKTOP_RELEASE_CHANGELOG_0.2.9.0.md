@@ -21,7 +21,33 @@
 - в runtime добавлены structured logs и live diagnostics для translation и browser ASR;
 - desktop dashboard и overlay стали лучше переживать websocket reconnect и late translation arrival.
 
+Дополнительный итог по desktop packaging:
+- primary release flow теперь переведён на bootstrap one-file launcher;
+- публичный релиз распространяется как один `Stream Subtitle Translator.exe`;
+- launcher при первом запуске сам раскладывает managed runtime рядом и умеет verify / repair / reset.
+
 ## Основные изменения
+
+### 0. Новый desktop bootstrap launcher
+
+Desktop release flow переведён с модели "пользователь вручную держит `exe + app-runtime`" на primary bootstrap launcher flow.
+
+Добавлено:
+- отдельный one-file bootstrap launcher;
+- embedded payload, собранный из clean managed desktop runtime;
+- SHA256 manifest для managed runtime файлов;
+- install / verify / repair / reset managed runtime;
+- скрытый internal runtime exe `.sst-runtime.exe`, который bootstrap launcher разворачивает рядом и уже затем запускает;
+- publish-ready clean release теперь может содержать только один публичный `Stream Subtitle Translator.exe`.
+
+Что это даёт:
+- пользователь скачивает один `exe`;
+- launcher сам восстанавливает `app-runtime/`, если он отсутствует или повреждён;
+- managed runtime можно обновить простой заменой публичного `exe`, без ручной переупаковки `app-runtime`.
+
+Что пока не входит:
+- runtime update из GitHub Releases;
+- self-update самого launcher-а.
 
 ### 1. Новый subtitle lifecycle
 
@@ -265,6 +291,11 @@ Remote mode не превращён в hosted/cloud mode.
 - default bind `127.0.0.1:8765`;
 - remote/LAN остаётся opt-in.
 
+UI-уточнение:
+- remote controller/worker modes возвращены в desktop splash;
+- они вынесены во вторичный компактный блок `Remote modes`;
+- remote tools в `Tools & Data` перенесены вниз и свёрнуты по умолчанию.
+
 Локальные улучшения в remote dashboard:
 - polling не крутится без нужды;
 - лучше учитывается pairing context;
@@ -289,6 +320,7 @@ Remote mode не превращён в hosted/cloud mode.
 
 Что отражено в документации:
 - новый translation/runtime flow;
+- новый bootstrap desktop release flow;
 - новые structured logs;
 - новый Google Cloud provider;
 - removal of MyMemory;
@@ -298,6 +330,8 @@ Remote mode не превращён в hosted/cloud mode.
 ## Автотесты
 
 Добавлено и расширено backend coverage для:
+- bootstrap payload manifest / verify / repair;
+- bootstrap launcher maintenance actions;
 - translation dispatcher;
 - translation dispatcher job-level error logging;
 - translation target timeout structured event path;
@@ -313,7 +347,7 @@ Remote mode не превращён в hosted/cloud mode.
 - config normalization для translation providers.
 
 Локальный прогон на момент подготовки файла:
-- `56 tests`
+- `62 tests`
 - `OK`
 
 Команда:
@@ -332,7 +366,8 @@ Remote mode не превращён в hosted/cloud mode.
 4. Добавлены structured logs и live diagnostics для translation и browser ASR.
 5. Исправлены duplicate sends в OBS Closed Captions.
 6. Убран `MyMemory`, добавлен `Google Cloud Translation - Advanced (v3)`.
-7. Версия приведена к `0.2.9.0`.
+7. Primary desktop release переведён на bootstrap one-file launcher с verify / repair / reset managed runtime.
+8. Версия приведена к `0.2.9.0`.
 
 ## Не как часть changelog, а как примечание для подготовки релиза
 

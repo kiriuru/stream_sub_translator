@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import socket
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +17,7 @@ class _FakeWindow:
         self.destroyed = False
         self.loaded_urls: list[str] = []
         self.js_calls: list[str] = []
+        self.events = SimpleNamespace(closed=_FakeEventHook())
 
     def destroy(self) -> None:
         self.destroyed = True
@@ -24,6 +27,11 @@ class _FakeWindow:
 
     def evaluate_js(self, script: str) -> None:
         self.js_calls.append(script)
+
+
+class _FakeEventHook:
+    def __iadd__(self, _handler):
+        return self
 
 
 class LauncherTests(unittest.TestCase):
@@ -66,11 +74,14 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("127.0.0.1:8765", message)
         self.assertIn("Detected another process on port.", message)
 
-    def test_run_returns_error_when_single_instance_guard_is_already_held(self) -> None:
+    def test_run_returns_error_when_webview_start_fails(self) -> None:
         launcher = self._launcher()
-        with mock.patch.object(launcher, "_acquire_single_instance_guard", return_value=False), mock.patch(
-            "desktop.launcher._show_error_dialog"
-        ) as dialog:
+        fake_window = _FakeWindow()
+        fake_webview = SimpleNamespace(
+            create_window=mock.Mock(return_value=fake_window),
+            start=mock.Mock(side_effect=RuntimeError("webview boom")),
+        )
+        with mock.patch.dict(sys.modules, {"webview": fake_webview}), mock.patch("desktop.launcher._show_error_dialog") as dialog:
             result = launcher.run()
 
         self.assertEqual(result, 1)
@@ -87,6 +98,32 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue(window.destroyed)
         self.assertIn("already in use", launcher._startup_error_message or "")
         self.assertTrue(dialog.called)
+
+    def test_set_launch_option_accepts_minimal_remote_modes(self) -> None:
+        launcher = self._launcher()
+
+        self.assertTrue(launcher._set_launch_option("remote_controller"))
+        self.assertEqual(launcher._selected_launch_mode(), "remote_controller")
+        self.assertTrue(launcher._set_launch_option("remote_worker"))
+        self.assertEqual(launcher._selected_launch_mode(), "remote_worker")
+        self.assertFalse(launcher._set_launch_option("not-a-mode"))
+
+    def test_apply_startup_mode_to_config_persists_remote_worker_state(self) -> None:
+        launcher = self._launcher()
+
+        launcher._apply_startup_mode_to_config(
+            launcher_module.STARTUP_MODE_LOCAL,
+            launcher_module.LAUNCH_OPTION_NVIDIA,
+            remote_role="worker",
+            allow_lan=True,
+        )
+
+        payload = json.loads((self.paths.data_dir / "config.json").read_text(encoding="utf-8"))
+        self.assertEqual(payload["asr"]["mode"], "local")
+        self.assertTrue(payload["asr"]["prefer_gpu"])
+        self.assertTrue(payload["remote"]["enabled"])
+        self.assertEqual(payload["remote"]["role"], "worker")
+        self.assertTrue(payload["remote"]["lan"]["bind_enabled"])
 
 
 if __name__ == "__main__":

@@ -805,63 +805,6 @@
         </div>
 
         <div class="tab-panel" data-tab-panel="tools">
-      <section class="panel remote-tools-panel">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Remote LAN</p>
-            <h2>Remote Pairing and Bridge</h2>
-          </div>
-        </div>
-        <p class="muted remote-tools-intro">Use one session and pair code for both controller and worker bridge windows in the same LAN.</p>
-        <div class="remote-tools-layout">
-          <article class="remote-tools-card">
-            <h3>Connection</h3>
-            <div class="remote-tools-fields">
-              <label class="stack-field">
-                <span>Worker Base URL</span>
-                <input id="remote-worker-url" type="text" placeholder="http://192.168.1.50:8765" />
-              </label>
-              <label class="stack-field">
-                <span>Session ID</span>
-                <input id="remote-session-id" type="text" placeholder="sst-..." />
-              </label>
-              <label class="stack-field">
-                <span>Pair Code</span>
-                <input id="remote-pair-code" type="text" placeholder="6 digits" />
-              </label>
-            </div>
-            <div class="remote-tools-action-grid remote-tools-action-grid-compact">
-              <button id="remote-create-pair-btn" class="secondary" type="button">Create Local Pair</button>
-              <button id="remote-refresh-state-btn" class="secondary" type="button">Refresh Remote State</button>
-            </div>
-          </article>
-
-          <article class="remote-tools-card">
-            <h3>Worker Runtime</h3>
-            <div class="remote-tools-action-grid">
-              <button id="remote-worker-sync-btn" class="secondary" type="button">Sync Worker Settings</button>
-              <button id="remote-worker-health-btn" class="secondary" type="button">Check Worker Health</button>
-              <button id="remote-worker-status-btn" class="secondary" type="button">Check Worker Runtime</button>
-              <button id="remote-prepare-run-btn" class="secondary" type="button">Prepare Remote Run</button>
-              <button id="remote-worker-start-btn" class="secondary" type="button">Start Worker Runtime</button>
-              <button id="remote-worker-stop-btn" class="secondary" type="button">Stop Worker Runtime</button>
-            </div>
-          </article>
-
-          <article class="remote-tools-card">
-            <h3>Bridge Windows</h3>
-            <div class="remote-tools-action-grid remote-tools-action-grid-compact">
-              <button id="remote-open-worker-bridge-btn" class="secondary" type="button">Open Local Worker Bridge</button>
-              <button id="remote-open-controller-bridge-btn" class="secondary" type="button">Open Controller Bridge</button>
-            </div>
-          </article>
-        </div>
-        <div class="remote-tools-status">
-          <p id="remote-state-text" class="muted remote-tools-status-line">Remote state: not loaded.</p>
-          <p id="remote-worker-text" class="muted remote-tools-status-line">Worker runtime: not loaded.</p>
-        </div>
-      </section>
-
       <section class="panel">
         <div class="section-heading">
           <div>
@@ -1056,6 +999,58 @@
           </div>
         </article>
       </section>
+
+      <details class="panel remote-tools-panel remote-tools-collapsible">
+        <summary>Remote LAN tools</summary>
+        <p class="muted remote-tools-intro">Secondary LAN-only controller/worker tools. Keep this section closed unless you need pairing, worker runtime control, or bridge windows.</p>
+        <div class="remote-tools-layout">
+          <article class="remote-tools-card">
+            <h3>Connection</h3>
+            <div class="remote-tools-fields">
+              <label class="stack-field">
+                <span>Worker Base URL</span>
+                <input id="remote-worker-url" type="text" placeholder="http://192.168.1.50:8765" />
+              </label>
+              <label class="stack-field">
+                <span>Session ID</span>
+                <input id="remote-session-id" type="text" placeholder="sst-..." />
+              </label>
+              <label class="stack-field">
+                <span>Pair Code</span>
+                <input id="remote-pair-code" type="text" placeholder="6 digits" />
+              </label>
+            </div>
+            <div class="remote-tools-action-grid remote-tools-action-grid-compact">
+              <button id="remote-create-pair-btn" class="secondary" type="button">Create Local Pair</button>
+              <button id="remote-refresh-state-btn" class="secondary" type="button">Refresh Remote State</button>
+            </div>
+          </article>
+
+          <article class="remote-tools-card">
+            <h3>Worker Runtime</h3>
+            <div class="remote-tools-action-grid">
+              <button id="remote-worker-sync-btn" class="secondary" type="button">Sync Worker Settings</button>
+              <button id="remote-worker-health-btn" class="secondary" type="button">Check Worker Health</button>
+              <button id="remote-worker-status-btn" class="secondary" type="button">Check Worker Runtime</button>
+              <button id="remote-prepare-run-btn" class="secondary" type="button">Prepare Remote Run</button>
+              <button id="remote-worker-start-btn" class="secondary" type="button">Start Worker Runtime</button>
+              <button id="remote-worker-stop-btn" class="secondary" type="button">Stop Worker Runtime</button>
+            </div>
+          </article>
+
+          <article class="remote-tools-card">
+            <h3>Bridge Windows</h3>
+            <div class="remote-tools-action-grid remote-tools-action-grid-compact">
+              <button id="remote-open-worker-bridge-btn" class="secondary" type="button">Open Local Worker Bridge</button>
+              <button id="remote-open-controller-bridge-btn" class="secondary" type="button">Open Controller Bridge</button>
+            </div>
+          </article>
+        </div>
+        <div class="remote-tools-status">
+          <p id="remote-state-text" class="muted remote-tools-status-line">Remote state: not loaded.</p>
+          <p id="remote-worker-text" class="muted remote-tools-status-line">Worker runtime: not loaded.</p>
+        </div>
+      </details>
         </div>
       </section>
     </main>

@@ -853,7 +853,16 @@ textarea {
   font-weight: 700;
 }
 
+.remote-tools-collapsible summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
 .advanced-panel[open] summary {
+  margin-bottom: var(--space-4);
+}
+
+.remote-tools-collapsible[open] summary {
   margin-bottom: var(--space-4);
 }
 
