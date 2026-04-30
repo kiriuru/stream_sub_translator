@@ -368,12 +368,3 @@ UI-уточнение:
 6. Убран `MyMemory`, добавлен `Google Cloud Translation - Advanced (v3)`.
 7. Primary desktop release переведён на bootstrap one-file launcher с verify / repair / reset managed runtime.
 8. Версия приведена к `0.2.9.0`.
-
-## Не как часть changelog, а как примечание для подготовки релиза
-
-Для внутренней опоры вместе с этим changelog использовать:
-- [docs/DESKTOP_DIFF_FROM_GITHUB_MAIN.md](/F:/AI/stream-sub-translator/docs/DESKTOP_DIFF_FROM_GITHUB_MAIN.md)
-
-Роли документов разные:
-- `DESKTOP_RELEASE_CHANGELOG_0.2.9.0.md` — публикационный список изменений;
-- `DESKTOP_DIFF_FROM_GITHUB_MAIN.md` — техническая карта расхождений от GitHub baseline.
