@@ -350,6 +350,8 @@ class TranslationDispatcher:
                 )
                 for target_lang in prepared.target_languages
             ]
+            published_items: list[TranslationItem] = []
+            final_status_message: str | None = None
             for target_lang in prepared.target_languages:
                 self._log_event(
                     "translation_target_started",
@@ -459,6 +461,9 @@ class TranslationDispatcher:
                     is_complete=False,
                 )
                 await self._publish_event(event)
+                published_items.append(item)
+                if status_message:
+                    final_status_message = status_message
                 self._log_event(
                     "translation_publish_accepted",
                     job_id=job.job_id,
@@ -489,13 +494,13 @@ class TranslationDispatcher:
                 sequence=job.sequence,
                 source_text=job.source_text,
                 source_lang=job.source_lang,
-                translations=[],
+                translations=list(published_items),
                 provider=prepared.provider_name,
                 provider_group=prepared.provider_group,
                 experimental=prepared.experimental,
                 local_provider=prepared.local_provider,
                 used_default_prompt=False,
-                status_message=None,
+                status_message=final_status_message,
                 is_complete=True,
             )
             await self._publish_event(event)

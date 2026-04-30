@@ -125,10 +125,33 @@ class TranslationDispatcherTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.08)
         await dispatcher.stop()
 
-        translation_events = [event for event in self.published_events if event.translations]
+        translation_events = [event for event in self.published_events if event.translations and not event.is_complete]
         self.assertEqual(len(translation_events), 1)
         self.assertEqual(translation_events[0].translations[0].text, "hello-en")
-        self.assertTrue(any(event.is_complete for event in self.published_events))
+        complete_events = [event for event in self.published_events if event.is_complete]
+        self.assertEqual(len(complete_events), 1)
+        self.assertEqual([item.text for item in complete_events[0].translations], ["hello-en"])
+
+    async def test_completion_event_keeps_published_translations(self) -> None:
+        self.config["translation"]["target_languages"] = ["en", "de"]
+        engine = _StubTranslationEngine(delays={"en": 0.01, "de": 0.02})
+        self.relevant_sequences.add(12)
+        dispatcher = TranslationDispatcher(
+            engine,
+            lambda: self.config,
+            self._publish,
+            lambda sequence: sequence in self.relevant_sequences,
+            self._metrics_callback,
+            structured_logger=self.structured_logger,
+        )
+        await dispatcher.submit_final(sequence=12, source_text="hello", source_lang="en")
+        await asyncio.sleep(0.1)
+        await dispatcher.stop()
+
+        complete_events = [event for event in self.published_events if event.sequence == 12 and event.is_complete]
+        self.assertEqual(len(complete_events), 1)
+        self.assertEqual([item.target_lang for item in complete_events[0].translations], ["en", "de"])
+        self.assertEqual([item.text for item in complete_events[0].translations], ["hello-en", "hello-de"])
 
     async def test_drops_stale_translation_result(self) -> None:
         engine = _StubTranslationEngine(delays={"en": 0.1})
@@ -243,10 +266,13 @@ class TranslationDispatcherTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(1.35)
         await dispatcher.stop()
 
-        translation_events = [event for event in self.published_events if event.sequence == 8 and event.translations]
+        translation_events = [event for event in self.published_events if event.sequence == 8 and event.translations and not event.is_complete]
         self.assertEqual(len(translation_events), 1)
         self.assertFalse(translation_events[0].translations[0].success)
-        self.assertTrue(any(event.sequence == 8 and event.is_complete for event in self.published_events))
+        complete_events = [event for event in self.published_events if event.sequence == 8 and event.is_complete]
+        self.assertEqual(len(complete_events), 1)
+        self.assertEqual(len(complete_events[0].translations), 1)
+        self.assertFalse(complete_events[0].translations[0].success)
         self.assertIn("translation_target_timeout", [record["event"] for record in self.structured_logger.records])
 
     async def test_prepare_request_failure_emits_structured_job_error(self) -> None:

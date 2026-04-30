@@ -681,6 +681,11 @@
     return window.I18n?.getLocale?.() || window.AppState.uiLanguage || "en";
   }
 
+  function normalizeSupportedUiLanguage(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    return ["en", "ru"].includes(normalized) ? normalized : "";
+  }
+
   function t(key, variables) {
     return window.I18n?.t ? window.I18n.t(key, variables) : key;
   }
@@ -1335,6 +1340,15 @@
     const normalized = payload || {};
     delete normalized.runtime;
     delete normalized.name;
+
+    if (!normalized.ui || typeof normalized.ui !== "object") {
+      normalized.ui = {};
+    }
+    normalized.ui.language =
+      normalizeSupportedUiLanguage(normalized.ui.language)
+      || normalizeSupportedUiLanguage(window.I18n?.getLocale?.())
+      || normalizeSupportedUiLanguage(window.AppState?.uiLanguage)
+      || "en";
 
     if (!normalized.audio || typeof normalized.audio !== "object") {
       normalized.audio = { input_device_id: null };
@@ -3604,8 +3618,13 @@
 
   function setConfig(payload) {
     const normalized = ensureConfigShape(payload);
+    const persistedUiLanguage = normalizeSupportedUiLanguage(normalized.ui?.language);
+    if (persistedUiLanguage && persistedUiLanguage !== getCurrentLocale()) {
+      window.I18n?.setLocale?.(persistedUiLanguage);
+    }
     enforceDesktopStartupMode(normalized);
     window.AppState.config = normalized;
+    window.AppState.uiLanguage = persistedUiLanguage || getCurrentLocale();
     window.AppState.selectedAudioInputId = normalized.audio.input_device_id || null;
     if (!window.AppState.selectedStyleLineSlot) {
       window.AppState.selectedStyleLineSlot = "source";
@@ -3844,6 +3863,7 @@
   function parseConfigEditor() {
     if (!configJson) return ensureConfigShape({});
     const parsed = ensureConfigShape(JSON.parse(configJson.value || "{}"));
+    parsed.ui.language = normalizeSupportedUiLanguage(getCurrentLocale()) || "en";
     parsed.audio.input_device_id = window.AppState.selectedAudioInputId || null;
     setConfig(parsed);
     return window.AppState.config;
@@ -4062,7 +4082,23 @@
 
   window.onTranslationEvent = (payload) => {
     const entry = addTranslationEntry(payload.sequence, payload.source_text);
-    entry.translations = payload.translations || [];
+    const incomingTranslations = Array.isArray(payload.translations) ? payload.translations : [];
+    if (incomingTranslations.length) {
+      const mergedTranslations = new Map();
+      entry.translations.forEach((item) => {
+        if (item && item.target_lang) {
+          mergedTranslations.set(item.target_lang, item);
+        }
+      });
+      incomingTranslations.forEach((item) => {
+        if (item && item.target_lang) {
+          mergedTranslations.set(item.target_lang, item);
+        }
+      });
+      entry.translations = Array.from(mergedTranslations.values());
+    } else if (!payload.is_complete) {
+      entry.translations = [];
+    }
     const meta = payload.provider ? getProviderMeta(payload.provider) : null;
     const providerLabelParts = [];
     if (payload.provider) {
@@ -4081,7 +4117,11 @@
       providerLabelParts.push(getCurrentLocale() === "ru" ? "Prompt по умолчанию" : "Default prompt");
     }
     entry.providerLabel = providerLabelParts.join(" | ");
-    entry.statusMessage = payload.status_message || "";
+    if (payload.status_message) {
+      entry.statusMessage = payload.status_message;
+    } else if (!payload.is_complete) {
+      entry.statusMessage = "";
+    }
     renderTranslationResults();
   };
 
@@ -4482,8 +4522,16 @@
   }
 
   if (uiLanguageSelect) {
-    uiLanguageSelect.addEventListener("change", () => {
-      window.I18n?.setLocale?.(uiLanguageSelect.value);
+    uiLanguageSelect.addEventListener("change", async () => {
+      const nextLocale = normalizeSupportedUiLanguage(uiLanguageSelect.value) || "en";
+      window.I18n?.setLocale?.(nextLocale);
+      window.AppState.uiLanguage = nextLocale;
+      window.AppState.config = ensureConfigShape(window.AppState.config || {});
+      window.AppState.config.ui.language = nextLocale;
+      syncConfigText();
+      if (window.AppState.config) {
+        await saveCurrentConfig();
+      }
     });
   }
 

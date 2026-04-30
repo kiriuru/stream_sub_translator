@@ -1,4 +1,4 @@
-# SST Desktop 0.2.9.1
+# SST Desktop 0.2.9.2
 
 SST Desktop is a local Windows application for real-time speech recognition, optional translation, subtitle routing, and OBS-ready output.
 
@@ -9,8 +9,7 @@ This release README is focused on the desktop product only.
 
 ## Technical Documentation
 - Full technical architecture document: [docs/TECHNICAL_ARCHITECTURE.md](./docs/TECHNICAL_ARCHITECTURE.md)
-- Full changelog for `0.2.9.0`: [docs/DESKTOP_RELEASE_CHANGELOG_0.2.9.0.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.2.9.0.md)
-- Delta changelog for `0.2.9.1`: [docs/DESKTOP_RELEASE_CHANGELOG_0.2.9.1.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.2.9.1.md)
+- Unified changelog: [docs/CHANGELOG.md](./docs/CHANGELOG.md)
 
 ## Release Package
 The primary desktop release now ships as:
@@ -298,11 +297,11 @@ To update SST Desktop:
 - Run the current regression tests with:
   - `.venv\Scripts\python.exe -m unittest discover -s tests`
 
-## 0.2.9.1 Notes
-- Desktop Browser Speech is now hard-fixed again to the old dedicated window behavior: a separate Chrome/Chromium/Edge window with a visible address bar and isolated worker profile.
-- The browser worker window-mode selector was removed from the desktop UI. Address-bar mode is the only supported desktop behavior.
-- Clean portable AI bootstrap now seeds offline `lightning 2.4.0` before NeMo ASR dependency installation, which avoids the recent fresh-install failure on missing `lightning`.
-- Versioning now uses the four-part release number `0.2.9.1` consistently across the runtime, API, and docs.
+## 0.2.9.2 Notes
+- Fixed UI language persistence. Interface language now round-trips through the saved desktop config instead of living only in browser storage.
+- Added broader settings save/load regression coverage for the main config groups.
+- Fixed the `Translated Results` card so it no longer falsely says translation is disabled after a valid translation update completes.
+- Versioning now uses the four-part release number `0.2.9.2` consistently across the runtime, API, and docs.
 
 ## Privacy and Runtime Scope
 - SST Desktop is local-first.
@@ -310,7 +309,7 @@ To update SST Desktop:
 - Default bind target is localhost (`127.0.0.1`).
 
 ## Release Version
-- `0.2.9.1`
+- `0.2.9.2`
 - Single runtime source of truth: `backend/versioning.py` (`PROJECT_VERSION`).
 - Future GitHub release sync scaffold:
   - config section: `updates` in `backend/data/config.example.json` and local `config.json`;

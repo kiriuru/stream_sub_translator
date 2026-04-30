@@ -157,6 +157,9 @@ class LocalConfigManager:
         prefer_gpu_default = self._default_prefer_gpu()
         return {
             "profile": "default",
+            "ui": {
+                "language": "",
+            },
             "source_lang": "auto",
             "targets": ["en"],
             "asr": {
@@ -375,6 +378,7 @@ class LocalConfigManager:
         normalized["audio"] = {
             "input_device_id": audio.get("input_device_id"),
         }
+        normalized["ui"] = self._normalize_ui_config(normalized.get("ui", {}))
         normalized["remote"] = self._normalize_remote_config(normalized.get("remote", {}))
         normalized["updates"] = self._normalize_updates_config(normalized.get("updates", {}))
 
@@ -576,6 +580,16 @@ class LocalConfigManager:
             "check_interval_hours": max(1, min(168, check_interval_hours)),
             "last_checked_utc": last_checked_utc,
             "latest_known_version": latest_known_version,
+        }
+
+    def _normalize_ui_config(self, payload: Any) -> dict[str, Any]:
+        defaults = self.default_config()["ui"]
+        current = payload if isinstance(payload, dict) else {}
+        language = str(current.get("language", defaults["language"]) or "").strip().lower()
+        if language not in {"en", "ru"}:
+            language = ""
+        return {
+            "language": language,
         }
 
     def _normalize_remote_config(self, payload: Any) -> dict[str, Any]:

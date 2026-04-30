@@ -13,6 +13,7 @@ class ApiAndWebSocketTests(unittest.TestCase):
     def test_api_route_contracts_cover_health_runtime_settings_version_and_exports(self) -> None:
         config = {
             "source_lang": "ru",
+            "ui": {"language": "en"},
             "translation": {"enabled": True, "target_languages": ["en", "de"]},
             "subtitle_output": {"show_source": True, "show_translations": True},
             "profile": "streamer",
@@ -44,15 +45,20 @@ class ApiAndWebSocketTests(unittest.TestCase):
             self.assertEqual(runtime_stop.status_code, 200)
             self.assertEqual(runtime_stop.json()["runtime"]["status"], "idle")
 
-            settings_save = client.post("/api/settings/save", json={"payload": {**config, "source_lang": "ja"}})
+            settings_save = client.post(
+                "/api/settings/save",
+                json={"payload": {**config, "source_lang": "ja", "ui": {"language": "ru"}}},
+            )
             self.assertEqual(settings_save.status_code, 200)
             self.assertTrue(settings_save.json()["live_applied"])
             self.assertEqual(settings_save.json()["payload"]["source_lang"], "ja")
+            self.assertEqual(settings_save.json()["payload"]["ui"]["language"], "ru")
             self.assertEqual(sandbox.runtime_orchestrator.apply_live_settings_calls[-1]["source_lang"], "ja")
 
             settings_load = client.get("/api/settings/load")
             self.assertEqual(settings_load.status_code, 200)
             self.assertEqual(settings_load.json()["payload"]["source_lang"], "ja")
+            self.assertEqual(settings_load.json()["payload"]["ui"]["language"], "ru")
 
             obs_url = client.get("/api/obs/url")
             self.assertEqual(obs_url.status_code, 200)
