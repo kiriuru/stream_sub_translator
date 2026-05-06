@@ -20,11 +20,12 @@ class StructuredRuntimeLoggerTests(unittest.TestCase):
                 payload={"sequence": 9, "provider": "stub", "latency_ms": 12.5},
             )
 
-            log_path = Path(temp_dir) / "translation-dispatcher.log"
+            log_path = Path(temp_dir) / "runtime-events.jsonl"
             lines = log_path.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(lines), 1)
             record = json.loads(lines[0])
             self.assertEqual(record["event"], "translation_job_started")
+            self.assertEqual(record["channel"], "translation_dispatcher")
             self.assertEqual(record["source"], "translation_dispatcher")
             self.assertEqual(record["sequence"], 9)
             self.assertEqual(record["provider"], "stub")
@@ -49,7 +50,7 @@ class StructuredRuntimeLoggerTests(unittest.TestCase):
                 },
             )
 
-            record = json.loads((Path(temp_dir) / "browser-recognition.log").read_text(encoding="utf-8").splitlines()[0])
+            record = json.loads((Path(temp_dir) / "runtime-events.jsonl").read_text(encoding="utf-8").splitlines()[0])
             self.assertEqual(record["api_key"], "[redacted]")
             self.assertEqual(record["token"], "[redacted]")
             self.assertEqual(record["access_token"], "[redacted]")
@@ -64,3 +65,19 @@ class StructuredRuntimeLoggerTests(unittest.TestCase):
             logger = StructuredRuntimeLogger(Path(temp_dir))
             with patch.object(Path, "open", side_effect=OSError("disk unavailable")):
                 logger.log("runtime_metrics", "metrics_snapshot", payload={"ok": True})
+
+    def test_experimental_browser_channel_is_recorded_in_runtime_events(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            logger = StructuredRuntimeLogger(Path(temp_dir))
+            logger.log(
+                "browser_recognition_experimental",
+                "audio_track_start_attempt",
+                payload={"browser_mode": "browser_google_experimental", "chunk": "not-audio-data"},
+            )
+
+            log_path = Path(temp_dir) / "runtime-events.jsonl"
+            record = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual(record["event"], "audio_track_start_attempt")
+            self.assertEqual(record["channel"], "browser_recognition_experimental")
+            self.assertEqual(record["browser_mode"], "browser_google_experimental")
+            self.assertEqual(record["chunk"], "not-audio-data")

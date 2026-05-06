@@ -12,8 +12,9 @@ from backend.config import (
 
 
 class ProfileManager:
-    def __init__(self, profiles_dir: Path) -> None:
+    def __init__(self, profiles_dir: Path, *, payload_normalizer: Any | None = None) -> None:
         self.profiles_dir = profiles_dir
+        self._payload_normalizer = payload_normalizer
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
 
     def list_profiles(self) -> list[str]:
@@ -34,6 +35,8 @@ class ProfileManager:
         payload.pop("name", None)
         payload["profile"] = name
         normalized = self._normalize_translation_secrets(payload)
+        if callable(self._payload_normalizer):
+            normalized = self._payload_normalizer(normalized, profile_name=name)
         if normalized != payload:
             path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
         return normalized
@@ -75,6 +78,8 @@ class ProfileManager:
         sanitized_payload.pop("name", None)
         sanitized_payload["profile"] = name
         stored_payload = self._normalize_translation_secrets(sanitized_payload)
+        if callable(self._payload_normalizer):
+            stored_payload = self._payload_normalizer(stored_payload, profile_name=name)
         path.write_text(json.dumps(stored_payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return path, stored_payload
 

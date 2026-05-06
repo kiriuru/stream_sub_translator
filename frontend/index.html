@@ -5,19 +5,19 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Stream Subtitle Translator</title>
     <link rel="stylesheet" href="/project-fonts.css?v=20260422a" />
-    <link rel="stylesheet" href="/static/css/app.css?v=20260422c" />
+    <link rel="stylesheet" href="/static/css/app.css?v=20260505a" />
     <link rel="stylesheet" href="/static/css/subtitle-style.css?v=20260422a" />
   </head>
   <body>
     <main class="app-shell">
-      <header class="panel hero-panel">
+      <header class="panel sst-card hero-panel">
         <div class="hero-copy">
           <p class="eyebrow" data-i18n="header.eyebrow">Local Runtime Dashboard</p>
           <h1 data-i18n="header.title">Stream Subtitle Translator</h1>
           <p class="muted hero-description" data-i18n="header.description">Compact local control center for live recognition, translation, subtitle routing, and OBS output.</p>
         </div>
         <div class="hero-actions">
-          <label class="stack-field locale-switcher">
+          <label class="stack-field sst-field locale-switcher">
             <span data-i18n="language.label">Interface language</span>
             <select id="ui-language-select">
               <option value="en" data-i18n="language.en">English</option>
@@ -27,18 +27,18 @@
         </div>
       </header>
 
-      <section class="panel runtime-shell">
+      <section class="panel sst-card sst-health-card runtime-shell">
         <div class="runtime-shell-main">
           <div class="runtime-status">
             <div class="badges">
-              <span id="health-badge" class="badge">health: unknown</span>
-              <span id="runtime-badge" class="badge">runtime: idle</span>
-              <span id="asr-provider-badge" class="badge">asr: unknown</span>
-              <span id="asr-device-badge" class="badge">device: unknown</span>
-              <span id="asr-partials-badge" class="badge">partials: unknown</span>
-              <span id="asr-mode-badge" class="badge">mode: unknown</span>
-              <span id="translation-status-badge" class="badge">translation: unknown</span>
-              <span id="obs-cc-badge" class="badge">obs cc: disabled</span>
+              <span id="health-badge" class="badge sst-status-badge">health: unknown</span>
+              <span id="runtime-badge" class="badge sst-status-badge">runtime: idle</span>
+              <span id="asr-provider-badge" class="badge sst-status-badge">asr: unknown</span>
+              <span id="asr-device-badge" class="badge sst-status-badge">device: unknown</span>
+              <span id="asr-partials-badge" class="badge sst-status-badge">partials: unknown</span>
+              <span id="asr-mode-badge" class="badge sst-status-badge">mode: unknown</span>
+              <span id="translation-status-badge" class="badge sst-status-badge">translation: unknown</span>
+              <span id="obs-cc-badge" class="badge sst-status-badge">obs cc: disabled</span>
             </div>
             <div class="badges" id="runtime-states">
               <span class="badge state-pill" data-state="idle" data-i18n="runtime.state.idle">idle</span>
@@ -62,8 +62,8 @@
 
           <aside class="runtime-side">
             <div class="actions runtime-actions">
-              <button id="start-btn" data-i18n="common.start">Start</button>
-              <button id="stop-btn" class="secondary" data-i18n="common.stop">Stop</button>
+              <button id="start-btn" class="sst-button" data-i18n="common.start">Start</button>
+              <button id="stop-btn" class="secondary sst-button-ghost" data-i18n="common.stop">Stop</button>
             </div>
           </aside>
         </div>
@@ -101,12 +101,68 @@
                   <select id="recognition-mode-select">
                     <option value="local" data-i18n="overview.recognition.mode.local">Local Parakeet</option>
                     <option value="browser_google" data-i18n="overview.recognition.mode.browser_google">Browser Speech</option>
+                    <option value="browser_google_experimental" data-i18n="overview.recognition.mode.browser_google_experimental">Browser Speech (Experimental)</option>
                   </select>
                 </label>
                 <label id="recognition-language-row" hidden>
                   <span class="label" data-i18n="overview.recognition.language">Recognition language</span>
                   <select id="recognition-language-select"></select>
                 </label>
+                <label id="local-asr-provider-row">
+                  <span class="label" data-i18n="overview.recognition.provider">Local ASR provider</span>
+                  <select id="local-asr-provider-select">
+                    <option value="official_eu_parakeet_low_latency" data-i18n="overview.recognition.provider.parakeet_low_latency">Official EU Parakeet Low Latency</option>
+                    <option value="official_eu_parakeet" data-i18n="overview.recognition.provider.parakeet">Official EU Parakeet</option>
+                    <option value="auto" data-i18n="overview.recognition.provider.auto">Auto</option>
+                    <option value="google_legacy_http_experimental" data-i18n="overview.recognition.provider.google_legacy_http">Google Legacy HTTP Speech Experimental</option>
+                  </select>
+                </label>
+                <p id="local-asr-provider-hint" class="muted" data-i18n="overview.recognition.provider.hint">Local backend providers are configured here. To use Google Legacy HTTP Speech Experimental, switch Recognition method to Local Parakeet.</p>
+                <p id="google-legacy-http-warning" class="muted" hidden data-i18n="overview.recognition.provider.google_legacy_http.warning">Experimental legacy Google speech endpoint. Sends audio to Google. Unofficial/unsupported and may stop working.</p>
+                <div id="google-legacy-http-settings" hidden>
+                  <div class="toggle-row">
+                    <label class="checkbox-row">
+                      <input id="google-legacy-http-enabled" type="checkbox" />
+                      <span data-i18n="overview.recognition.provider.google_legacy_http.enabled">Enable this backend provider</span>
+                    </label>
+                  </div>
+                  <div class="actions">
+                    <label class="stack-field grow">
+                      <span data-i18n="overview.recognition.provider.google_legacy_http.language">Recognition language</span>
+                      <input id="google-legacy-http-language" type="text" placeholder="ru-RU" />
+                    </label>
+                    <label class="stack-field grow">
+                      <span data-i18n="overview.recognition.provider.google_legacy_http.endpoint_host">Endpoint host</span>
+                      <input id="google-legacy-http-endpoint-host" type="text" placeholder="https://www.google.com" />
+                    </label>
+                  </div>
+                  <div class="toggle-row">
+                    <label class="checkbox-row">
+                      <input id="google-legacy-http-profanity-filter" type="checkbox" />
+                      <span data-i18n="overview.recognition.provider.google_legacy_http.profanity_filter">Enable profanity filter flag</span>
+                    </label>
+                  </div>
+                  <div class="actions">
+                    <label class="inline-field">
+                      <span data-i18n="overview.recognition.provider.google_legacy_http.connect_timeout_ms">Connect timeout (ms)</span>
+                      <input id="google-legacy-http-connect-timeout-ms" type="number" min="1000" step="100" />
+                    </label>
+                    <label class="inline-field">
+                      <span data-i18n="overview.recognition.provider.google_legacy_http.send_timeout_ms">Send timeout (ms)</span>
+                      <input id="google-legacy-http-send-timeout-ms" type="number" min="1000" step="100" />
+                    </label>
+                  </div>
+                  <div class="actions">
+                    <label class="inline-field">
+                      <span data-i18n="overview.recognition.provider.google_legacy_http.recv_timeout_ms">Receive timeout (ms)</span>
+                      <input id="google-legacy-http-recv-timeout-ms" type="number" min="1000" step="100" />
+                    </label>
+                    <label class="inline-field">
+                      <span data-i18n="overview.recognition.provider.google_legacy_http.max_queue_depth">Max audio queue depth</span>
+                      <input id="google-legacy-http-max-queue-depth" type="number" min="1" step="1" />
+                    </label>
+                  </div>
+                </div>
               </div>
               <p id="recognition-mode-hint" class="muted" data-i18n="overview.recognition.hint.local">Local mode uses the built-in microphone capture, VAD, and Parakeet runtime on this machine.</p>
             </article>
@@ -133,7 +189,7 @@
       </section>
 
       <section class="tab-toolbar">
-        <nav class="tab-bar" aria-label="Dashboard sections" role="tablist">
+        <nav class="tab-bar sst-tabs" aria-label="Dashboard sections" role="tablist">
           <button class="tab-button" type="button" data-tab-target="translation" data-i18n="tab.translation">Translation</button>
           <button class="tab-button" type="button" data-tab-target="subtitles" data-i18n="tab.subtitles">Subtitles</button>
           <button class="tab-button" type="button" data-tab-target="style" data-i18n="tab.style">Style</button>
@@ -818,7 +874,7 @@
         <p id="translation-runtime-text" class="muted">Translation queue idle.</p>
         <p id="browser-worker-diagnostics-text" class="muted">Browser worker not connected.</p>
         <p id="obs-cc-diagnostics-text" class="muted" data-i18n="tools.runtime.loading.obs">OBS Closed Captions diagnostics loading...</p>
-        <p id="logs-discoverability-text" class="muted">Logs are stored in logs/: translation-dispatcher.log, browser-recognition.log, overlay-events.log, dashboard-live-events.log.</p>
+        <p id="logs-discoverability-text" class="muted">Logs are stored in logs/: translation-dispatcher.log, browser-recognition.log, browser-recognition-experimental.log, overlay-events.log, dashboard-live-events.log.</p>
       </section>
 
       <details class="panel advanced-panel">
@@ -972,8 +1028,9 @@
             </div>
           </div>
           <div class="actions">
-            <button id="config-save-btn" data-i18n="tools.config.save">Save Current Config</button>
-            <button id="config-export-btn" class="secondary" data-i18n="tools.config.export">Export Config</button>
+            <button id="config-save-btn" class="sst-button" data-i18n="tools.config.save">Save Current Config</button>
+            <button id="config-export-btn" class="secondary sst-button-ghost" data-i18n="tools.config.export">Export Config</button>
+            <button id="diagnostics-export-btn" class="secondary sst-button-ghost" type="button">Export Diagnostics</button>
           </div>
           <div class="actions">
             <input id="config-import-input" type="file" accept="application/json,.json" />
@@ -1060,13 +1117,10 @@
     </footer>
     <div class="project-version-tag" title="Project version">v0.2.9.0</div>
 
-    <script src="/static/js/state.js?v=20260422a"></script>
-    <script src="/static/js/api.js?v=20260422c"></script>
-    <script src="/static/js/ws.js?v=20260422a"></script>
-    <script src="/static/js/remote.js?v=20260422e"></script>
+    <script src="/static/js/core/redaction.js?v=20260505a"></script>
     <script src="/static/js/subtitle-style.js?v=20260422a"></script>
     <script src="/static/js/desktop.js?v=20260423a"></script>
     <script src="/static/js/i18n.js?v=20260422b"></script>
-    <script src="/static/js/app.js?v=20260423a"></script>
+    <script type="module" src="/static/js/main.js?v=20260505a"></script>
   </body>
 </html>

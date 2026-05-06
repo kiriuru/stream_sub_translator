@@ -45,15 +45,33 @@ def _torch_summary() -> dict[str, object]:
 def _likely_asr_mode(config: dict, model_path: Path, torch_info: dict[str, object]) -> tuple[str, str | None]:
     asr_config = config.get("asr", {}) if isinstance(config, dict) else {}
     asr_mode = str(asr_config.get("mode", "local")).strip().lower() if isinstance(asr_config, dict) else "local"
-    if asr_mode == "browser_google":
+    if asr_mode in {"browser_google", "browser_google_experimental"}:
         browser = asr_config.get("browser", {}) if isinstance(asr_config, dict) else {}
         browser_lang = str(browser.get("recognition_language", "ru-RU")).strip() if isinstance(browser, dict) else "ru-RU"
+        if asr_mode == "browser_google_experimental":
+            return (
+                "browser speech worker (experimental)",
+                "Experimental browser speech mode is configured. Recognition will try SpeechRecognition.start(audioTrack) before falling back to start().",
+            )
         return (
             "browser speech worker",
             f"Browser speech recognition mode is configured. Recognition will run in a separate browser window using {browser_lang}.",
         )
-    provider_preference = str(asr_config.get("provider_preference", "official_eu_parakeet_realtime"))
+    provider_preference = str(asr_config.get("provider_preference", "official_eu_parakeet_low_latency"))
     prefer_gpu = bool(asr_config.get("prefer_gpu", True))
+
+    if provider_preference == "google_legacy_http_experimental":
+        google_legacy_http = asr_config.get("google_legacy_http", {}) if isinstance(asr_config, dict) else {}
+        endpoint_host = (
+            str(google_legacy_http.get("endpoint_host", "")).strip()
+            if isinstance(google_legacy_http, dict)
+            else ""
+        )
+        return (
+            "backend legacy HTTP speech",
+            "Experimental backend streaming provider is selected. "
+            f"Endpoint host: {endpoint_host or 'default Google legacy host'}",
+        )
 
     if not model_path.exists():
         return (
@@ -69,7 +87,7 @@ def _likely_asr_mode(config: dict, model_path: Path, torch_info: dict[str, objec
             return "baseline compatibility", "Baseline provider selected explicitly; realtime is not the active default."
         return "baseline fallback", "Baseline provider selected explicitly."
 
-    if provider_preference in {"official_eu_parakeet_realtime", "auto"}:
+    if provider_preference in {"official_eu_parakeet_low_latency", "auto"}:
         if prefer_gpu and cuda_build and cuda_available:
             return "realtime GPU", None
         if prefer_gpu:
@@ -106,7 +124,7 @@ def main() -> None:
     )
     print(
         f"[preflight] ASR policy: mode={config.get('asr', {}).get('mode', 'local')} | "
-        f"provider={config.get('asr', {}).get('provider_preference', 'official_eu_parakeet_realtime')} | "
+        f"provider={config.get('asr', {}).get('provider_preference', 'official_eu_parakeet_low_latency')} | "
         f"prefer_gpu={'yes' if config.get('asr', {}).get('prefer_gpu', True) else 'no'}"
     )
     print(f"[preflight] Likely runtime mode: {mode_label}")

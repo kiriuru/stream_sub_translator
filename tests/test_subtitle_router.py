@@ -185,10 +185,7 @@ class SubtitleRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["lifecycle_state"], "completed_with_partial")
         self.assertTrue(payload["completed_block_visible"])
         self.assertEqual(payload["active_partial_text"], "Новая")
-        self.assertEqual(
-            [item["text"] for item in payload["visible_items"]],
-            ["Новая", "First phrase"],
-        )
+        self.assertEqual([item["text"] for item in payload["visible_items"]], ["Новая"])
 
     async def test_completed_source_expires_before_translation_and_then_returns_to_idle(self) -> None:
         self._config["subtitle_lifecycle"]["completed_source_ttl_ms"] = 500

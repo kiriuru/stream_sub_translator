@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import json
 import unittest
+import zipfile
+from unittest import mock
 
 from fastapi.testclient import TestClient
 
@@ -14,6 +18,16 @@ class ApiAndWebSocketTests(unittest.TestCase):
         config = {
             "source_lang": "ru",
             "ui": {"language": "en"},
+            "asr": {
+                "mode": "browser_google",
+                "browser": {
+                    "recognition_language": "ru-RU",
+                    "interim_results": True,
+                    "continuous_results": True,
+                    "force_finalization_enabled": True,
+                    "force_finalization_timeout_ms": 1600,
+                },
+            },
             "translation": {"enabled": True, "target_languages": ["en", "de"]},
             "subtitle_output": {"show_source": True, "show_translations": True},
             "profile": "streamer",
@@ -47,18 +61,45 @@ class ApiAndWebSocketTests(unittest.TestCase):
 
             settings_save = client.post(
                 "/api/settings/save",
-                json={"payload": {**config, "source_lang": "ja", "ui": {"language": "ru"}}},
+                json={
+                    "payload": {
+                        **config,
+                        "source_lang": "ja",
+                        "ui": {"language": "ru"},
+                        "asr": {
+                            **config["asr"],
+                            "browser": {
+                                **config["asr"]["browser"],
+                                "recognition_language": "en-US",
+                                "continuous_results": False,
+                            },
+                        },
+                    }
+                },
             )
             self.assertEqual(settings_save.status_code, 200)
             self.assertTrue(settings_save.json()["live_applied"])
             self.assertEqual(settings_save.json()["payload"]["source_lang"], "ja")
             self.assertEqual(settings_save.json()["payload"]["ui"]["language"], "ru")
+            self.assertEqual(settings_save.json()["payload"]["asr"]["browser"]["recognition_language"], "en-US")
+            self.assertFalse(settings_save.json()["payload"]["asr"]["browser"]["continuous_results"])
             self.assertEqual(sandbox.runtime_orchestrator.apply_live_settings_calls[-1]["source_lang"], "ja")
 
             settings_load = client.get("/api/settings/load")
             self.assertEqual(settings_load.status_code, 200)
             self.assertEqual(settings_load.json()["payload"]["source_lang"], "ja")
             self.assertEqual(settings_load.json()["payload"]["ui"]["language"], "ru")
+            self.assertEqual(settings_load.json()["payload"]["asr"]["browser"]["recognition_language"], "en-US")
+            self.assertFalse(settings_load.json()["payload"]["asr"]["browser"]["continuous_results"])
+
+            browser_worker_page = client.get("/google-asr-experimental")
+            self.assertEqual(browser_worker_page.status_code, 200)
+            self.assertIn("browser-asr-audio-track-session-manager.js", browser_worker_page.text)
+
+            dashboard = client.get("/")
+            self.assertEqual(dashboard.status_code, 200)
+            self.assertIn('type="module" src="/static/js/main.js', dashboard.text)
+            self.assertNotIn('/static/js/state.js', dashboard.text)
 
             obs_url = client.get("/api/obs/url")
             self.assertEqual(obs_url.status_code, 200)
@@ -68,6 +109,27 @@ class ApiAndWebSocketTests(unittest.TestCase):
             self.assertEqual(exports.status_code, 200)
             self.assertEqual(exports.json()["exports"], ["sample.srt"])
             self.assertEqual(exports.json()["files"][0]["name"], "sample.srt")
+
+            diagnostics_bundle = client.get("/api/exports/diagnostics")
+            self.assertEqual(diagnostics_bundle.status_code, 200)
+            self.assertEqual(diagnostics_bundle.headers["content-type"], "application/zip")
+            with zipfile.ZipFile(io.BytesIO(diagnostics_bundle.content)) as archive:
+                names = set(archive.namelist())
+                self.assertTrue(
+                    {
+                        "runtime_status.json",
+                        "preflight_report.json",
+                        "config_redacted.json",
+                        "model_manifest.json",
+                        "model_integrity.json",
+                        "latest_session.jsonl",
+                        "backend.log",
+                        "last_errors.json",
+                        "environment.txt",
+                    }.issubset(names)
+                )
+                config_redacted = json.loads(archive.read("config_redacted.json").decode("utf-8"))
+                self.assertEqual(config_redacted["remote"]["role"], "disabled")
 
             devices = client.get("/api/devices/audio-inputs")
             self.assertEqual(devices.status_code, 200)
@@ -125,9 +187,57 @@ class ApiAndWebSocketTests(unittest.TestCase):
                         "final": "final text",
                         "is_final": True,
                         "source_lang": "en-US",
+                        "generation_id": 0,
+                        "session_id": None,
+                        "client_segment_id": None,
+                        "forced_final": False,
                     }
                 ],
             )
+
+    def test_client_event_logging_returns_ok_when_logger_reports_write_failure(self) -> None:
+        with AppStateSandbox() as sandbox, TestClient(app_module.app) as client:
+            with mock.patch.object(
+                sandbox.session_logger,
+                "log",
+                return_value={"ok": True, "logged": False, "reason": "log_write_failed"},
+            ):
+                response = client.post(
+                    "/api/logs/client-event",
+                    json={"channel": "dashboard", "source": "dashboard", "message": "hello"},
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"ok": True, "logged": False, "reason": "log_write_failed"},
+        )
+
+    def test_settings_logs_drop_deprecated_google_legacy_http_api_key(self) -> None:
+        payload = {
+            "source_lang": "ru",
+            "asr": {
+                "mode": "local",
+                "provider_preference": "google_legacy_http_experimental",
+                "google_legacy_http": {
+                    "enabled": True,
+                    "language": "ru-RU",
+                    "api_key": "super-secret-key",
+                },
+            },
+            "translation": {"enabled": False},
+            "subtitle_output": {"show_source": True, "show_translations": True},
+            "remote": {"enabled": False, "role": "disabled"},
+        }
+        with AppStateSandbox(config=payload) as sandbox, TestClient(app_module.app) as client:
+            response = client.post("/api/settings/save", json={"payload": payload})
+
+        self.assertEqual(response.status_code, 200)
+        records = sandbox.structured_runtime_logger.records
+        self.assertTrue(records)
+        latest_payload = records[-1]["payload"]
+        self.assertNotIn("super-secret-key", str(latest_payload))
+        self.assertIn("[redacted]", str(latest_payload))
 
 
 if __name__ == "__main__":

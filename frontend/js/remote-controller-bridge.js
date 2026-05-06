@@ -88,7 +88,7 @@
 
   function log(message) {
     if (!logBox) return;
-    const text = String(message || "");
+    const text = window.SSTRedaction?.redactText ? window.SSTRedaction.redactText(message) : String(message || "");
     if (!VERBOSE_LOGS && isNoisyLogMessage(text)) {
       return;
     }
@@ -111,11 +111,12 @@
 
   function setStatus(message, level) {
     if (!statusLine) return;
-    statusLine.classList.remove("ok", "warn", "bad");
     if (level) {
-      statusLine.classList.add(level);
+      statusLine.dataset.status = level;
+    } else {
+      delete statusLine.dataset.status;
     }
-    statusLine.textContent = message;
+    statusLine.textContent = window.SSTRedaction?.redactText ? window.SSTRedaction.redactText(message) : String(message || "");
   }
 
   function parseQuery() {
@@ -197,7 +198,7 @@
     const nextAttempt = state.reconnectAttempt + 1;
     const delayMs = reconnectDelayMs(nextAttempt);
     const delaySec = (delayMs / 1000).toFixed(1);
-    setStatus(`Connection lost, reconnect in ${delaySec}s...`, "warn");
+    setStatus(`Connection lost, reconnect in ${delaySec}s...`, "warning");
     log(`reconnect scheduled (${reason}) in ${delaySec}s`);
     state.reconnectTimer = window.setTimeout(() => {
       state.reconnectTimer = null;
@@ -909,7 +910,7 @@
     logMicRmsIfNeeded(true);
 
     if (!silent) {
-      setStatus(manual ? "Stopped." : "Bridge restarted.", "warn");
+    setStatus(manual ? "Stopped." : "Bridge restarted.", manual ? "disabled" : "ready");
       if (manual) {
         log("bridge stopped");
       }
@@ -988,7 +989,7 @@
     const pairCode = String(pairCodeInput?.value || "").trim();
     if (!workerUrl || !sessionId || !pairCode) {
       state.manualStop = true;
-      setStatus("Worker URL, Session ID, and Pair Code are required.", "bad");
+      setStatus("Worker URL, Session ID, and Pair Code are required.", "error");
       return;
     }
     persistValues();
@@ -1005,7 +1006,7 @@
       autoGainControl: false,
     };
 
-    setStatus("Requesting microphone access...", "warn");
+    setStatus("Requesting microphone access...", "loading");
     try {
       state.localStream = await navigator.mediaDevices.getUserMedia({
         audio: selectedMicId
@@ -1075,10 +1076,10 @@
     state.pc.onconnectionstatechange = () => {
       log(`pc state: ${state.pc?.connectionState || "unknown"}`);
       if (state.pc?.connectionState === "connected") {
-        setStatus("WebRTC stream is connected to remote worker.", "ok");
+      setStatus("WebRTC stream is connected to remote worker.", "running");
       }
       if (state.pc?.connectionState === "failed") {
-        setStatus("WebRTC connection failed.", "bad");
+      setStatus("WebRTC connection failed.", "error");
         scheduleReconnect("webrtc connection failed");
       }
       if (state.pc?.connectionState === "disconnected" && !state.manualStop) {
@@ -1094,14 +1095,14 @@
     );
     const signalingWs = new WebSocket(signalWsUrl);
     state.signalingWs = signalingWs;
-    setStatus("Connecting to remote signaling...", "warn");
+    setStatus("Connecting to remote signaling...", "loading");
     log(`signaling -> ${signalWsUrl}`);
     log(`signaling websocket state=${signalingWs.readyState}`);
 
     signalingWs.onopen = async () => {
       state.running = true;
       resetReconnectState();
-      setStatus("Signaling connected. Creating offer...", "warn");
+      setStatus("Signaling connected. Creating offer...", "loading");
       await startEventForwarding(workerUrl);
       state.heartbeatTimer = window.setInterval(() => {
         if (state.signalingWs?.readyState === WebSocket.OPEN) {
@@ -1144,23 +1145,23 @@
       }
       if (messageType === "warning") {
         log(`warning: ${message.message || "unknown warning"}`);
-        setStatus("Waiting for worker bridge peer...", "warn");
+      setStatus("Waiting for worker bridge peer...", "loading");
         return;
       }
       if (messageType === "peer_state") {
         const workerConnected = Boolean(message.worker_connected);
-        setStatus(workerConnected ? "Worker bridge connected." : "Waiting for worker bridge peer...", workerConnected ? "ok" : "warn");
+      setStatus(workerConnected ? "Worker bridge connected." : "Waiting for worker bridge peer...", workerConnected ? "running" : "loading");
         return;
       }
       if (messageType === "error") {
         const errorMessage = String(message.message || "unknown");
-        setStatus(`Signaling error: ${errorMessage}`, "bad");
+      setStatus(`Signaling error: ${errorMessage}`, "error");
         log(`error: ${errorMessage}`);
         if (isFatalPairingMessage(errorMessage)) {
           state.fatalPairingError = true;
           state.manualStop = true;
           resetReconnectState();
-          setStatus("Pairing expired or invalid. Create a new pair and start bridge again.", "bad");
+      setStatus("Pairing expired or invalid. Create a new pair and start bridge again.", "error");
           log("fatal pairing error detected; automatic reconnect is stopped");
         }
       }
@@ -1173,7 +1174,7 @@
     signalingWs.onclose = (event) => {
       log(`signaling websocket closed: code=${Number(event?.code || 0)} reason=${String(event?.reason || "")}`);
       if (state.running) {
-        setStatus("Signaling disconnected.", "warn");
+      setStatus("Signaling disconnected.", "warning");
       }
       state.running = false;
       if (!state.manualStop && !state.isClosing) {
@@ -1208,20 +1209,20 @@
 
   connectBtn?.addEventListener("click", () => {
     startBridge().catch((error) => {
-      setStatus(`Start failed: ${error}`, "bad");
+      setStatus(`Start failed: ${error}`, "error");
       log(`start failed: ${error}`);
     });
   });
 
   stopBtn?.addEventListener("click", () => {
     stopBridge({ manual: true }).catch((error) => {
-      setStatus(`Stop failed: ${error}`, "bad");
+      setStatus(`Stop failed: ${error}`, "error");
     });
   });
 
   refreshMicsBtn?.addEventListener("click", () => {
     refreshMicrophones(true).catch((error) => {
-      setStatus(`Microphone refresh failed: ${error}`, "bad");
+      setStatus(`Microphone refresh failed: ${error}`, "error");
       log(`microphone refresh failed: ${error}`);
     });
   });

@@ -114,6 +114,60 @@ class ConfigTranslationProviderTests(unittest.TestCase):
 
         self.assertEqual(normalized["ui"]["language"], "")
 
+    def test_browser_google_experimental_mode_round_trips(self) -> None:
+        saved = self.manager.save(
+            {
+                "asr": {
+                    "mode": "browser_google_experimental",
+                    "browser": {
+                        "recognition_language": "en-US",
+                        "experimental": {
+                            "start_with_audio_track": True,
+                            "fallback_to_default_start": True,
+                            "keep_stream_alive": True,
+                            "audio_track_constraints": {
+                                "echoCancellation": False,
+                                "noiseSuppression": False,
+                                "autoGainControl": False,
+                            },
+                        },
+                    },
+                }
+            }
+        )
+
+        self.assertEqual(saved["asr"]["mode"], "browser_google_experimental")
+        self.assertTrue(saved["asr"]["browser"]["experimental"]["start_with_audio_track"])
+        self.assertTrue(saved["asr"]["browser"]["experimental"]["fallback_to_default_start"])
+        self.assertTrue(saved["asr"]["browser"]["experimental"]["keep_stream_alive"])
+
+    def test_invalid_asr_mode_falls_back_to_local(self) -> None:
+        normalized = self.manager._normalize({"asr": {"mode": "browser_google_beta"}})
+        self.assertEqual(normalized["asr"]["mode"], "local")
+
+    def test_google_legacy_http_provider_preference_round_trips(self) -> None:
+        saved = self.manager.save(
+            {
+                "asr": {
+                    "mode": "local",
+                    "provider_preference": "google_legacy_http_experimental",
+                    "google_legacy_http": {
+                        "enabled": True,
+                        "language": "ru-RU",
+                        "endpoint_host": " https://example.test ",
+                        "pair_id_prefix": " sst-live ",
+                        "max_queue_depth": 60,
+                    },
+                }
+            }
+        )
+
+        self.assertEqual(saved["asr"]["provider_preference"], "google_legacy_http_experimental")
+        self.assertTrue(saved["asr"]["google_legacy_http"]["enabled"])
+        self.assertEqual(saved["asr"]["google_legacy_http"]["endpoint_host"], "https://example.test")
+        self.assertEqual(saved["asr"]["google_legacy_http"]["pair_id_prefix"], "sst-live")
+        self.assertEqual(saved["asr"]["google_legacy_http"]["max_queue_depth"], 60)
+
     def test_main_settings_groups_round_trip_through_save_and_load(self) -> None:
         payload = {
             "profile": "streamer",

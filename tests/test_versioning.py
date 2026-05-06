@@ -21,12 +21,12 @@ class VersioningTests(unittest.TestCase):
                     "enabled": True,
                     "provider": "github_releases",
                     "github_repo": "example/repo",
-                    "latest_known_version": "0.2.9.3",
+                    "latest_known_version": "0.3.1",
                 }
             }
         )
 
-        self.assertEqual(payload["current_version"], "0.2.9.2")
+        self.assertEqual(payload["current_version"], "0.3.0")
         self.assertTrue(payload["sync"]["update_available"])
 
 

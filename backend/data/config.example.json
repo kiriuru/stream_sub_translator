@@ -1,4 +1,5 @@
 {
+  "config_version": 5,
   "profile": "default",
   "source_lang": "auto",
   "targets": [
@@ -6,7 +7,7 @@
   ],
   "asr": {
     "mode": "local",
-    "provider_preference": "official_eu_parakeet_realtime",
+    "provider_preference": "official_eu_parakeet_low_latency",
     "prefer_gpu": true,
     "rnnoise_enabled": false,
     "rnnoise_strength": 70,
@@ -16,6 +17,19 @@
       "continuous_results": false,
       "force_finalization_enabled": true,
       "force_finalization_timeout_ms": 1600
+    },
+    "google_legacy_http": {
+      "enabled": false,
+      "language": "ru-RU",
+      "profanity_filter": false,
+      "connect_timeout_ms": 10000,
+      "send_timeout_ms": 10000,
+      "recv_timeout_ms": 30000,
+      "max_queue_depth": 50,
+      "reconnect_initial_ms": 1000,
+      "reconnect_max_ms": 30000,
+      "endpoint_host": "",
+      "pair_id_prefix": "sst"
     },
     "realtime": {
       "vad_mode": 3,

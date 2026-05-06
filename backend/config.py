@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 from pydantic import BaseModel
 
+from backend.core.config_migrations import migrate_config
 from backend.core.font_catalog import build_font_catalog
 from backend.core.obs_caption_output import OBS_CC_OUTPUT_MODES
 from backend.core.subtitle_style import (
@@ -15,13 +16,14 @@ from backend.core.subtitle_style import (
     merge_style_presets,
     normalize_subtitle_style_config,
 )
-from backend.runtime_paths import RUNTIME_PATHS, ensure_runtime_layout
+from backend.core.paths import APP_PATHS, ensure_app_layout
+from backend.schemas.config_schema import ConfigSchema, CURRENT_CONFIG_VERSION
 
 
 def configure_project_local_environment() -> None:
-    ensure_runtime_layout(RUNTIME_PATHS)
-    cache_root = RUNTIME_PATHS.cache_root
-    temp_root = RUNTIME_PATHS.temp_root
+    ensure_app_layout(APP_PATHS)
+    cache_root = APP_PATHS.cache_root
+    temp_root = APP_PATHS.temp_root
     huggingface_root = cache_root / "huggingface"
 
     directories = (
@@ -63,11 +65,11 @@ class AppSettings(BaseModel):
     app_host: str = "127.0.0.1"
     app_port: int = 8765
     app_name: str = "Stream Subtitle Translator"
-    data_dir: Path = RUNTIME_PATHS.data_dir
+    data_dir: Path = APP_PATHS.user_data_dir
 
     @property
     def project_root(self) -> Path:
-        return RUNTIME_PATHS.project_root
+        return APP_PATHS.project_root
 
     @property
     def config_path(self) -> Path:
@@ -79,15 +81,15 @@ class AppSettings(BaseModel):
 
     @property
     def models_dir(self) -> Path:
-        return self.data_dir / "models"
+        return APP_PATHS.models_dir
 
     @property
     def logs_dir(self) -> Path:
-        return RUNTIME_PATHS.logs_dir
+        return APP_PATHS.logs_dir
 
     @property
     def project_fonts_dir(self) -> Path:
-        return RUNTIME_PATHS.fonts_dir
+        return APP_PATHS.fonts_dir
 
     @property
     def local_base_url(self) -> str:
@@ -156,6 +158,7 @@ class LocalConfigManager:
     def default_config(self) -> dict[str, Any]:
         prefer_gpu_default = self._default_prefer_gpu()
         return {
+            "config_version": CURRENT_CONFIG_VERSION,
             "profile": "default",
             "ui": {
                 "language": "",
@@ -164,7 +167,7 @@ class LocalConfigManager:
             "targets": ["en"],
             "asr": {
                 "mode": "local",
-                "provider_preference": "official_eu_parakeet_realtime",
+                "provider_preference": "official_eu_parakeet_low_latency",
                 "prefer_gpu": prefer_gpu_default,
                 "rnnoise_enabled": False,
                 "rnnoise_strength": 70,
@@ -174,6 +177,29 @@ class LocalConfigManager:
                     "continuous_results": True,
                     "force_finalization_enabled": True,
                     "force_finalization_timeout_ms": 1600,
+                    "experimental": {
+                        "start_with_audio_track": True,
+                        "fallback_to_default_start": True,
+                        "keep_stream_alive": True,
+                        "audio_track_constraints": {
+                            "echoCancellation": False,
+                            "noiseSuppression": False,
+                            "autoGainControl": False,
+                        },
+                    },
+                },
+                "google_legacy_http": {
+                    "enabled": False,
+                    "language": "ru-RU",
+                    "profanity_filter": False,
+                    "connect_timeout_ms": 10000,
+                    "send_timeout_ms": 10000,
+                    "recv_timeout_ms": 30000,
+                    "max_queue_depth": 50,
+                    "reconnect_initial_ms": 1000,
+                    "reconnect_max_ms": 30000,
+                    "endpoint_host": "",
+                    "pair_id_prefix": "sst",
                 },
                 "realtime": {
                     "vad_mode": 3,
@@ -352,10 +378,11 @@ class LocalConfigManager:
 
     def _normalize(self, payload: dict[str, Any]) -> dict[str, Any]:
         normalized = self.default_config()
-        incoming = dict(payload or {})
+        incoming = migrate_config(dict(payload or {}))
         incoming.pop("runtime", None)
         incoming.pop("name", None)
         normalized.update(incoming)
+        normalized["config_version"] = CURRENT_CONFIG_VERSION
 
         profile = normalized.get("profile")
         if not isinstance(profile, str) or not profile.strip():
@@ -434,11 +461,16 @@ class LocalConfigManager:
         if not isinstance(asr, dict):
             asr = {}
         asr_mode = str(asr.get("mode", "local")).strip().lower()
-        if asr_mode not in {"local", "browser_google"}:
+        if asr_mode not in {"local", "browser_google", "browser_google_experimental"}:
             asr_mode = "local"
-        provider_preference = str(asr.get("provider_preference", "official_eu_parakeet_realtime")).strip().lower()
-        if provider_preference not in {"auto", "official_eu_parakeet", "official_eu_parakeet_realtime"}:
-            provider_preference = "official_eu_parakeet_realtime"
+        provider_preference = str(asr.get("provider_preference", "official_eu_parakeet_low_latency")).strip().lower()
+        if provider_preference not in {
+            "auto",
+            "official_eu_parakeet",
+            "official_eu_parakeet_low_latency",
+            "google_legacy_http_experimental",
+        }:
+            provider_preference = "official_eu_parakeet_low_latency"
         browser = asr.get("browser", {})
         if not isinstance(browser, dict):
             browser = {}
@@ -447,6 +479,26 @@ class LocalConfigManager:
             force_finalization_timeout_ms = int(browser.get("force_finalization_timeout_ms", 1600) or 1600)
         except (TypeError, ValueError):
             force_finalization_timeout_ms = 1600
+        experimental_browser = browser.get("experimental", {})
+        if not isinstance(experimental_browser, dict):
+            experimental_browser = {}
+        audio_track_constraints = experimental_browser.get("audio_track_constraints", {})
+        if not isinstance(audio_track_constraints, dict):
+            audio_track_constraints = {}
+        google_legacy_http = asr.get("google_legacy_http", {})
+        if not isinstance(google_legacy_http, dict):
+            google_legacy_http = {}
+        google_legacy_http_defaults = self.default_config()["asr"]["google_legacy_http"]
+
+        def clamp_google_legacy_http_int(key: str, minimum: int, maximum: int) -> int:
+            try:
+                value = int(
+                    google_legacy_http.get(key, google_legacy_http_defaults[key]) or google_legacy_http_defaults[key]
+                )
+            except (TypeError, ValueError):
+                value = int(google_legacy_http_defaults[key])
+            return max(minimum, min(maximum, value))
+
         try:
             rnnoise_strength = int(asr.get("rnnoise_strength", 70) or 70)
         except (TypeError, ValueError):
@@ -465,6 +517,43 @@ class LocalConfigManager:
                 "continuous_results": bool(browser.get("continuous_results", True)),
                 "force_finalization_enabled": bool(browser.get("force_finalization_enabled", True)),
                 "force_finalization_timeout_ms": max(300, min(15000, force_finalization_timeout_ms)),
+                "experimental": {
+                    "start_with_audio_track": bool(experimental_browser.get("start_with_audio_track", True)),
+                    "fallback_to_default_start": bool(
+                        experimental_browser.get("fallback_to_default_start", True)
+                    ),
+                    "keep_stream_alive": bool(experimental_browser.get("keep_stream_alive", True)),
+                    "audio_track_constraints": {
+                        "echoCancellation": bool(audio_track_constraints.get("echoCancellation", False)),
+                        "noiseSuppression": bool(audio_track_constraints.get("noiseSuppression", False)),
+                        "autoGainControl": bool(audio_track_constraints.get("autoGainControl", False)),
+                    },
+                },
+            },
+            "google_legacy_http": {
+                "enabled": bool(google_legacy_http.get("enabled", google_legacy_http_defaults["enabled"])),
+                "language": (
+                    str(google_legacy_http.get("language", google_legacy_http_defaults["language"]) or "ru-RU").strip()
+                    or "ru-RU"
+                ),
+                "profanity_filter": bool(
+                    google_legacy_http.get("profanity_filter", google_legacy_http_defaults["profanity_filter"])
+                ),
+                "connect_timeout_ms": clamp_google_legacy_http_int("connect_timeout_ms", 1000, 120000),
+                "send_timeout_ms": clamp_google_legacy_http_int("send_timeout_ms", 1000, 120000),
+                "recv_timeout_ms": clamp_google_legacy_http_int("recv_timeout_ms", 1000, 300000),
+                "max_queue_depth": clamp_google_legacy_http_int("max_queue_depth", 1, 512),
+                "reconnect_initial_ms": clamp_google_legacy_http_int("reconnect_initial_ms", 100, 120000),
+                "reconnect_max_ms": clamp_google_legacy_http_int("reconnect_max_ms", 100, 300000),
+                "endpoint_host": normalize_provider_text_value(
+                    google_legacy_http.get("endpoint_host", google_legacy_http_defaults["endpoint_host"])
+                ),
+                "pair_id_prefix": (
+                    normalize_provider_text_value(
+                        google_legacy_http.get("pair_id_prefix", google_legacy_http_defaults["pair_id_prefix"])
+                    )
+                    or "sst"
+                ),
             },
             "realtime": self._normalize_realtime_asr_config(asr.get("realtime", {})),
         }
@@ -544,7 +633,8 @@ class LocalConfigManager:
         )
         normalized["asr"]["realtime"]["finalization_hold_ms"] = normalized["subtitle_lifecycle"]["pause_to_finalize_ms"]
         normalized["asr"]["realtime"]["max_segment_ms"] = normalized["subtitle_lifecycle"]["hard_max_phrase_ms"]
-        return normalized
+        normalized["config_version"] = CURRENT_CONFIG_VERSION
+        return ConfigSchema.model_validate(normalized).model_dump(mode="json")
 
     def _normalize_updates_config(self, payload: Any) -> dict[str, Any]:
         defaults = self.default_config()["updates"]
@@ -842,6 +932,12 @@ class LocalConfigManager:
         normalized = self._normalize(payload)
         path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
         return normalized
+
+    def normalize_profile_payload(self, payload: dict[str, Any], *, profile_name: str | None = None) -> dict[str, Any]:
+        normalized = self._normalize(payload)
+        if profile_name:
+            normalized["profile"] = profile_name
+        return ConfigSchema.model_validate(normalized).model_dump(mode="json")
 
     def subtitle_style_presets(self, payload: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
         current_payload = payload if isinstance(payload, dict) else self.load()

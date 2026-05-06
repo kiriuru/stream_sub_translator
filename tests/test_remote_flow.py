@@ -124,8 +124,7 @@ class RemoteFlowTests(unittest.TestCase):
         }
         captured_payloads: list[dict] = []
 
-        async def fake_proxy(request, *, method, path, json_payload=None):
-            _ = request
+        async def fake_proxy(*, method, path, json_payload=None):
             if method == "GET" and path == "/api/settings/load":
                 return "http://worker.local:8765", {"payload": {"asr": {"mode": "browser_google"}}}, None
             if method == "POST" and path == "/api/settings/save":
@@ -134,7 +133,7 @@ class RemoteFlowTests(unittest.TestCase):
             raise AssertionError(f"Unexpected proxy call: {method} {path}")
 
         with AppStateSandbox(config=config) as _sandbox, TestClient(app_module.app) as client:
-            with mock.patch("backend.api.routes_remote._proxy_worker_request", side_effect=fake_proxy):
+            with mock.patch.object(app_module.app.state.runtime_service, "_proxy_worker_request", side_effect=fake_proxy):
                 response = client.post("/api/remote/worker/settings/sync")
 
         self.assertEqual(response.status_code, 200)
@@ -143,6 +142,10 @@ class RemoteFlowTests(unittest.TestCase):
         self.assertEqual(body["worker_asr_mode"], "local")
         self.assertEqual(body["worker_target_languages"], ["en", "de"])
         self.assertEqual(captured_payloads[0]["payload"]["asr"]["mode"], "local")
+        self.assertEqual(
+            captured_payloads[0]["payload"]["asr"]["provider_preference"],
+            "official_eu_parakeet_low_latency",
+        )
         self.assertEqual(captured_payloads[0]["payload"]["translation"]["target_languages"], ["en", "de"])
 
 

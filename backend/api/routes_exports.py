@@ -1,32 +1,25 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Request
+from fastapi.responses import FileResponse
 
-from backend.models import ExportFileInfo, ExportsListResponse
+from backend.models import ExportsListResponse
 
 router = APIRouter(prefix="/api/exports", tags=["exports"])
 
 
 @router.get("", response_model=ExportsListResponse)
 async def list_exports(request: Request) -> ExportsListResponse:
-    export_dir = request.app.state.app_settings.data_dir / "exports"
-    export_dir.mkdir(parents=True, exist_ok=True)
-    items = sorted(
-        (p for p in export_dir.glob("*") if p.is_file()),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )
-    files = [
-        ExportFileInfo(
-            name=path.name,
-            size_bytes=path.stat().st_size,
-            modified_utc=datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat(),
-        )
-        for path in items
-    ]
-    return ExportsListResponse(
-        exports=[item.name for item in files],
-        files=files,
+    service = request.app.state.export_service
+    return service.list_exports()
+
+
+@router.get("/diagnostics")
+async def export_diagnostics(request: Request) -> FileResponse:
+    service = request.app.state.export_service
+    bundle_path = service.export_diagnostics_bundle()
+    return FileResponse(
+        bundle_path,
+        media_type="application/zip",
+        filename=bundle_path.name,
     )

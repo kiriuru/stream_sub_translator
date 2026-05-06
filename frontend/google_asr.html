@@ -396,7 +396,7 @@
     </footer>
 
     <script src="/static/js/i18n.js?v=20260423c"></script>
-    <script src="/static/js/browser-asr-session-manager.js?v=20260430a"></script>
+    <script src="/static/js/browser-asr-session-manager.js?v=20260506b"></script>
     <script>
       (() => {
         const t = (key, variables) => (window.I18n?.t ? window.I18n.t(key, variables) : key);
@@ -421,9 +421,15 @@
         const stopButton = document.getElementById("stop-recognition");
         const saveSettingsButton = document.getElementById("save-worker-settings");
         const settingsSaveStatusEl = document.getElementById("settings-save-status");
+        const CLIENT_LOG_THROTTLE_MS = 3000;
+        const MIC_MONITOR_INTERVAL_MS = 250;
+        const MIC_ACTIVE_RMS_THRESHOLD = 0.015;
         const WORKER_SETTINGS_STORAGE_KEY = "sst.browser_worker.settings.v1";
 
         const state = {
+          browserMode: "browser_google",
+          experimental: false,
+          startMode: "default_start",
           configuredLanguage: "ru-RU",
           sourceLang: "ru",
           desiredRunning: false,
@@ -463,7 +469,28 @@
           visibilityState: document.hidden ? "hidden" : "visible",
           logLines: [],
           settingsSavePromise: Promise.resolve(),
+          fallbackToDefaultStart: false,
+          fallbackUsed: false,
+          audioTrackReused: false,
+          audioTrackReopenCount: 0,
+          audioTrackStartAttempts: 0,
+          audioTrackStartFailures: 0,
+          lastStartError: "",
+          lastAudioTrackError: "",
+          pendingStart: false,
+          generationId: 0,
+          browserSupervisorState: "idle",
+          effectiveContinuousMode: "native_continuous",
+          currentConfigPayload: null,
+          microphoneMonitor: null,
+          micTrackReadyState: null,
+          micTrackMuted: false,
+          micRms: 0,
+          micActiveRecentMs: null,
+          lastMicActivityAt: 0,
+          micHealthUpdatedAt: 0,
         };
+        const clientLogState = new Map();
 
         const workerDefaults = Object.freeze({
           recognitionLanguage: "ru-RU",
@@ -481,24 +508,31 @@
           return new Date().toLocaleTimeString([], { hour12: false });
         }
 
-        function sendClientLogPayload(payload) {
+        async function sendClientLogPayload(payload) {
           const body = JSON.stringify(payload);
-          fetch("/api/logs/client-event", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body,
-          }).catch(() => {
+          try {
+            const response = await fetch("/api/logs/client-event", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body,
+            });
+            const result = await response.json().catch(() => null);
+            if (result && result.logged === false) {
+              const key = `${payload.channel}:${payload.source}:${payload.message}`;
+              clientLogState.set(key, { at: Date.now(), muted: true });
+            }
+          } catch (_error) {
             if (typeof navigator?.sendBeacon === "function") {
               try {
                 navigator.sendBeacon(
                   "/api/logs/client-event",
                   new Blob([body], { type: "application/json" })
                 );
-              } catch (_error) {
+              } catch (_fallbackError) {
                 // best-effort fallback
               }
             }
-          });
+          }
         }
 
         function postClientLog(message, details) {
@@ -513,6 +547,15 @@
           if (details && typeof details === "object") {
             payload.details = details;
           }
+          const key = `${payload.channel}:${payload.source}:${payload.message}`;
+          const last = clientLogState.get(key);
+          if (last && last.muted && (Date.now() - last.at) < CLIENT_LOG_THROTTLE_MS) {
+            return;
+          }
+          if (last && (Date.now() - last.at) < CLIENT_LOG_THROTTLE_MS) {
+            return;
+          }
+          clientLogState.set(key, { at: Date.now(), muted: false });
           sendClientLogPayload(payload);
         }
 
@@ -532,17 +575,12 @@
             "requesting microphone permission",
             "microphone permission granted",
             "microphone permission failed",
-            "recognition.start",
             "recognition.start failed",
-            "recognition.onstart",
-            "recognition.onsoundstart",
-            "recognition.onsoundend",
             "recognition.onerror",
-            "recognition.onend",
             "websocket connected",
             "websocket closed",
             "websocket error",
-            "restart scheduled",
+            "watchdog forced rearm",
             "restart cancelled",
             "auto-restart stopped",
             "stop requested by user",
@@ -572,8 +610,8 @@
 
         function defaultSettingsSaveStatusText() {
           return locale() === "ru"
-            ? "Настройки этого окна сохраняются локально в браузере. Можно нажать «Сохранить» вручную."
-            : "This window stores its settings in local browser storage. You can also press Save manually.";
+            ? "Настройки этого окна сначала берутся из localStorage worker-а, а затем при возможности синхронизируются в backend config."
+            : "This window prioritizes its own localStorage settings and mirrors them to backend config when possible.";
         }
 
         function setSettingsSaveStatus(message, isError = false) {
@@ -582,6 +620,14 @@
           }
           settingsSaveStatusEl.textContent = String(message || "").trim();
           settingsSaveStatusEl.style.color = isError ? "var(--danger)" : "var(--muted)";
+        }
+
+        function cloneConfigPayload(payload) {
+          try {
+            return JSON.parse(JSON.stringify(payload || {}));
+          } catch (_error) {
+            return {};
+          }
         }
 
         function readWorkerSettingsFromLocalStorage() {
@@ -600,30 +646,26 @@
         function resolveWorkerSettings(backendBrowserConfig, storedWorkerSettings) {
           const backend = backendBrowserConfig && typeof backendBrowserConfig === "object" ? backendBrowserConfig : {};
           const stored = storedWorkerSettings && typeof storedWorkerSettings === "object" ? storedWorkerSettings : {};
-          const hasStoredInterim = Object.prototype.hasOwnProperty.call(stored, "interim_results");
-          const hasStoredContinuous = Object.prototype.hasOwnProperty.call(stored, "continuous_results");
-          const hasStoredForceFinalization = Object.prototype.hasOwnProperty.call(stored, "force_finalization_enabled");
-          const hasStoredForceTimeout = Object.prototype.hasOwnProperty.call(stored, "force_finalization_timeout_ms");
           return {
             recognition_language: String(
-              backend.recognition_language || stored.recognition_language || workerDefaults.recognitionLanguage
+              stored.recognition_language || backend.recognition_language || workerDefaults.recognitionLanguage
             ),
-            interim_results: hasStoredInterim
+            interim_results: Object.prototype.hasOwnProperty.call(stored, "interim_results")
               ? stored.interim_results !== false
               : backend.interim_results !== false,
-            continuous_results: hasStoredContinuous
+            continuous_results: Object.prototype.hasOwnProperty.call(stored, "continuous_results")
               ? stored.continuous_results !== false
               : backend.continuous_results !== false,
-            force_finalization_enabled: hasStoredForceFinalization
+            force_finalization_enabled: Object.prototype.hasOwnProperty.call(stored, "force_finalization_enabled")
               ? stored.force_finalization_enabled !== false
               : backend.force_finalization_enabled !== false,
             force_finalization_timeout_ms: Math.max(
               300,
               Number.parseInt(
                 String(
-                  hasStoredForceTimeout
-                    ? stored.force_finalization_timeout_ms
-                    : backend.force_finalization_timeout_ms || workerDefaults.forceFinalizationTimeoutMs
+                  stored.force_finalization_timeout_ms
+                    || backend.force_finalization_timeout_ms
+                    || workerDefaults.forceFinalizationTimeoutMs
                 ),
                 10
               ) || workerDefaults.forceFinalizationTimeoutMs
@@ -631,8 +673,79 @@
           };
         }
 
-        function queueBrowserSettingsSave(reason) {
+        function applyResolvedWorkerSettings(resolvedWorkerSettings) {
+          const effectiveBrowserConfig = resolveWorkerSettings(resolvedWorkerSettings, null);
+          state.configuredLanguage = String(
+            effectiveBrowserConfig.recognition_language || workerDefaults.recognitionLanguage
+          );
+          state.sourceLang = String(state.configuredLanguage.split("-", 1)[0] || "ru").toLowerCase();
+          interimResultsToggle.checked = effectiveBrowserConfig.interim_results !== false;
+          continuousResultsToggle.checked = effectiveBrowserConfig.continuous_results !== false;
+          forceFinalizationToggle.checked = effectiveBrowserConfig.force_finalization_enabled !== false;
+          state.forceFinalizationTimeoutMs = Math.max(
+            300,
+            Number.parseInt(
+              String(
+                effectiveBrowserConfig.force_finalization_timeout_ms || workerDefaults.forceFinalizationTimeoutMs
+              ),
+              10
+            ) || workerDefaults.forceFinalizationTimeoutMs
+          );
+          sessionManager.applyRecognitionSettings();
+          sessionManager.handleForceFinalizationSettingChange();
+          updateCounters();
+          return effectiveBrowserConfig;
+        }
+
+        function applyLoadedConfigPayload(configPayload, storedWorkerSettings = null) {
+          const payload = configPayload && typeof configPayload === "object" ? configPayload : {};
+          state.currentConfigPayload = cloneConfigPayload(payload);
+          const asrConfig = payload.asr && typeof payload.asr === "object" ? payload.asr : {};
+          const browserConfig = asrConfig.browser && typeof asrConfig.browser === "object" ? asrConfig.browser : {};
+          return applyResolvedWorkerSettings(resolveWorkerSettings(browserConfig, storedWorkerSettings));
+        }
+
+        function buildSettingsSavePayload(nextWorkerSettings) {
+          const payload = cloneConfigPayload(state.currentConfigPayload);
+          const currentAsr = payload.asr && typeof payload.asr === "object" ? payload.asr : {};
+          const currentBrowser = currentAsr.browser && typeof currentAsr.browser === "object" ? currentAsr.browser : {};
+          payload.asr = {
+            ...currentAsr,
+            browser: {
+              ...currentBrowser,
+              recognition_language: String(
+                nextWorkerSettings.recognition_language || workerDefaults.recognitionLanguage
+              ),
+              interim_results: nextWorkerSettings.interim_results !== false,
+              continuous_results: nextWorkerSettings.continuous_results !== false,
+              force_finalization_enabled: nextWorkerSettings.force_finalization_enabled !== false,
+              force_finalization_timeout_ms: Math.max(
+                300,
+                Number.parseInt(
+                  String(
+                    nextWorkerSettings.force_finalization_timeout_ms || workerDefaults.forceFinalizationTimeoutMs
+                  ),
+                  10
+                ) || workerDefaults.forceFinalizationTimeoutMs
+              ),
+            },
+          };
+          return payload;
+        }
+
+        function queueBrowserSettingsSave(reason, options = {}) {
           const nextWorkerSettings = readWorkerSettingsFromControls();
+          const previousPayload = cloneConfigPayload(state.currentConfigPayload);
+          const restartRecognition = options.restartRecognition === true;
+          try {
+            window.localStorage.setItem(WORKER_SETTINGS_STORAGE_KEY, JSON.stringify(nextWorkerSettings));
+          } catch (_error) {
+            // best effort
+          }
+          applyResolvedWorkerSettings(nextWorkerSettings);
+          if (restartRecognition) {
+            sessionManager.maybeRestartAfterSettingsChange("settings_change");
+          }
           setSettingsSaveStatus(
             locale() === "ru" ? "Сохранение настроек..." : "Saving settings...",
             false
@@ -643,47 +756,35 @@
           state.settingsSavePromise = state.settingsSavePromise
             .catch(() => undefined)
             .then(async () => {
-              window.localStorage.setItem(
-                WORKER_SETTINGS_STORAGE_KEY,
-                JSON.stringify(nextWorkerSettings)
-              );
-              const savedBrowser = resolveWorkerSettings(null, nextWorkerSettings);
-              state.configuredLanguage = String(
-                savedBrowser.recognition_language || workerDefaults.recognitionLanguage
-              );
-              state.sourceLang = String(
-                state.configuredLanguage.split("-", 1)[0] || "ru"
-              ).toLowerCase();
-              interimResultsToggle.checked = savedBrowser.interim_results !== false;
-              continuousResultsToggle.checked = savedBrowser.continuous_results !== false;
-              forceFinalizationToggle.checked = savedBrowser.force_finalization_enabled !== false;
-              state.forceFinalizationTimeoutMs = Math.max(
-                300,
-                Number.parseInt(
-                  String(savedBrowser.force_finalization_timeout_ms || workerDefaults.forceFinalizationTimeoutMs),
-                  10
-                ) || workerDefaults.forceFinalizationTimeoutMs
-              );
-              sessionManager.applyRecognitionSettings();
-              sessionManager.handleForceFinalizationSettingChange();
+              const response = await fetch("/api/settings/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ payload: buildSettingsSavePayload(nextWorkerSettings) }),
+              });
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+              }
+              const data = await response.json();
+              const savedBrowser = applyLoadedConfigPayload(data?.payload || {}, nextWorkerSettings);
               updateCounters();
               appendLog(
-                `worker settings saved to localStorage (${reason}): interim=${interimResultsToggle.checked}, continuous=${continuousResultsToggle.checked}, force_finalization=${forceFinalizationToggle.checked}`
+                `worker settings saved to localStorage+backend (${reason}): lang=${savedBrowser.recognition_language}, interim=${savedBrowser.interim_results}, continuous=${savedBrowser.continuous_results}, force_finalization=${savedBrowser.force_finalization_enabled}`
               );
               setSettingsSaveStatus(
                 locale() === "ru"
-                  ? `Сохранено локально в ${formatNow()}`
-                  : `Saved locally at ${formatNow()}`,
+                  ? `Сохранено локально и синхронизировано с backend в ${formatNow()}`
+                  : `Saved locally and mirrored to backend at ${formatNow()}`,
                 false
               );
             })
             .catch((error) => {
               const message = error instanceof Error ? error.message : String(error || "");
-              appendLog(`worker settings save failed (${reason}): ${message}`);
+              state.currentConfigPayload = previousPayload;
+              appendLog(`worker settings backend mirror failed (${reason}): ${message}`);
               setSettingsSaveStatus(
                 locale() === "ru"
-                  ? `Ошибка сохранения: ${message || "неизвестная ошибка"}`
-                  : `Save failed: ${message || "unknown error"}`,
+                  ? `Сохранено локально; backend sync failed: ${message || "неизвестная ошибка"}`
+                  : `Saved locally; backend sync failed: ${message || "unknown error"}`,
                 true
               );
             })
@@ -750,51 +851,156 @@
           const storedWorkerSettings = readWorkerSettingsFromLocalStorage();
           try {
             const response = await fetch("/api/settings/load");
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}`);
+            }
             const data = await response.json();
-            const browserConfig = data?.payload?.asr?.browser || {};
-            const effectiveBrowserConfig = resolveWorkerSettings(browserConfig, storedWorkerSettings);
-            state.configuredLanguage = String(
-              effectiveBrowserConfig.recognition_language || workerDefaults.recognitionLanguage
-            );
-            state.sourceLang = String(state.configuredLanguage.split("-", 1)[0] || "ru").toLowerCase();
-            interimResultsToggle.checked = effectiveBrowserConfig.interim_results !== false;
-            continuousResultsToggle.checked = effectiveBrowserConfig.continuous_results !== false;
-            forceFinalizationToggle.checked = effectiveBrowserConfig.force_finalization_enabled !== false;
-            state.forceFinalizationTimeoutMs = Math.max(
-              300,
-              Number.parseInt(
-                String(
-                  effectiveBrowserConfig.force_finalization_timeout_ms || workerDefaults.forceFinalizationTimeoutMs
-                ),
-                10
-              ) || workerDefaults.forceFinalizationTimeoutMs
-            );
+            const effectiveBrowserConfig = applyLoadedConfigPayload(data?.payload || {}, storedWorkerSettings);
             appendLog(
-              `settings loaded: lang=${state.configuredLanguage}, interim=${interimResultsToggle.checked}, continuous=${continuousResultsToggle.checked}, force_finalization=${forceFinalizationToggle.checked}, storage=${storedWorkerSettings ? "local+backend" : "backend"}`
+              `settings loaded: lang=${effectiveBrowserConfig.recognition_language}, interim=${effectiveBrowserConfig.interim_results}, continuous=${effectiveBrowserConfig.continuous_results}, force_finalization=${effectiveBrowserConfig.force_finalization_enabled}, source=${storedWorkerSettings ? "localStorage+backend" : "backend"}`
             );
             updateCounters();
           } catch (_error) {
-            const effectiveBrowserConfig = resolveWorkerSettings(null, storedWorkerSettings);
-            state.configuredLanguage = effectiveBrowserConfig.recognition_language || workerDefaults.recognitionLanguage;
-            state.sourceLang = String(state.configuredLanguage.split("-", 1)[0] || "ru").toLowerCase();
-            interimResultsToggle.checked = effectiveBrowserConfig.interim_results !== false;
-            continuousResultsToggle.checked = effectiveBrowserConfig.continuous_results !== false;
-            forceFinalizationToggle.checked = effectiveBrowserConfig.force_finalization_enabled !== false;
-            state.forceFinalizationTimeoutMs = effectiveBrowserConfig.force_finalization_timeout_ms;
+            if (storedWorkerSettings) {
+              applyResolvedWorkerSettings(resolveWorkerSettings(workerDefaults, storedWorkerSettings));
+              state.currentConfigPayload = cloneConfigPayload({ asr: { browser: workerDefaults } });
+              appendLog("settings load failed; using localStorage fallback");
+            } else {
+              applyResolvedWorkerSettings(workerDefaults);
+              state.currentConfigPayload = cloneConfigPayload({ asr: { browser: workerDefaults } });
+              appendLog("settings load failed; using defaults");
+            }
             updateCounters();
-            appendLog(`settings load failed; using ${storedWorkerSettings ? "local storage fallback" : "defaults"}`);
           }
           setSettingsSaveStatus(defaultSettingsSaveStatusText(), false);
         }
 
         async function ensureMicrophonePermission() {
+          const existingStream = state.microphoneMonitor?.stream || null;
+          const existingTrack = state.microphoneMonitor?.track || null;
+          if (existingStream && existingTrack && existingTrack.readyState === "live") {
+            return existingStream;
+          }
           appendLog("requesting microphone permission via getUserMedia");
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           const [track] = stream.getAudioTracks();
+          if (!track) {
+            throw new Error("No audio track returned by getUserMedia.");
+          }
+          const AudioContextCtor = window.AudioContext || window.webkitAudioContext || null;
+          let audioContext = null;
+          let analyser = null;
+          let sourceNode = null;
+          let rmsBuffer = null;
+          if (AudioContextCtor) {
+            try {
+              audioContext = new AudioContextCtor();
+              sourceNode = audioContext.createMediaStreamSource(stream);
+              analyser = audioContext.createAnalyser();
+              analyser.fftSize = 1024;
+              analyser.smoothingTimeConstant = 0.15;
+              sourceNode.connect(analyser);
+              rmsBuffer = new Uint8Array(analyser.fftSize);
+            } catch (_error) {
+              audioContext = null;
+              analyser = null;
+              sourceNode = null;
+              rmsBuffer = null;
+            }
+          }
+
+          const updateMicHealth = () => {
+            const monitor = state.microphoneMonitor;
+            const monitorTrack = monitor?.track || null;
+            if (!monitorTrack) {
+              state.micTrackReadyState = "missing";
+              state.micTrackMuted = false;
+              state.micRms = 0;
+              state.micHealthUpdatedAt = Date.now();
+              return;
+            }
+            state.micTrackReadyState = String(monitorTrack.readyState || "unknown");
+            state.micTrackMuted = Boolean(monitorTrack.muted);
+            let micRms = 0;
+            if (monitor?.analyser && monitor?.rmsBuffer) {
+              try {
+                monitor.analyser.getByteTimeDomainData(monitor.rmsBuffer);
+                let sum = 0;
+                for (let index = 0; index < monitor.rmsBuffer.length; index += 1) {
+                  const centered = (monitor.rmsBuffer[index] - 128) / 128;
+                  sum += centered * centered;
+                }
+                micRms = Math.sqrt(sum / monitor.rmsBuffer.length);
+              } catch (_error) {
+                micRms = 0;
+              }
+            }
+            state.micRms = Number.isFinite(micRms) ? Number(micRms.toFixed(4)) : 0;
+            const nowMs = Date.now();
+            if (state.micRms >= MIC_ACTIVE_RMS_THRESHOLD && !state.micTrackMuted) {
+              state.lastMicActivityAt = nowMs;
+              state.micActiveRecentMs = 0;
+            } else if (state.lastMicActivityAt > 0) {
+              state.micActiveRecentMs = Math.max(0, nowMs - state.lastMicActivityAt);
+            } else {
+              state.micActiveRecentMs = null;
+            }
+            state.micHealthUpdatedAt = nowMs;
+          };
+
+          const monitor = {
+            stream,
+            track,
+            audioContext,
+            analyser,
+            sourceNode,
+            rmsBuffer,
+            intervalId: null,
+          };
+          state.microphoneMonitor = monitor;
+          state.micTrackReadyState = String(track.readyState || "unknown");
+          state.micTrackMuted = Boolean(track.muted);
+          updateMicHealth();
+          monitor.intervalId = window.setInterval(updateMicHealth, MIC_MONITOR_INTERVAL_MS);
+          track.addEventListener("ended", updateMicHealth);
+          track.addEventListener("mute", updateMicHealth);
+          track.addEventListener("unmute", updateMicHealth);
           appendLog(
             `microphone permission granted${track?.label ? `: ${track.label}` : ""}`
           );
-          stream.getTracks().forEach((track) => track.stop());
+          return stream;
+        }
+
+        function releaseMicrophoneMonitor() {
+          const monitor = state.microphoneMonitor;
+          state.microphoneMonitor = null;
+          if (!monitor) {
+            return;
+          }
+          if (monitor.intervalId) {
+            window.clearInterval(monitor.intervalId);
+          }
+          try {
+            monitor.sourceNode?.disconnect?.();
+          } catch (_error) {
+            // best effort
+          }
+          try {
+            monitor.stream?.getTracks?.().forEach((track) => {
+              try {
+                track.stop();
+              } catch (_error) {
+                // best effort
+              }
+            });
+          } catch (_error) {
+            // best effort
+          }
+          try {
+            monitor.audioContext?.close?.();
+          } catch (_error) {
+            // best effort
+          }
         }
 
         function setPartialText(value) {
@@ -821,6 +1027,7 @@
           isForceFinalizationEnabled: () => forceFinalizationToggle.checked,
           setPartialText,
           setFinalText,
+          loadBackendSettings: loadSettings,
         });
 
         startButton.addEventListener("click", async () => {
@@ -838,33 +1045,30 @@
         }
 
         if (interimResultsToggle) {
-          interimResultsToggle.addEventListener("change", () => {
-            sessionManager.applyRecognitionSettings();
-            queueBrowserSettingsSave("interim_results");
-            sessionManager.maybeRestartAfterSettingsChange();
+          interimResultsToggle.addEventListener("change", async () => {
+            await queueBrowserSettingsSave("interim_results", { restartRecognition: true });
           });
         }
 
         if (continuousResultsToggle) {
-          continuousResultsToggle.addEventListener("change", () => {
-            sessionManager.applyRecognitionSettings();
-            queueBrowserSettingsSave("continuous_results");
-            sessionManager.maybeRestartAfterSettingsChange();
+          continuousResultsToggle.addEventListener("change", async () => {
+            await queueBrowserSettingsSave("continuous_results", { restartRecognition: true });
           });
         }
 
         if (forceFinalizationToggle) {
-          forceFinalizationToggle.addEventListener("change", () => {
-            sessionManager.handleForceFinalizationSettingChange();
-            queueBrowserSettingsSave("force_finalization");
+          forceFinalizationToggle.addEventListener("change", async () => {
+            await queueBrowserSettingsSave("force_finalization");
           });
         }
 
         window.addEventListener("beforeunload", () => {
-          sessionManager.stop();
-          if (state.socket && state.socket.readyState <= WebSocket.OPEN) {
-            state.socket.close();
-          }
+          sessionManager.destroy();
+          releaseMicrophoneMonitor();
+        });
+        window.addEventListener("pagehide", () => {
+          sessionManager.destroy();
+          releaseMicrophoneMonitor();
         });
 
         document.addEventListener("visibilitychange", () => {

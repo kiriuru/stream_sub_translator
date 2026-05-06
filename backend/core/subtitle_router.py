@@ -12,9 +12,16 @@ from backend.core.cache_manager import CacheManager
 from backend.core.audio_capture import AudioCapture, RNNoiseRecognitionProcessor
 from backend.core.browser_asr_gateway import BrowserAsrGateway
 from backend.core.exporter import Exporter
+from backend.core.google_legacy_http_parser import GoogleLegacyHttpParsedResult
+from backend.core.google_legacy_http_provider import (
+    GOOGLE_LEGACY_HTTP_PROVIDER_LABEL,
+    GOOGLE_LEGACY_HTTP_PROVIDER_NAME,
+    GOOGLE_LEGACY_HTTP_PROVIDER_WARNING,
+    GoogleLegacyHttpAsrProvider,
+)
 from backend.core.obs_caption_output import ObsCaptionOutput
 from backend.core.overlay_broadcaster import OverlayBroadcaster
-from backend.core.parakeet_provider import AsrProviderStatus
+from backend.core.parakeet_provider import AsrProviderStatus, OFFICIAL_EU_PARAKEET_REPO
 from backend.core.remote_mode import (
     REMOTE_ROLE_CONTROLLER,
     REMOTE_ROLE_WORKER,
@@ -29,7 +36,10 @@ from backend.core.translation_engine import TranslationEngine
 from backend.core.vad import VadEngine
 from backend.models import (
     AsrDiagnostics,
+    AsrRuntimeStatus,
     ObsCaptionDiagnostics,
+    ObsCaptionsStatus,
+    OverlayRuntimeStatus,
     RuntimeMetrics,
     RuntimeState,
     SubtitleLineItem,
@@ -39,8 +49,15 @@ from backend.models import (
     TranslationDiagnostics,
     TranslationEvent,
     TranslationItem,
+    TranslationRuntimeStatus,
 )
 from backend.ws_manager import WebSocketManager
+
+LOCAL_ASR_MODE = "local"
+BROWSER_ASR_MODE = "browser_google"
+EXPERIMENTAL_BROWSER_ASR_MODE = "browser_google_experimental"
+BROWSER_ASR_MODES = {BROWSER_ASR_MODE, EXPERIMENTAL_BROWSER_ASR_MODE}
+GOOGLE_LEGACY_HTTP_DEVICE_POLICY = "backend_audio_pipeline"
 
 
 class SubtitleRouter:
@@ -67,6 +84,10 @@ class SubtitleRouter:
         self._pending_final_sequence: int | None = None
         self._expiry_task: asyncio.Task | None = None
         self._exported_sequences: set[int] = set()
+        self._diagnostic_counters = {
+            "overlay_stale_translation_suppressed": 0,
+            "overlay_payload_mismatch_count": 0,
+        }
 
     def _subtitle_lifecycle_config(self) -> dict:
         config = self.config_getter()
@@ -127,6 +148,16 @@ class SubtitleRouter:
         self._pending_final_sequence = None
         self._exported_sequences.clear()
         await self._publish_current()
+
+    def diagnostic_counters(self) -> dict[str, int]:
+        return dict(self._diagnostic_counters)
+
+    def _increment_counter_metric(
+        self,
+        key: Literal["overlay_stale_translation_suppressed", "overlay_payload_mismatch_count"],
+        amount: int = 1,
+    ) -> None:
+        self._diagnostic_counters[key] = int(self._diagnostic_counters.get(key, 0) or 0) + int(amount)
 
     async def handle_transcript(self, event: TranscriptEvent) -> None:
         if event.event == "partial":
@@ -661,6 +692,12 @@ class SubtitleRouter:
         active_partial_sequence: int | None,
         active_partial_source_lang: str | None,
     ) -> SubtitlePayloadEvent:
+        preserve_completed_translations = (
+            active_partial_sequence is not None
+            and active_partial_sequence == completed_payload.sequence
+        )
+        if not preserve_completed_translations and completed_payload.visible_items:
+            self._increment_counter_metric("overlay_payload_mismatch_count", 1)
         config = self.config_getter()
         subtitle_output = config.get("subtitle_output", {}) if isinstance(config, dict) else {}
         translation_config = config.get("translation", {}) if isinstance(config, dict) else {}
@@ -716,11 +753,15 @@ class SubtitleRouter:
             if translation_item is None:
                 continue
             can_show = (
+                preserve_completed_translations
+                and
                 show_translations
                 and visible_translation_count < max_translation_languages
                 and bool(translation_item.success)
                 and bool(translation_item.text)
             )
+            if not preserve_completed_translations and bool(translation_item.text):
+                self._increment_counter_metric("overlay_stale_translation_suppressed", 1)
             next_translation_slot = f"translation_{visible_translation_count + 1}" if can_show else None
             updated_translation_item = translation_item.model_copy(
                 update={
@@ -976,10 +1017,19 @@ class RuntimeOrchestrator:
         self._external_worker_connected = False
         self._browser_asr_gateway = BrowserAsrGateway(structured_logger=structured_logger)
         self._active_runtime_mode: str | None = None
+        self._active_local_provider_preference: str | None = None
         self._remote_audio_connected = False
         self._remote_audio_session_id: str | None = None
         self._remote_audio_last_chunk_monotonic: float | None = None
         self._translation_dispatcher_snapshot: dict[str, Any] = {}
+        self._runtime_event_sequence = 0
+        self._runtime_event_sequence_by_type: dict[str, int] = {}
+        self._last_runtime_status_signature: str | None = None
+        self._last_runtime_status_broadcast_monotonic: float = 0.0
+        self._runtime_status_heartbeat_interval_ms = 1000
+        self._active_browser_worker_session_id: str | None = None
+        self._active_browser_worker_generation_id: int = 0
+        self._last_browser_worker_status_signature: tuple[Any, ...] | None = None
         self._translation_dispatcher = TranslationDispatcher(
             self._translation_engine,
             self.config_getter,
@@ -987,6 +1037,10 @@ class RuntimeOrchestrator:
             self.subtitle_router.is_sequence_relevant_for_translation,
             self._apply_translation_dispatcher_metrics,
             structured_logger=structured_logger,
+        )
+        self._google_legacy_http_provider = GoogleLegacyHttpAsrProvider(
+            config_getter=self.config_getter,
+            result_callback=self._handle_google_legacy_http_result,
         )
         self._apply_vad_tuning()
         self._apply_recognition_processing_settings()
@@ -1013,14 +1067,52 @@ class RuntimeOrchestrator:
         await self._broadcast_runtime()
 
     def _current_asr_mode(self) -> str:
-        if self._state.is_running and self._active_runtime_mode in {"local", "browser_google"}:
+        if self._state.is_running and self._active_runtime_mode in {LOCAL_ASR_MODE, *BROWSER_ASR_MODES}:
             return str(self._active_runtime_mode)
         config = self.config_getter()
         asr = config.get("asr", {}) if isinstance(config, dict) else {}
         if not isinstance(asr, dict):
-            return "local"
+            return LOCAL_ASR_MODE
         mode = str(asr.get("mode", "local")).strip().lower()
-        return mode if mode in {"local", "browser_google"} else "local"
+        return mode if mode in {LOCAL_ASR_MODE, *BROWSER_ASR_MODES} else LOCAL_ASR_MODE
+
+    def _is_browser_asr_mode(self, mode: str | None = None) -> bool:
+        current_mode = str(mode or self._current_asr_mode()).strip().lower()
+        return current_mode in BROWSER_ASR_MODES
+
+    def _current_local_provider_preference(self) -> str:
+        if (
+            self._state.is_running
+            and self._active_runtime_mode == LOCAL_ASR_MODE
+            and self._active_local_provider_preference is not None
+        ):
+            return self._active_local_provider_preference
+        config = self.config_getter()
+        asr = config.get("asr", {}) if isinstance(config, dict) else {}
+        if not isinstance(asr, dict):
+            return "official_eu_parakeet_low_latency"
+        provider_preference = str(asr.get("provider_preference", "official_eu_parakeet_low_latency") or "").strip().lower()
+        if provider_preference in {
+            "auto",
+            "official_eu_parakeet",
+            "official_eu_parakeet_low_latency",
+            GOOGLE_LEGACY_HTTP_PROVIDER_NAME,
+        }:
+            return provider_preference
+        return "official_eu_parakeet_low_latency"
+
+    def _uses_google_legacy_http_provider(self, mode: str | None = None) -> bool:
+        return (
+            not self._is_browser_asr_mode(mode)
+            and str(mode or self._current_asr_mode()).strip().lower() == LOCAL_ASR_MODE
+            and self._current_local_provider_preference() == GOOGLE_LEGACY_HTTP_PROVIDER_NAME
+        )
+
+    def _google_legacy_http_config(self) -> dict[str, Any]:
+        config = self.config_getter()
+        asr = config.get("asr", {}) if isinstance(config, dict) else {}
+        provider = asr.get("google_legacy_http", {}) if isinstance(asr, dict) else {}
+        return provider if isinstance(provider, dict) else {}
 
     def _browser_asr_config(self) -> dict[str, object]:
         config = self.config_getter()
@@ -1033,6 +1125,10 @@ class RuntimeOrchestrator:
         primary = language.split("-", 1)[0].strip().lower()
         return primary or "auto"
 
+    def _browser_worker_provider_name(self) -> str:
+        mode = self._current_asr_mode()
+        return mode if self._is_browser_asr_mode(mode) else BROWSER_ASR_MODE
+
     def _current_remote_role(self) -> str:
         try:
             return resolve_effective_remote_role(self.config_getter())
@@ -1040,7 +1136,7 @@ class RuntimeOrchestrator:
             return "disabled"
 
     def _uses_remote_audio_source(self) -> bool:
-        return self._current_asr_mode() != "browser_google" and self._current_remote_role() == REMOTE_ROLE_WORKER
+        return not self._is_browser_asr_mode() and self._current_remote_role() == REMOTE_ROLE_WORKER
 
     def _is_remote_enabled(self) -> bool:
         enabled, _ = resolve_configured_remote_state(self.config_getter())
@@ -1048,22 +1144,57 @@ class RuntimeOrchestrator:
 
     def _uses_remote_event_source(self) -> bool:
         return (
-            self._current_asr_mode() != "browser_google"
+            not self._is_browser_asr_mode()
             and self._is_remote_enabled()
             and self._current_remote_role() == REMOTE_ROLE_CONTROLLER
         )
 
     async def _broadcast_runtime(self) -> None:
-        await self.ws_manager.broadcast({"type": "runtime_update", "payload": self._state.model_dump()})
+        payload = self._state.model_dump()
+        signature = self._runtime_material_status_snapshot(payload)
+        now_monotonic = time.perf_counter()
+        important_change = signature != self._last_runtime_status_signature
+        elapsed_ms = (now_monotonic - self._last_runtime_status_broadcast_monotonic) * 1000.0
+        if not important_change and elapsed_ms < self._runtime_status_heartbeat_interval_ms:
+            self._increment_counter_metric("runtime_status_duplicate_suppressed", 1)
+            self._increment_counter_metric("runtime_events_duplicate_suppressed", 1)
+            return
+        if important_change:
+            self._increment_counter_metric("runtime_status_broadcast_count", 1)
+        else:
+            self._increment_counter_metric("runtime_status_heartbeat_sent", 1)
+        self._last_runtime_status_signature = signature
+        self._last_runtime_status_broadcast_monotonic = now_monotonic
+        await self.ws_manager.broadcast(
+            {
+                "type": "runtime_update",
+                "payload": self._enrich_event_payload("runtime_status", payload),
+            }
+        )
 
     async def _broadcast_transcript(self, event: TranscriptEvent) -> None:
-        await self.ws_manager.broadcast({"type": "transcript_update", "payload": event.model_dump()})
+        await self.ws_manager.broadcast(
+            {
+                "type": "transcript_update",
+                "payload": self._enrich_event_payload("transcript_update", event.model_dump()),
+            }
+        )
 
     async def _broadcast_transcript_segment_event(self, event: TranscriptEvent) -> None:
-        await self.ws_manager.broadcast({"type": "transcript_segment_event", "payload": event.model_dump()})
+        await self.ws_manager.broadcast(
+            {
+                "type": "transcript_segment_event",
+                "payload": self._enrich_event_payload("transcript_segment_event", event.model_dump()),
+            }
+        )
 
     async def _broadcast_translation(self, event: TranslationEvent) -> None:
-        await self.ws_manager.broadcast({"type": "translation_update", "payload": event.model_dump()})
+        await self.ws_manager.broadcast(
+            {
+                "type": "translation_update",
+                "payload": self._enrich_event_payload("translation_update", event.model_dump()),
+            }
+        )
 
     async def _publish_translation_dispatch_event(self, event: TranslationEvent) -> None:
         await self.subtitle_router.handle_translation(event)
@@ -1142,15 +1273,98 @@ class RuntimeOrchestrator:
         self._translation_engine.apply_live_settings(config.get("translation", {}) if isinstance(config, dict) else {})
         await self._obs_caption_output.apply_live_settings(config if isinstance(config, dict) else {})
         await self.subtitle_router.republish_latest()
-        self._state = self._state.model_copy(
-            update={
-                "asr_diagnostics": self.asr_diagnostics(),
-                "translation_diagnostics": self.translation_diagnostics(),
-                "obs_caption_diagnostics": self.obs_caption_diagnostics(),
-                "metrics": self._metrics.model_copy(),
-            }
+        self._state = self._build_runtime_state(
+            is_running=self._state.is_running,
+            status=self._state.status,
+            started_at_utc=self._state.started_at_utc,
+            last_error=self._state.last_error,
+            status_message=self._state.status_message,
         )
         await self._broadcast_runtime()
+
+    def _overlay_runtime_status(self) -> OverlayRuntimeStatus:
+        config = self.config_getter()
+        overlay = config.get("overlay", {}) if isinstance(config, dict) else {}
+        subtitle_output = config.get("subtitle_output", {}) if isinstance(config, dict) else {}
+        return OverlayRuntimeStatus(
+            preset=str(overlay.get("preset", "single")) if isinstance(overlay, dict) else "single",
+            compact=bool(overlay.get("compact", False)) if isinstance(overlay, dict) else False,
+            show_source=bool(subtitle_output.get("show_source", True)) if isinstance(subtitle_output, dict) else True,
+            show_translations=bool(subtitle_output.get("show_translations", True))
+            if isinstance(subtitle_output, dict)
+            else True,
+            display_order=list(subtitle_output.get("display_order", [])) if isinstance(subtitle_output, dict) else [],
+        )
+
+    def _build_runtime_state(
+        self,
+        *,
+        is_running: bool,
+        status: Literal["idle", "starting", "listening", "transcribing", "translating", "error"],
+        started_at_utc: str | None,
+        last_error: str | None = None,
+        status_message: str | None = None,
+    ) -> RuntimeState:
+        asr_diagnostics = self.asr_diagnostics()
+        translation_diagnostics = self.translation_diagnostics()
+        obs_caption_diagnostics = self.obs_caption_diagnostics()
+        asr_runtime = AsrRuntimeStatus(
+            active_mode=self._current_asr_mode(),
+            provider=asr_diagnostics.provider,
+            provider_label=asr_diagnostics.provider_label or asr_diagnostics.provider,
+            ready=bool(asr_diagnostics.runtime_initialized or self._is_browser_asr_mode()),
+            true_streaming=bool(asr_diagnostics.true_streaming),
+            supports_partials=bool(asr_diagnostics.supports_partials or asr_diagnostics.partials_supported),
+            degraded_mode=bool(asr_diagnostics.degraded_mode),
+            fallback_reason=asr_diagnostics.fallback_reason or asr_diagnostics.cpu_fallback_reason,
+            diagnostics=asr_diagnostics,
+        )
+        translation_runtime = TranslationRuntimeStatus(
+            enabled=translation_diagnostics.enabled,
+            provider=translation_diagnostics.provider,
+            ready=translation_diagnostics.ready,
+            degraded_mode=translation_diagnostics.degraded,
+            status=translation_diagnostics.status,
+            summary=translation_diagnostics.summary,
+            target_languages=list(translation_diagnostics.target_languages),
+            diagnostics=translation_diagnostics,
+        )
+        obs_runtime = ObsCaptionsStatus(
+            enabled=obs_caption_diagnostics.enabled,
+            active=obs_caption_diagnostics.active,
+            connected=obs_caption_diagnostics.connected,
+            connection_state=obs_caption_diagnostics.connection_state,
+            output_mode=obs_caption_diagnostics.output_mode,
+            diagnostics=obs_caption_diagnostics,
+        )
+        degraded_mode = bool(asr_runtime.degraded_mode or translation_runtime.degraded_mode)
+        fallback_reason = (
+            asr_runtime.fallback_reason
+            or translation_diagnostics.reason
+            or translation_diagnostics.last_runtime_reason
+            or last_error
+        )
+        return RuntimeState(
+            running=is_running,
+            starting=status == "starting",
+            stopping=False,
+            degraded_mode=degraded_mode,
+            fallback_reason=fallback_reason,
+            phase=status,
+            is_running=is_running,
+            status=status,
+            started_at_utc=started_at_utc,
+            last_error=last_error,
+            status_message=status_message,
+            asr=asr_runtime,
+            translation=translation_runtime,
+            overlay=self._overlay_runtime_status(),
+            obs_captions=obs_runtime,
+            metrics=self._metrics.model_copy(update=self.subtitle_router.diagnostic_counters()),
+            asr_diagnostics=asr_diagnostics,
+            translation_diagnostics=translation_diagnostics,
+            obs_caption_diagnostics=obs_caption_diagnostics,
+        )
 
     def _set_state(
         self,
@@ -1161,16 +1375,12 @@ class RuntimeOrchestrator:
         last_error: str | None = None,
         status_message: str | None = None,
     ) -> None:
-        self._state = RuntimeState(
+        self._state = self._build_runtime_state(
             is_running=is_running,
             status=status,
             started_at_utc=started_at_utc,
             last_error=last_error,
             status_message=status_message,
-            asr_diagnostics=self.asr_diagnostics(),
-            translation_diagnostics=self.translation_diagnostics(),
-            obs_caption_diagnostics=self.obs_caption_diagnostics(),
-            metrics=self._metrics.model_copy(),
         )
 
     def _record_metrics(self, **values: float | int | None) -> None:
@@ -1183,6 +1393,41 @@ class RuntimeOrchestrator:
             else:
                 updates[key] = round(float(value), 2)
         self._metrics = self._metrics.model_copy(update=updates)
+
+    def _runtime_material_status_snapshot(self, payload: dict[str, Any]) -> tuple[Any, ...]:
+        asr = payload.get("asr", {}) if isinstance(payload.get("asr"), dict) else {}
+        asr_diagnostics = payload.get("asr_diagnostics", {}) if isinstance(payload.get("asr_diagnostics"), dict) else {}
+        browser_worker = asr_diagnostics.get("browser_worker", {}) if isinstance(asr_diagnostics.get("browser_worker"), dict) else {}
+        return (
+            payload.get("is_running"),
+            payload.get("status"),
+            payload.get("last_error"),
+            payload.get("status_message"),
+            asr.get("active_mode"),
+            asr.get("provider"),
+            browser_worker.get("worker_connected"),
+            browser_worker.get("recognition_state"),
+            browser_worker.get("supervisor_state"),
+            browser_worker.get("degraded_reason"),
+            browser_worker.get("last_error"),
+            browser_worker.get("generation_id"),
+        )
+
+    def _next_event_sequence(self, event_type: str) -> int:
+        self._runtime_event_sequence += 1
+        self._runtime_event_sequence_by_type[event_type] = self._runtime_event_sequence
+        self._record_metrics(
+            runtime_events_emitted=int(self._metrics.runtime_events_emitted or 0) + 1,
+            runtime_events_last_sequence=self._runtime_event_sequence,
+        )
+        return self._runtime_event_sequence
+
+    def _enrich_event_payload(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+        enriched = dict(payload)
+        enriched.setdefault("event_type", event_type)
+        enriched["created_at_ms"] = int(time.time() * 1000)
+        enriched["event_sequence"] = self._next_event_sequence(event_type)
+        return enriched
 
     def _apply_translation_dispatcher_metrics(self, metrics: dict) -> None:
         if not isinstance(metrics, dict):
@@ -1215,6 +1460,14 @@ class RuntimeOrchestrator:
             "remote_audio_chunks_dropped",
             "vad_segments_partial",
             "vad_segments_final",
+            "runtime_events_duplicate_suppressed",
+            "runtime_status_broadcast_count",
+            "runtime_status_duplicate_suppressed",
+            "runtime_status_heartbeat_sent",
+            "browser_worker_event_count",
+            "browser_worker_event_coalesced",
+            "overlay_stale_translation_suppressed",
+            "overlay_payload_mismatch_count",
         ],
         amount: int = 1,
     ) -> None:
@@ -1239,7 +1492,7 @@ class RuntimeOrchestrator:
             asr_config = {}
 
         status = self._asr_engine.status()
-        if status.provider != "official_eu_parakeet_realtime":
+        if status.provider != "official_eu_parakeet_low_latency":
             return dict(self._LEGACY_VAD_SETTINGS)
 
         effective = dict(self._LEGACY_VAD_SETTINGS)
@@ -1410,13 +1663,24 @@ class RuntimeOrchestrator:
         await self._broadcast_runtime()
 
     def _build_startup_status_message(self) -> str:
-        if self._current_asr_mode() == "browser_google":
+        if self._is_browser_asr_mode():
             browser_lang = str(self._browser_asr_config().get("recognition_language", "ru-RU") or "ru-RU")
+            if self._current_asr_mode() == EXPERIMENTAL_BROWSER_ASR_MODE:
+                return (
+                    f"Preparing experimental browser speech worker mode for {browser_lang}. "
+                    "The popup window will open a live microphone track before recognition starts."
+                )
             return f"Preparing browser speech worker mode for {browser_lang}. The popup window will capture audio."
         if self._uses_remote_event_source():
             return "Initializing controller relay mode and waiting for remote worker transcript events."
         if self._uses_remote_audio_source():
             return "Initializing worker ASR runtime and waiting for remote controller audio stream."
+        if self._uses_google_legacy_http_provider():
+            language = str(self._google_legacy_http_config().get("language", "ru-RU") or "ru-RU")
+            return (
+                f"Initializing {GOOGLE_LEGACY_HTTP_PROVIDER_LABEL} for {language}. "
+                "Audio will stream directly from the backend pipeline."
+            )
         asr_status = self._asr_engine.status()
         model_path = Path(asr_status.model_path) if asr_status.model_path else None
         if model_path is not None and not model_path.exists():
@@ -1453,6 +1717,9 @@ class RuntimeOrchestrator:
                     if chunk is None:
                         continue
                     chunk_data = chunk.data
+                if self._uses_google_legacy_http_provider():
+                    self._google_legacy_http_provider.enqueue_audio(self._prepare_recognition_audio(chunk_data))
+                    continue
                 vad_started = time.perf_counter()
                 segments = self._vad.process_chunk(chunk_data)
                 vad_elapsed_ms = (time.perf_counter() - vad_started) * 1000.0
@@ -1637,7 +1904,7 @@ class RuntimeOrchestrator:
                 event="partial",
                 lifecycle_event="segment_started",
                 text="",
-                device_id="browser_google_worker",
+                device_id=f"{self._browser_worker_provider_name()}_worker",
                 sequence=self._sequence,
                 segment=TranscriptSegment(
                     segment_id=segment_id,
@@ -1647,7 +1914,7 @@ class RuntimeOrchestrator:
                     start_ms=0,
                     end_ms=0,
                     source_lang=source_lang,
-                    provider="browser_google",
+                    provider=self._browser_worker_provider_name(),
                     latency_ms=None,
                     sequence=self._sequence,
                     revision=revision,
@@ -1672,43 +1939,224 @@ class RuntimeOrchestrator:
             start_ms=0,
             end_ms=0,
             source_lang=source_lang,
-            provider="browser_google",
+            provider=self._browser_worker_provider_name(),
             latency_ms=0.0,
             sequence=self._sequence,
             revision=revision,
         )
 
+    async def _broadcast_google_legacy_http_segment_started(
+        self,
+        *,
+        segment_id: str,
+        revision: int,
+        source_lang: str,
+    ) -> None:
+        await self._broadcast_transcript_segment_event(
+            TranscriptEvent(
+                event="partial",
+                lifecycle_event="segment_started",
+                text="",
+                device_id=self._device_id,
+                sequence=self._sequence,
+                segment=TranscriptSegment(
+                    segment_id=segment_id,
+                    text="",
+                    is_partial=False,
+                    is_final=False,
+                    start_ms=0,
+                    end_ms=0,
+                    source_lang=source_lang,
+                    provider=GOOGLE_LEGACY_HTTP_PROVIDER_NAME,
+                    latency_ms=None,
+                    sequence=self._sequence,
+                    revision=revision,
+                ),
+            )
+        )
+
+    def _build_google_legacy_http_transcript_segment(
+        self,
+        *,
+        segment_id: str,
+        revision: int,
+        text: str,
+        is_final: bool,
+        source_lang: str,
+    ) -> TranscriptSegment:
+        return TranscriptSegment(
+            segment_id=segment_id,
+            text=text,
+            is_partial=not is_final,
+            is_final=is_final,
+            start_ms=0,
+            end_ms=0,
+            source_lang=source_lang,
+            provider=GOOGLE_LEGACY_HTTP_PROVIDER_NAME,
+            latency_ms=0.0,
+            sequence=self._sequence,
+            revision=revision,
+        )
+
+    async def _handle_google_legacy_http_result(self, parsed: GoogleLegacyHttpParsedResult) -> None:
+        if not self._state.is_running or not self._uses_google_legacy_http_provider():
+            return
+        normalized_source_lang = str(parsed.language or self.config_getter().get("source_lang", "auto") or "auto").strip()
+        normalized_source_lang = (normalized_source_lang.split("-", 1)[0].strip().lower() or "auto")
+
+        if parsed.is_partial and parsed.text:
+            segment_id, revision, started_now = self._assign_segment_tracking("partial")
+            if started_now:
+                await self._broadcast_google_legacy_http_segment_started(
+                    segment_id=segment_id,
+                    revision=revision,
+                    source_lang=normalized_source_lang,
+                )
+            self._sequence += 1
+            transcript_event = TranscriptEvent(
+                event="partial",
+                text=parsed.text,
+                device_id=self._device_id,
+                sequence=self._sequence,
+                lifecycle_event="partial_updated",
+                segment=self._build_google_legacy_http_transcript_segment(
+                    segment_id=segment_id,
+                    revision=revision,
+                    text=parsed.text,
+                    is_final=False,
+                    source_lang=normalized_source_lang,
+                ),
+            )
+            await self._broadcast_transcript(transcript_event)
+            await self.subtitle_router.handle_transcript(transcript_event)
+            await self._obs_caption_output.publish_source_event(transcript_event)
+            self._increment_metric("partial_updates_emitted")
+            await self._set_listening_if_current(
+                "listening",
+                "transcribing",
+                "translating",
+                last_error=None,
+                status_message=f"{GOOGLE_LEGACY_HTTP_PROVIDER_LABEL} is active.",
+            )
+
+        if parsed.is_final and parsed.text:
+            segment_id, revision, started_now = self._assign_segment_tracking("final")
+            if started_now:
+                await self._broadcast_google_legacy_http_segment_started(
+                    segment_id=segment_id,
+                    revision=revision,
+                    source_lang=normalized_source_lang,
+                )
+            self._clear_partial_tracking(segment_id)
+            self._sequence += 1
+            transcript_event = TranscriptEvent(
+                event="final",
+                text=parsed.text,
+                device_id=self._device_id,
+                sequence=self._sequence,
+                lifecycle_event="segment_finalized",
+                segment=self._build_google_legacy_http_transcript_segment(
+                    segment_id=segment_id,
+                    revision=revision,
+                    text=parsed.text,
+                    is_final=True,
+                    source_lang=normalized_source_lang,
+                ),
+            )
+            await self._broadcast_transcript(transcript_event)
+            self._increment_metric("finals_emitted")
+            await self.subtitle_router.handle_transcript(transcript_event)
+            await self._obs_caption_output.publish_source_event(transcript_event)
+            await self._translation_dispatcher.submit_final(
+                sequence=self._sequence,
+                source_text=parsed.text,
+                source_lang=normalized_source_lang,
+            )
+            self._active_segment_id = None
+            self._active_segment_revision = 0
+            await self._set_listening_if_current(
+                "listening",
+                "transcribing",
+                "translating",
+                last_error=None,
+                status_message=f"{GOOGLE_LEGACY_HTTP_PROVIDER_LABEL} is active.",
+            )
+            await self._broadcast_runtime()
+
     async def browser_asr_worker_connected(self) -> None:
         self._external_worker_connected = True
-        self._browser_asr_gateway.worker_connected()
-        if self._state.is_running and self._current_asr_mode() == "browser_google":
+        self._active_browser_worker_session_id = None
+        self._active_browser_worker_generation_id = 0
+        browser_mode = self._current_asr_mode() if self._is_browser_asr_mode() else None
+        self._browser_asr_gateway.worker_connected(browser_mode=browser_mode)
+        if self._state.is_running and self._is_browser_asr_mode():
             await self._set_runtime_state(
                 is_running=True,
                 status="listening",
                 started_at_utc=self._state.started_at_utc,
                 last_error=None,
-                status_message="Browser speech worker connected. Press Start Recognition in the popup window.",
+                status_message=(
+                    "Experimental browser speech worker connected. Press Start Recognition in the popup window."
+                    if browser_mode == EXPERIMENTAL_BROWSER_ASR_MODE
+                    else "Browser speech worker connected. Press Start Recognition in the popup window."
+                ),
             )
 
     async def browser_asr_worker_disconnected(self) -> None:
         self._external_worker_connected = False
-        self._browser_asr_gateway.worker_disconnected()
+        self._active_browser_worker_session_id = None
+        self._active_browser_worker_generation_id = 0
+        browser_mode = self._current_asr_mode() if self._is_browser_asr_mode() else None
+        self._browser_asr_gateway.worker_disconnected(browser_mode=browser_mode)
         segment_id = self._active_segment_id
         self._active_segment_id = None
         self._active_segment_revision = 0
         self._clear_partial_tracking(segment_id)
         await self.subtitle_router.clear_active_partial()
-        if self._state.is_running and self._current_asr_mode() == "browser_google":
+        if self._state.is_running and self._is_browser_asr_mode():
             await self._set_runtime_state(
                 is_running=True,
                 status="listening",
                 started_at_utc=self._state.started_at_utc,
-                status_message="Browser speech worker disconnected. Reopen or restart the browser recognition window.",
+                status_message=(
+                    "Experimental browser speech worker disconnected. Reopen or restart the browser recognition window."
+                    if browser_mode == EXPERIMENTAL_BROWSER_ASR_MODE
+                    else "Browser speech worker disconnected. Reopen or restart the browser recognition window."
+                ),
             )
 
     async def update_browser_asr_worker_status(self, payload: dict[str, Any]) -> None:
+        previous = self._browser_asr_gateway.diagnostics()
         self._browser_asr_gateway.update_status(payload)
-        if self._state.is_running and self._current_asr_mode() == "browser_google":
+        if self._state.is_running and self._is_browser_asr_mode():
+            self._increment_counter_metric("browser_worker_event_count", 1)
+            current = self._browser_asr_gateway.diagnostics()
+            signature = (
+                current.worker_connected,
+                current.desired_running,
+                current.pending_start,
+                current.recognition_state,
+                current.supervisor_state,
+                current.degraded_reason,
+                current.last_error,
+                current.generation_id,
+                current.session_id,
+                current.client_segment_id,
+                current.forced_final,
+                current.no_speech_count,
+                current.network_error_count,
+                current.duplicate_partial_suppressed,
+                current.duplicate_final_suppressed,
+                current.late_forced_final_suppressed,
+                current.mic_track_ready_state,
+                current.mic_track_muted,
+                current.mic_rms,
+                current.mic_active_recent_ms,
+            )
+            if signature == self._last_browser_worker_status_signature and previous.model_dump() == current.model_dump():
+                self._increment_counter_metric("browser_worker_event_coalesced", 1)
+                return
+            self._last_browser_worker_status_signature = signature
             await self._broadcast_runtime()
 
     async def ingest_external_asr_update(
@@ -1718,18 +2166,45 @@ class RuntimeOrchestrator:
         final: str = "",
         is_final: bool = False,
         source_lang: str | None = None,
+        generation_id: int | None = None,
+        session_id: str | None = None,
+        client_segment_id: str | None = None,
+        forced_final: bool = False,
     ) -> None:
-        if not self._state.is_running or self._current_asr_mode() != "browser_google":
+        if not self._state.is_running or not self._is_browser_asr_mode():
             return
+        normalized_session_id = str(session_id or "").strip() or None
+        normalized_generation_id = max(0, int(generation_id or 0))
+        if normalized_session_id:
+            if self._active_browser_worker_session_id and normalized_session_id != self._active_browser_worker_session_id:
+                self._increment_counter_metric("browser_worker_event_coalesced", 1)
+                self._browser_asr_gateway.update_status(
+                    {"stale_worker_events_ignored": self._browser_asr_gateway.diagnostics().stale_worker_events_ignored + 1}
+                )
+                return
+            self._active_browser_worker_session_id = normalized_session_id
+        if normalized_generation_id:
+            if normalized_generation_id < self._active_browser_worker_generation_id:
+                self._increment_counter_metric("browser_worker_event_coalesced", 1)
+                self._browser_asr_gateway.update_status(
+                    {"stale_worker_events_ignored": self._browser_asr_gateway.diagnostics().stale_worker_events_ignored + 1}
+                )
+                return
+            self._active_browser_worker_generation_id = normalized_generation_id
+        self._increment_counter_metric("browser_worker_event_count", 1)
 
         normalized_source_lang = str(source_lang or self._browser_asr_source_lang() or "auto").strip().lower() or "auto"
         partial_text = str(partial or "").strip()
         final_text = str(final or "").strip()
+        normalized_client_segment_id = str(client_segment_id or "").strip() or None
         if is_final and not final_text and partial_text:
             final_text = partial_text
 
         if partial_text and not is_final:
-            segment_id, revision, started_now = self._assign_segment_tracking("partial")
+            segment_id, revision, started_now = self._assign_segment_tracking(
+                "partial",
+                preferred_segment_id=normalized_client_segment_id,
+            )
             if started_now:
                 await self._broadcast_external_segment_started(
                     segment_id=segment_id,
@@ -1744,7 +2219,7 @@ class RuntimeOrchestrator:
             transcript_event = TranscriptEvent(
                 event="partial",
                 text=partial_text,
-                device_id="browser_google_worker",
+                device_id=f"{self._browser_worker_provider_name()}_worker",
                 sequence=self._sequence,
                 lifecycle_event="partial_updated",
                 segment=self._build_external_transcript_segment(
@@ -1771,7 +2246,10 @@ class RuntimeOrchestrator:
             )
 
         if is_final and final_text:
-            segment_id, revision, started_now = self._assign_segment_tracking("final")
+            segment_id, revision, started_now = self._assign_segment_tracking(
+                "final",
+                preferred_segment_id=normalized_client_segment_id,
+            )
             if started_now:
                 await self._broadcast_external_segment_started(
                     segment_id=segment_id,
@@ -1783,7 +2261,7 @@ class RuntimeOrchestrator:
             transcript_event = TranscriptEvent(
                 event="final",
                 text=final_text,
-                device_id="browser_google_worker",
+                device_id=f"{self._browser_worker_provider_name()}_worker",
                 sequence=self._sequence,
                 lifecycle_event="segment_finalized",
                 segment=self._build_external_transcript_segment(
@@ -1834,7 +2312,8 @@ class RuntimeOrchestrator:
         )
         self._remote_audio_queue = asyncio.Queue(maxsize=256)
         asr_mode = self._current_asr_mode()
-        if self._current_remote_role() == REMOTE_ROLE_WORKER and asr_mode == "browser_google":
+        use_google_legacy_http_provider = self._uses_google_legacy_http_provider(asr_mode)
+        if self._current_remote_role() == REMOTE_ROLE_WORKER and self._is_browser_asr_mode(asr_mode):
             await self._set_runtime_state(
                 is_running=False,
                 status="error",
@@ -1843,9 +2322,21 @@ class RuntimeOrchestrator:
                 status_message=None,
             )
             return self._state
+        if self._current_remote_role() != "disabled" and use_google_legacy_http_provider:
+            await self._set_runtime_state(
+                is_running=False,
+                status="error",
+                started_at_utc=None,
+                last_error=(
+                    f"{GOOGLE_LEGACY_HTTP_PROVIDER_LABEL} is unavailable in remote controller/worker mode. "
+                    "Remote processing must stay on the local AI runtime."
+                ),
+                status_message=None,
+            )
+            return self._state
         use_remote_audio_source = self._uses_remote_audio_source()
         use_remote_event_source = self._uses_remote_event_source()
-        if asr_mode != "browser_google" and not use_remote_audio_source and not use_remote_event_source and not has_audio_inputs:
+        if not self._is_browser_asr_mode(asr_mode) and not use_remote_audio_source and not use_remote_event_source and not has_audio_inputs:
             await self._set_runtime_state(
                 is_running=False,
                 status="error",
@@ -1862,7 +2353,7 @@ class RuntimeOrchestrator:
         )
 
         try:
-            if asr_mode != "browser_google" and not use_remote_event_source:
+            if not self._is_browser_asr_mode(asr_mode) and not use_remote_event_source and not use_google_legacy_http_provider:
                 asr_status = await asyncio.to_thread(self._asr_engine.initialize_runtime)
                 self._apply_vad_tuning()
                 if not asr_status.ready:
@@ -1875,9 +2366,9 @@ class RuntimeOrchestrator:
                     )
                     return self._state
             self._device_id = "remote_webrtc_controller" if use_remote_audio_source else device_id
-            if asr_mode != "browser_google":
+            if not self._is_browser_asr_mode(asr_mode):
                 self._external_worker_connected = False
-            if asr_mode != "browser_google" and not use_remote_audio_source:
+            if not self._is_browser_asr_mode(asr_mode) and not use_remote_audio_source:
                 self._audio_capture = AudioCapture()
                 self._audio_capture.start(device_id=device_id)
             if use_remote_audio_source:
@@ -1891,8 +2382,14 @@ class RuntimeOrchestrator:
             await self.subtitle_router.reset()
             self._vad.reset()
             self._asr_engine.reset_runtime_state()
+            await self._google_legacy_http_provider.stop()
             self._segment_queue.clear()
             self._sequence = 0
+            self._runtime_event_sequence = 0
+            self._runtime_event_sequence_by_type.clear()
+            self._last_runtime_status_signature = None
+            self._last_runtime_status_broadcast_monotonic = 0.0
+            self._last_browser_worker_status_signature = None
             self._last_partial_text_by_segment.clear()
             self._last_partial_emit_monotonic_by_segment.clear()
             started_at = datetime.now(timezone.utc).isoformat()
@@ -1900,6 +2397,9 @@ class RuntimeOrchestrator:
             self._session_started_at_utc = started_at
             self._session_started_at_monotonic = time.perf_counter()
             self._active_runtime_mode = asr_mode
+            self._active_local_provider_preference = (
+                self._current_local_provider_preference() if asr_mode == LOCAL_ASR_MODE else None
+            )
             await self._set_runtime_state(
                 is_running=True,
                 status="listening",
@@ -1912,19 +2412,46 @@ class RuntimeOrchestrator:
                     if use_remote_audio_source
                     else
                     (
-                        "Browser speech worker connected. Press Start Recognition in the popup window."
+                        (
+                            "Experimental browser speech worker connected. Press Start Recognition in the popup window."
+                            if asr_mode == EXPERIMENTAL_BROWSER_ASR_MODE
+                            else "Browser speech worker connected. Press Start Recognition in the popup window."
+                        )
                         if self._external_worker_connected
-                        else "Waiting for the browser speech worker window to connect."
+                        else (
+                            "Waiting for the experimental browser speech worker window to connect."
+                            if asr_mode == EXPERIMENTAL_BROWSER_ASR_MODE
+                            else "Waiting for the browser speech worker window to connect."
+                        )
                     )
-                    if asr_mode == "browser_google"
-                    else None
+                    if self._is_browser_asr_mode(asr_mode)
+                    else (
+                        f"{GOOGLE_LEGACY_HTTP_PROVIDER_LABEL} is connecting."
+                        if use_google_legacy_http_provider
+                        else None
+                    )
                 ),
             )
-            if asr_mode != "browser_google" and not use_remote_event_source:
+            if not self._is_browser_asr_mode(asr_mode) and not use_remote_event_source:
+                if use_google_legacy_http_provider:
+                    provider_snapshot = await self._google_legacy_http_provider.start()
+                    if provider_snapshot.get("last_error_kind") == "disabled":
+                        await self._set_runtime_state(
+                            is_running=False,
+                            status="error",
+                            started_at_utc=None,
+                            last_error=str(provider_snapshot.get("last_error") or GOOGLE_LEGACY_HTTP_PROVIDER_WARNING),
+                            status_message=None,
+                        )
+                        await self._safe_stop_audio()
+                        await self._obs_caption_output.stop()
+                        return self._state
                 self._capture_task = asyncio.create_task(self._capture_loop())
-                self._asr_task = asyncio.create_task(self._asr_loop())
+                if not use_google_legacy_http_provider:
+                    self._asr_task = asyncio.create_task(self._asr_loop())
         except Exception as exc:
             await self._safe_stop_audio()
+            await self._google_legacy_http_provider.stop()
             await self._obs_caption_output.stop()
             await self._set_runtime_state(
                 is_running=False,
@@ -1954,11 +2481,15 @@ class RuntimeOrchestrator:
         self._capture_task = None
         self._asr_task = None
         self._external_worker_connected = False
+        self._active_browser_worker_session_id = None
+        self._active_browser_worker_generation_id = 0
         self._active_runtime_mode = None
+        self._active_local_provider_preference = None
         self._remote_audio_connected = False
         self._remote_audio_session_id = None
         self._remote_audio_last_chunk_monotonic = None
         await self._safe_stop_audio()
+        await self._google_legacy_http_provider.stop()
         await self._obs_caption_output.stop()
         stopped_at_utc = datetime.now(timezone.utc).isoformat()
         export_error: str | None = None
@@ -1977,6 +2508,9 @@ class RuntimeOrchestrator:
         self._remote_audio_queue = None
         self._reset_export_session()
         self._metrics = RuntimeMetrics()
+        self._last_runtime_status_signature = None
+        self._last_runtime_status_broadcast_monotonic = 0.0
+        self._last_browser_worker_status_signature = None
         self._runtime_loop = None
         if export_error:
             self._state = self._state.model_copy(update={"last_error": f"Export error: {export_error}"})
@@ -2106,28 +2640,32 @@ class RuntimeOrchestrator:
                 )
         else:
             self._record_metrics(remote_audio_last_chunk_age_ms=None)
-        self._state = self._state.model_copy(
-            update={
-                "asr_diagnostics": self.asr_diagnostics(),
-                "translation_diagnostics": self.translation_diagnostics(),
-                "obs_caption_diagnostics": self.obs_caption_diagnostics(),
-                "metrics": self._metrics.model_copy(),
-            }
+        self._state = self._build_runtime_state(
+            is_running=self._state.is_running,
+            status=self._state.status,
+            started_at_utc=self._state.started_at_utc,
+            last_error=self._state.last_error,
+            status_message=self._state.status_message,
         )
         return self._state
 
     def asr_status(self):
-        if self._current_asr_mode() == "browser_google":
+        if self._is_browser_asr_mode():
+            browser_mode = self._current_asr_mode()
             message = (
+                "Experimental browser speech worker is connected."
+                if self._external_worker_connected
+                else "Experimental browser speech mode is configured. Open the browser worker window to capture audio."
+            ) if browser_mode == EXPERIMENTAL_BROWSER_ASR_MODE else (
                 "Browser speech worker is connected."
                 if self._external_worker_connected
                 else "Browser speech mode is configured. Open the browser worker window to capture audio."
             )
             return AsrProviderStatus(
-                provider="browser_google",
+                provider=browser_mode,
                 ready=True,
                 message=message,
-                requested_provider="browser_google",
+                requested_provider=browser_mode,
                 requested_device_policy="browser_window",
                 supports_gpu=False,
                 supports_partials=True,
@@ -2136,6 +2674,30 @@ class RuntimeOrchestrator:
                 selected_device="browser",
                 selected_execution_provider="webkitSpeechRecognition",
                 runtime_initialized=self._state.is_running,
+            )
+        if self._uses_google_legacy_http_provider():
+            diagnostics = self._google_legacy_http_provider.diagnostics()
+            return AsrProviderStatus(
+                provider=GOOGLE_LEGACY_HTTP_PROVIDER_NAME,
+                ready=bool(diagnostics.get("desired_running")),
+                message=str(
+                    diagnostics.get("last_error")
+                    or (
+                        f"{GOOGLE_LEGACY_HTTP_PROVIDER_LABEL} is {diagnostics.get('provider_state', 'idle')}. "
+                        f"{GOOGLE_LEGACY_HTTP_PROVIDER_WARNING}"
+                    )
+                ),
+                requested_provider=GOOGLE_LEGACY_HTTP_PROVIDER_NAME,
+                requested_device_policy=GOOGLE_LEGACY_HTTP_DEVICE_POLICY,
+                supports_gpu=False,
+                supports_partials=True,
+                supports_streaming=True,
+                partials_supported=True,
+                selected_device="microphone",
+                selected_execution_provider="legacy_http",
+                runtime_initialized=self._state.is_running,
+                degraded_mode=bool(diagnostics.get("last_error")),
+                fallback_reason=str(diagnostics.get("last_error") or "") or None,
             )
         return self._asr_engine.status()
 
@@ -2173,23 +2735,36 @@ class RuntimeOrchestrator:
 
     def asr_diagnostics(self) -> AsrDiagnostics:
         try:
-            if self._current_asr_mode() == "browser_google":
+            if self._is_browser_asr_mode():
+                browser_mode = self._current_asr_mode()
                 browser_config = self._browser_asr_config()
                 browser_lang = str(browser_config.get("recognition_language", "ru-RU") or "ru-RU")
                 browser_worker = self._browser_asr_gateway.diagnostics()
                 worker_message = (
+                    "Experimental browser speech worker is connected."
+                    if self._external_worker_connected
+                    else "Open the experimental browser speech window and start recognition there."
+                ) if browser_mode == EXPERIMENTAL_BROWSER_ASR_MODE else (
                     "Browser speech worker is connected."
                     if self._external_worker_connected
                     else "Open the browser speech window and start recognition there."
                 )
                 return AsrDiagnostics(
-                    provider="browser_google",
-                    requested_provider="browser_google",
+                    provider=browser_mode,
+                    provider_label="Browser Google Speech Experimental"
+                    if browser_mode == EXPERIMENTAL_BROWSER_ASR_MODE
+                    else "Browser Google Speech",
+                    provider_mode_kind="browser_speech",
+                    true_streaming=True,
+                    requested_provider=browser_mode,
                     requested_device_policy="browser_window",
+                    requested_device="browser_window",
+                    cuda_available=False,
                     supports_gpu=False,
                     supports_partials=True,
                     supports_streaming=True,
                     supports_word_timestamps=False,
+                    supports_timestamps=False,
                     gpu_requested=False,
                     gpu_available=False,
                     torch_built_with_cuda=False,
@@ -2205,23 +2780,116 @@ class RuntimeOrchestrator:
                     rnnoise_available=False,
                     rnnoise_active=False,
                     rnnoise_message="RNNoise is not used in browser speech mode.",
-                    message=f"{worker_message} Recognition language: {browser_lang}.",
+                    message=(
+                        f"{worker_message} Recognition language: {browser_lang}. "
+                        "The worker may fall back to default start() if audio-track start is rejected."
+                        if browser_mode == EXPERIMENTAL_BROWSER_ASR_MODE
+                        else f"{worker_message} Recognition language: {browser_lang}."
+                    ),
                     runtime_initialized=self._state.is_running,
                     browser_worker=browser_worker,
                 )
+            if self._uses_google_legacy_http_provider():
+                provider_snapshot = self._google_legacy_http_provider.diagnostics()
+                rnnoise_status = self._rnnoise_processor.status()
+                return AsrDiagnostics(
+                    provider=GOOGLE_LEGACY_HTTP_PROVIDER_NAME,
+                    provider_label=GOOGLE_LEGACY_HTTP_PROVIDER_LABEL,
+                    provider_mode_kind="backend_streaming",
+                    true_streaming=True,
+                    requested_provider=GOOGLE_LEGACY_HTTP_PROVIDER_NAME,
+                    requested_device_policy=GOOGLE_LEGACY_HTTP_DEVICE_POLICY,
+                    requested_device=self._device_id or "microphone",
+                    supports_gpu=False,
+                    supports_partials=True,
+                    supports_streaming=True,
+                    supports_word_timestamps=False,
+                    supports_timestamps=False,
+                    gpu_requested=False,
+                    gpu_available=False,
+                    cuda_available=False,
+                    torch_built_with_cuda=False,
+                    torch_cuda_is_available=False,
+                    torch_device_count=0,
+                    degraded_mode=bool(provider_snapshot.get("last_error"))
+                    or str(provider_snapshot.get("provider_state", "")).lower() in {"reconnecting", "error"},
+                    fallback_reason=str(provider_snapshot.get("last_error") or "") or None,
+                    selected_device=self._device_id or "microphone",
+                    selected_execution_provider="legacy_http",
+                    partials_supported=True,
+                    sample_rate=getattr(self._audio_capture, "sample_rate", None) or self._asr_engine.sample_rate,
+                    recognition_noise_reduction_enabled=rnnoise_status.enabled,
+                    rnnoise_strength=rnnoise_status.strength,
+                    rnnoise_available=rnnoise_status.backend_available,
+                    rnnoise_active=rnnoise_status.active,
+                    rnnoise_backend=rnnoise_status.backend_name,
+                    rnnoise_uses_resample=rnnoise_status.uses_resample,
+                    rnnoise_input_sample_rate=rnnoise_status.input_sample_rate,
+                    rnnoise_processing_sample_rate=rnnoise_status.processing_sample_rate,
+                    rnnoise_frame_size_samples=rnnoise_status.frame_size_samples,
+                    rnnoise_message=rnnoise_status.message,
+                    message=(
+                        f"{GOOGLE_LEGACY_HTTP_PROVIDER_LABEL} is {provider_snapshot.get('provider_state', 'idle')}. "
+                        f"{GOOGLE_LEGACY_HTTP_PROVIDER_WARNING}"
+                    ),
+                    runtime_initialized=bool(provider_snapshot.get("desired_running")),
+                    provider_state=str(provider_snapshot.get("provider_state", "idle") or "idle"),
+                    stream_generation=int(provider_snapshot.get("stream_generation", 0) or 0),
+                    desired_running=bool(provider_snapshot.get("desired_running", False)),
+                    upstream_connected=bool(provider_snapshot.get("upstream_connected", False)),
+                    downstream_connected=bool(provider_snapshot.get("downstream_connected", False)),
+                    reconnect_count=int(provider_snapshot.get("reconnect_count", 0) or 0),
+                    audio_queue_depth=int(provider_snapshot.get("audio_queue_depth", 0) or 0),
+                    audio_chunks_sent=int(provider_snapshot.get("audio_chunks_sent", 0) or 0),
+                    audio_chunks_dropped=int(provider_snapshot.get("audio_chunks_dropped", 0) or 0),
+                    stale_results_ignored=int(provider_snapshot.get("stale_results_ignored", 0) or 0),
+                    partials_received=int(provider_snapshot.get("partials_received", 0) or 0),
+                    finals_received=int(provider_snapshot.get("finals_received", 0) or 0),
+                    duplicate_partials_suppressed=int(provider_snapshot.get("duplicate_partials_suppressed", 0) or 0),
+                    duplicate_finals_suppressed=int(provider_snapshot.get("duplicate_finals_suppressed", 0) or 0),
+                    last_error=str(provider_snapshot.get("last_error") or "") or None,
+                    last_error_kind=str(provider_snapshot.get("last_error_kind") or "") or None,
+                    last_partial_age_ms=provider_snapshot.get("last_partial_age_ms"),
+                    last_final_age_ms=provider_snapshot.get("last_final_age_ms"),
+                    connect_timeout_ms=int(provider_snapshot.get("connect_timeout_ms", 0) or 0),
+                    send_timeout_ms=int(provider_snapshot.get("send_timeout_ms", 0) or 0),
+                    recv_timeout_ms=int(provider_snapshot.get("recv_timeout_ms", 0) or 0),
+                    max_queue_depth=int(provider_snapshot.get("max_queue_depth", 0) or 0),
+                    endpoint_mode=str(provider_snapshot.get("endpoint_mode", "legacy_http") or "legacy_http"),
+                    uses_google_cloud_api=bool(provider_snapshot.get("uses_google_cloud_api", False)),
+                    requires_api_key=bool(provider_snapshot.get("requires_api_key", False)),
+                )
             diagnostics = self._asr_engine.diagnostics()
             rnnoise_status = self._rnnoise_processor.status()
+            config = self.config_getter()
+            asr_config = config.get("asr", {}) if isinstance(config, dict) else {}
+            model_load_mode = str(asr_config.get("model_load_mode", "auto") or "auto") if isinstance(asr_config, dict) else "auto"
+            model_revision = str(asr_config.get("model_revision", "") or "") if isinstance(asr_config, dict) else ""
             return AsrDiagnostics(
                 provider=diagnostics.provider_name,
+                provider_label=(
+                    "Official EU Parakeet Low Latency"
+                    if diagnostics.provider_name == "official_eu_parakeet_low_latency"
+                    else "Official EU Parakeet"
+                ),
+                provider_mode_kind="local_ai",
+                true_streaming=diagnostics.provider_name == "official_eu_parakeet_low_latency",
                 requested_provider=diagnostics.requested_provider,
                 requested_device_policy=diagnostics.requested_device_policy,
+                requested_device="cuda" if diagnostics.gpu_requested else "cpu",
+                model_load_mode=model_load_mode,
+                model_repo=OFFICIAL_EU_PARAKEET_REPO,
+                model_revision=model_revision,
                 model_path=diagnostics.model_path,
+                model_integrity_state="present" if diagnostics.model_path else "pending_download",
                 supports_gpu=diagnostics.supports_gpu,
                 supports_partials=diagnostics.supports_partials,
                 supports_streaming=diagnostics.supports_streaming,
                 supports_word_timestamps=diagnostics.supports_word_timestamps,
+                supports_timestamps=diagnostics.supports_word_timestamps,
                 gpu_requested=diagnostics.gpu_requested,
                 gpu_available=diagnostics.gpu_available,
+                cuda_available=diagnostics.torch_cuda_is_available,
                 torch_version=diagnostics.torch_version,
                 torch_built_with_cuda=diagnostics.torch_built_with_cuda,
                 torch_cuda_is_available=diagnostics.torch_cuda_is_available,
@@ -2268,12 +2936,22 @@ class RuntimeOrchestrator:
         except Exception as exc:
             return AsrDiagnostics(
                 provider="unknown",
+                provider_label="Unknown ASR",
+                provider_mode_kind="unknown",
+                true_streaming=False,
                 requested_provider="unknown",
                 requested_device_policy="unknown",
+                requested_device="unknown",
+                model_load_mode="auto",
+                model_repo=OFFICIAL_EU_PARAKEET_REPO,
+                model_revision="",
+                model_integrity_state="unknown",
                 supports_gpu=False,
                 supports_partials=False,
                 supports_streaming=False,
                 supports_word_timestamps=False,
+                supports_timestamps=False,
+                cuda_available=False,
                 torch_built_with_cuda=False,
                 torch_cuda_is_available=False,
                 torch_device_count=0,
@@ -2299,9 +2977,16 @@ class RuntimeOrchestrator:
                 message=f"ASR diagnostics unavailable: {exc}",
             )
 
-    def _assign_segment_tracking(self, kind: str) -> tuple[str, int, bool]:
+    def _assign_segment_tracking(self, kind: str, *, preferred_segment_id: str | None = None) -> tuple[str, int, bool]:
         started_now = False
-        if self._active_segment_id is None:
+        _ = kind
+        normalized_preferred_segment_id = str(preferred_segment_id or "").strip() or None
+        if normalized_preferred_segment_id and normalized_preferred_segment_id != self._active_segment_id:
+            self._clear_partial_tracking(self._active_segment_id)
+            self._active_segment_id = normalized_preferred_segment_id
+            self._active_segment_revision = 0
+            started_now = True
+        elif self._active_segment_id is None:
             self._segment_counter += 1
             self._active_segment_id = f"segment-{self._segment_counter}"
             self._active_segment_revision = 0

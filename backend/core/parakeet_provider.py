@@ -29,7 +29,7 @@ OFFICIAL_EU_PARAKEET_URL = (
     f"https://huggingface.co/{OFFICIAL_EU_PARAKEET_REPO}/resolve/main/{OFFICIAL_EU_PARAKEET_FILENAME}?download=true"
 )
 ASR_PROVIDER_OFFICIAL = "official_eu_parakeet"
-ASR_PROVIDER_REALTIME = "official_eu_parakeet_realtime"
+ASR_PROVIDER_REALTIME = "official_eu_parakeet_low_latency"
 _MODEL_INSTALL_LOCK = threading.Lock()
 ProgressCallback = Callable[[str], None]
 

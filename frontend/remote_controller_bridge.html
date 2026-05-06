@@ -7,22 +7,31 @@
     <style>
       :root {
         color-scheme: dark;
-        --bg: #0b1220;
-        --panel: #111a2e;
-        --line: #23314f;
-        --text: #e9eefc;
-        --muted: #95a5c8;
-        --ok: #46d39a;
-        --warn: #f4b95b;
-        --bad: #ef6d6d;
+        --sst-bg: #080a12;
+        --sst-panel: rgba(12, 18, 32, 0.82);
+        --sst-panel-strong: rgba(16, 24, 42, 0.95);
+        --sst-border: rgba(120, 220, 255, 0.25);
+        --sst-text: #eef8ff;
+        --sst-muted: #91a4b8;
+        --sst-ok: #7cffb2;
+        --sst-warning: #ffd166;
+        --sst-danger: #ff5c7a;
+        --sst-info: #7cc7ff;
+        --sst-radius-sm: 8px;
+        --sst-radius-md: 14px;
+        --sst-radius-lg: 22px;
+        --sst-shadow-panel: 0 20px 60px rgba(0, 0, 0, 0.35);
       }
       * {
         box-sizing: border-box;
       }
       body {
         margin: 0;
-        background: radial-gradient(circle at top, #1a2a49 0%, var(--bg) 58%);
-        color: var(--text);
+        background:
+          radial-gradient(circle at 16% 12%, rgba(124, 199, 255, 0.18), transparent 30%),
+          radial-gradient(circle at 84% 10%, rgba(255, 92, 122, 0.12), transparent 24%),
+          linear-gradient(180deg, #0b1422 0%, var(--sst-bg) 100%);
+        color: var(--sst-text);
         font-family: "Segoe UI", Tahoma, sans-serif;
       }
       main {
@@ -31,10 +40,15 @@
         padding: 0 16px 24px;
       }
       .panel {
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 16px;
-        padding: 16px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent),
+          radial-gradient(circle at top right, rgba(124, 199, 255, 0.12), transparent 36%),
+          var(--sst-panel-strong);
+        border: 1px solid var(--sst-border);
+        border-radius: var(--sst-radius-lg);
+        padding: 20px;
+        box-shadow: var(--sst-shadow-panel);
+        backdrop-filter: blur(10px);
       }
       .grid {
         display: grid;
@@ -49,9 +63,9 @@
       select {
         width: 100%;
         padding: 10px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        color: var(--text);
+        border: 1px solid rgba(120, 220, 255, 0.18);
+        border-radius: var(--sst-radius-sm);
+        color: var(--sst-text);
         background: #0d1528;
       }
       .actions {
@@ -61,9 +75,9 @@
       }
       button {
         padding: 10px 14px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        color: var(--text);
+        border: 1px solid rgba(120, 220, 255, 0.2);
+        border-radius: var(--sst-radius-sm);
+        color: var(--sst-text);
         background: #1a2745;
         cursor: pointer;
       }
@@ -73,7 +87,7 @@
         max-height: 340px;
         overflow: auto;
         white-space: pre-wrap;
-        border: 1px solid var(--line);
+        border: 1px solid rgba(120, 220, 255, 0.12);
         border-radius: 10px;
         padding: 12px;
         background: #0a1122;
@@ -81,16 +95,31 @@
       }
       .status {
         margin-top: 10px;
-        color: var(--muted);
+        padding: 10px 12px;
+        border: 1px solid rgba(120, 220, 255, 0.12);
+        border-radius: var(--sst-radius-md);
+        color: var(--sst-muted);
+        background: rgba(8, 14, 24, 0.72);
       }
-      .ok {
-        color: var(--ok);
+      .status[data-status="ready"] {
+        color: var(--sst-info);
+        border-color: rgba(124, 199, 255, 0.24);
       }
-      .warn {
-        color: var(--warn);
+      .status[data-status="running"] {
+        color: var(--sst-ok);
+        border-color: rgba(124, 255, 178, 0.28);
       }
-      .bad {
-        color: var(--bad);
+      .status[data-status="disabled"] {
+        color: var(--sst-muted);
+      }
+      .status[data-status="loading"],
+      .status[data-status="warning"] {
+        color: var(--sst-warning);
+        border-color: rgba(255, 209, 102, 0.28);
+      }
+      .status[data-status="error"] {
+        color: var(--sst-danger);
+        border-color: rgba(255, 92, 122, 0.28);
       }
       @media (max-width: 860px) {
         .grid {
@@ -131,10 +160,11 @@
           <button id="stop-btn" type="button">Stop</button>
           <button id="refresh-mics-btn" type="button">Refresh Mics</button>
         </div>
-        <p id="status-line" class="status">Idle.</p>
+        <p id="status-line" class="status" data-status="ready">Ready.</p>
         <pre id="log-box">controller-bridge: ready</pre>
       </div>
     </main>
-    <script src="/static/js/remote-controller-bridge.js?v=20260422k"></script>
+    <script src="/static/js/core/redaction.js?v=20260505a"></script>
+    <script src="/static/js/remote-controller-bridge.js?v=20260505a"></script>
   </body>
 </html>

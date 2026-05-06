@@ -1,30 +1,45 @@
 :root {
-  --bg-canvas: #09111b;
+  --sst-bg: #080a12;
+  --sst-panel: rgba(12, 18, 32, 0.82);
+  --sst-panel-strong: rgba(16, 24, 42, 0.95);
+  --sst-border: rgba(120, 220, 255, 0.25);
+  --sst-text: #eef8ff;
+  --sst-muted: #91a4b8;
+  --sst-ok: #7cffb2;
+  --sst-warning: #ffd166;
+  --sst-danger: #ff5c7a;
+  --sst-info: #7cc7ff;
+  --sst-radius-sm: 8px;
+  --sst-radius-md: 14px;
+  --sst-radius-lg: 22px;
+  --sst-shadow-panel: 0 20px 60px rgba(0, 0, 0, 0.35);
+
+  --bg-canvas: var(--sst-bg);
   --bg-app: #0b1422;
-  --bg-panel: rgba(14, 24, 40, 0.9);
-  --bg-panel-elevated: rgba(18, 30, 50, 0.94);
+  --bg-panel: var(--sst-panel);
+  --bg-panel-elevated: var(--sst-panel-strong);
   --bg-control: rgba(8, 14, 24, 0.92);
   --bg-control-hover: rgba(14, 22, 36, 0.96);
   --bg-control-disabled: rgba(10, 14, 20, 0.84);
-  --text-primary: #f5f7fb;
-  --text-secondary: #9cb0d0;
+  --text-primary: var(--sst-text);
+  --text-secondary: var(--sst-muted);
   --text-tertiary: #7c92b4;
-  --text-positive: #b8f4d5;
-  --accent: #6cc7ff;
+  --text-positive: var(--sst-ok);
+  --accent: var(--sst-info);
   --accent-strong: #8bddff;
-  --accent-secondary: #ff6ce6;
+  --accent-secondary: #4fe3ff;
   --accent-soft: rgba(108, 199, 255, 0.14);
-  --accent-secondary-soft: rgba(255, 108, 230, 0.14);
-  --danger: #ff9d95;
+  --accent-secondary-soft: rgba(79, 227, 255, 0.14);
+  --danger: var(--sst-danger);
   --danger-soft: rgba(255, 157, 149, 0.14);
-  --line-subtle: rgba(160, 193, 255, 0.12);
+  --line-subtle: rgba(120, 220, 255, 0.16);
   --line-strong: rgba(160, 193, 255, 0.2);
-  --shadow-panel: 0 24px 80px rgba(0, 0, 0, 0.35);
+  --shadow-panel: var(--sst-shadow-panel);
   --shadow-focus: 0 0 0 3px rgba(108, 199, 255, 0.22);
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  --radius-sm: var(--sst-radius-sm);
+  --radius-md: var(--sst-radius-md);
+  --radius-lg: 18px;
+  --radius-xl: var(--sst-radius-lg);
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -102,16 +117,25 @@ a {
   gap: var(--space-4);
 }
 
-.panel {
+.panel,
+.sst-card {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent),
-    linear-gradient(135deg, rgba(108, 199, 255, 0.04), rgba(255, 108, 230, 0.035)),
+    linear-gradient(135deg, rgba(108, 199, 255, 0.05), rgba(79, 227, 255, 0.04)),
     var(--bg-panel);
   border: 1px solid var(--line-subtle);
   border-radius: var(--radius-xl);
   padding: var(--space-5);
   box-shadow: var(--shadow-panel);
   backdrop-filter: blur(10px);
+}
+
+.sst-health-card {
+  border-color: var(--sst-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent),
+    radial-gradient(circle at top right, rgba(124, 199, 255, 0.13), transparent 34%),
+    var(--bg-panel-elevated);
 }
 
 .hero-panel {
@@ -240,6 +264,14 @@ a {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.sst-latency-meter {
+  width: 100%;
+  min-height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
 .runtime-progress-fill {
   width: 0%;
   height: 100%;
@@ -275,7 +307,8 @@ a {
   align-items: center;
 }
 
-.tab-bar {
+.tab-bar,
+.sst-tabs {
   display: flex;
   justify-content: flex-start;
   align-items: center;
@@ -498,7 +531,8 @@ a {
   margin-top: var(--space-3);
 }
 
-.badge {
+.badge,
+.sst-status-badge {
   border: 1px solid var(--line-strong);
   border-radius: 999px;
   padding: 8px 12px;
@@ -506,6 +540,43 @@ a {
   line-height: 1;
   color: var(--text-secondary);
   background: rgba(255, 255, 255, 0.03);
+}
+
+.sst-status-badge[data-status="ready"] {
+  border-color: rgba(124, 255, 178, 0.38);
+  color: var(--sst-ok);
+  background: rgba(124, 255, 178, 0.08);
+}
+
+.sst-status-badge[data-status="running"] {
+  border-color: rgba(124, 199, 255, 0.42);
+  color: var(--sst-info);
+  background: rgba(124, 199, 255, 0.1);
+}
+
+.sst-status-badge[data-status="disabled"] {
+  border-color: rgba(145, 164, 184, 0.24);
+  color: var(--sst-muted);
+  background: rgba(145, 164, 184, 0.08);
+}
+
+.sst-status-badge[data-status="warning"],
+.sst-status-badge[data-status="loading"] {
+  border-color: rgba(255, 209, 102, 0.38);
+  color: var(--sst-warning);
+  background: rgba(255, 209, 102, 0.08);
+}
+
+.sst-status-badge[data-status="error"] {
+  border-color: rgba(255, 92, 122, 0.42);
+  color: var(--sst-danger);
+  background: rgba(255, 92, 122, 0.1);
+}
+
+.sst-status-badge[data-status="degraded"] {
+  border-color: rgba(124, 199, 255, 0.32);
+  color: #9edbff;
+  background: rgba(124, 199, 255, 0.08);
 }
 
 .state-pill {
@@ -556,17 +627,21 @@ a {
 }
 
 .stack-field,
-.inline-field {
+.inline-field,
+.sst-field,
+.sst-field-row {
   width: 100%;
 }
 
-.stack-field {
+.stack-field,
+.sst-field {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
 }
 
-.inline-field {
+.inline-field,
+.sst-field-row {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
@@ -589,7 +664,9 @@ a {
 }
 
 .stack-field span,
-.inline-field span {
+.inline-field span,
+.sst-field span,
+.sst-field-row span {
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.3;
@@ -609,6 +686,7 @@ a {
 }
 
 button,
+.sst-button,
 input,
 select,
 textarea {
@@ -616,13 +694,15 @@ textarea {
 }
 
 button,
+.sst-button,
 input:not([type="checkbox"]):not([type="range"]),
 select,
 textarea {
   width: 100%;
 }
 
-button {
+button,
+.sst-button {
   min-height: var(--control-height);
   padding: 10px 16px;
   border-radius: var(--radius-md);
@@ -634,23 +714,36 @@ button {
   transition: background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
 }
 
-button:hover {
+button:hover,
+.sst-button:hover {
   background: linear-gradient(135deg, var(--accent-strong), #ff8cf0);
 }
 
-button:disabled {
+button:disabled,
+.sst-button:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
 
-button.secondary {
+button.secondary,
+.sst-button-ghost {
   background: var(--bg-control);
   border-color: var(--line-strong);
   color: var(--text-primary);
 }
 
-button.secondary:hover {
+button.secondary:hover,
+.sst-button-ghost:hover {
   background: var(--bg-control-hover);
+}
+
+.sst-button-danger {
+  background: linear-gradient(135deg, rgba(255, 92, 122, 0.92), rgba(255, 145, 123, 0.92));
+  color: #fff5f7;
+}
+
+.sst-button-danger:hover {
+  background: linear-gradient(135deg, rgba(255, 110, 136, 0.98), rgba(255, 162, 144, 0.98));
 }
 
 .button-stack {
@@ -697,6 +790,35 @@ textarea:disabled {
 
 textarea {
   resize: vertical;
+}
+
+.sst-toast {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  max-width: 360px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--sst-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel-elevated);
+  box-shadow: var(--shadow-panel);
+  color: var(--text-primary);
+  z-index: 50;
+}
+
+.sst-modal {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--space-5);
+  background: rgba(3, 7, 14, 0.72);
+  backdrop-filter: blur(10px);
+  z-index: 60;
+}
+
+.sst-modal > * {
+  width: min(720px, 100%);
 }
 
 .toggle-row {

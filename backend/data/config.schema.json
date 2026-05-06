@@ -1,0 +1,952 @@
+{
+  "$defs": {
+    "AsrBrowserAudioTrackConstraintsConfig": {
+      "properties": {
+        "echoCancellation": {
+          "default": false,
+          "title": "Echocancellation",
+          "type": "boolean"
+        },
+        "noiseSuppression": {
+          "default": false,
+          "title": "Noisesuppression",
+          "type": "boolean"
+        },
+        "autoGainControl": {
+          "default": false,
+          "title": "Autogaincontrol",
+          "type": "boolean"
+        }
+      },
+      "title": "AsrBrowserAudioTrackConstraintsConfig",
+      "type": "object"
+    },
+    "AsrBrowserConfig": {
+      "properties": {
+        "recognition_language": {
+          "default": "ru-RU",
+          "title": "Recognition Language",
+          "type": "string"
+        },
+        "interim_results": {
+          "default": true,
+          "title": "Interim Results",
+          "type": "boolean"
+        },
+        "continuous_results": {
+          "default": true,
+          "title": "Continuous Results",
+          "type": "boolean"
+        },
+        "force_finalization_enabled": {
+          "default": true,
+          "title": "Force Finalization Enabled",
+          "type": "boolean"
+        },
+        "force_finalization_timeout_ms": {
+          "default": 1600,
+          "title": "Force Finalization Timeout Ms",
+          "type": "integer"
+        },
+        "experimental": {
+          "$ref": "#/$defs/AsrBrowserExperimentalConfig"
+        }
+      },
+      "title": "AsrBrowserConfig",
+      "type": "object"
+    },
+    "AsrBrowserExperimentalConfig": {
+      "properties": {
+        "start_with_audio_track": {
+          "default": true,
+          "title": "Start With Audio Track",
+          "type": "boolean"
+        },
+        "fallback_to_default_start": {
+          "default": true,
+          "title": "Fallback To Default Start",
+          "type": "boolean"
+        },
+        "keep_stream_alive": {
+          "default": true,
+          "title": "Keep Stream Alive",
+          "type": "boolean"
+        },
+        "audio_track_constraints": {
+          "$ref": "#/$defs/AsrBrowserAudioTrackConstraintsConfig"
+        }
+      },
+      "title": "AsrBrowserExperimentalConfig",
+      "type": "object"
+    },
+    "AsrConfig": {
+      "properties": {
+        "mode": {
+          "default": "local",
+          "enum": [
+            "local",
+            "browser_google",
+            "browser_google_experimental"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "provider_preference": {
+          "default": "official_eu_parakeet_low_latency",
+          "enum": [
+            "auto",
+            "official_eu_parakeet",
+            "official_eu_parakeet_low_latency",
+            "google_legacy_http_experimental"
+          ],
+          "title": "Provider Preference",
+          "type": "string"
+        },
+        "prefer_gpu": {
+          "default": true,
+          "title": "Prefer Gpu",
+          "type": "boolean"
+        },
+        "rnnoise_enabled": {
+          "default": false,
+          "title": "Rnnoise Enabled",
+          "type": "boolean"
+        },
+        "rnnoise_strength": {
+          "default": 70,
+          "title": "Rnnoise Strength",
+          "type": "integer"
+        },
+        "browser": {
+          "$ref": "#/$defs/AsrBrowserConfig"
+        },
+        "google_legacy_http": {
+          "$ref": "#/$defs/GoogleLegacyHttpConfig"
+        },
+        "realtime": {
+          "$ref": "#/$defs/AsrRealtimeConfig"
+        }
+      },
+      "title": "AsrConfig",
+      "type": "object"
+    },
+    "AsrRealtimeConfig": {
+      "properties": {
+        "vad_mode": {
+          "default": 3,
+          "title": "Vad Mode",
+          "type": "integer"
+        },
+        "energy_gate_enabled": {
+          "default": false,
+          "title": "Energy Gate Enabled",
+          "type": "boolean"
+        },
+        "min_rms_for_recognition": {
+          "default": 0.0018,
+          "title": "Min Rms For Recognition",
+          "type": "number"
+        },
+        "min_voiced_ratio": {
+          "default": 0.0,
+          "title": "Min Voiced Ratio",
+          "type": "number"
+        },
+        "first_partial_min_speech_ms": {
+          "default": 180,
+          "title": "First Partial Min Speech Ms",
+          "type": "integer"
+        },
+        "partial_emit_interval_ms": {
+          "default": 450,
+          "title": "Partial Emit Interval Ms",
+          "type": "integer"
+        },
+        "min_speech_ms": {
+          "default": 180,
+          "title": "Min Speech Ms",
+          "type": "integer"
+        },
+        "max_segment_ms": {
+          "default": 5500,
+          "title": "Max Segment Ms",
+          "type": "integer"
+        },
+        "silence_hold_ms": {
+          "default": 180,
+          "title": "Silence Hold Ms",
+          "type": "integer"
+        },
+        "finalization_hold_ms": {
+          "default": 350,
+          "title": "Finalization Hold Ms",
+          "type": "integer"
+        },
+        "chunk_window_ms": {
+          "default": 0,
+          "title": "Chunk Window Ms",
+          "type": "integer"
+        },
+        "chunk_overlap_ms": {
+          "default": 0,
+          "title": "Chunk Overlap Ms",
+          "type": "integer"
+        },
+        "partial_min_delta_chars": {
+          "default": 4,
+          "title": "Partial Min Delta Chars",
+          "type": "integer"
+        },
+        "partial_coalescing_ms": {
+          "default": 160,
+          "title": "Partial Coalescing Ms",
+          "type": "integer"
+        }
+      },
+      "title": "AsrRealtimeConfig",
+      "type": "object"
+    },
+    "AudioConfig": {
+      "properties": {
+        "input_device_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Device Id"
+        }
+      },
+      "title": "AudioConfig",
+      "type": "object"
+    },
+    "AzureTranslatorProviderSettings": {
+      "properties": {
+        "api_key": {
+          "default": "",
+          "title": "Api Key",
+          "type": "string"
+        },
+        "endpoint": {
+          "default": "https://api.cognitive.microsofttranslator.com",
+          "title": "Endpoint",
+          "type": "string"
+        },
+        "region": {
+          "default": "",
+          "title": "Region",
+          "type": "string"
+        }
+      },
+      "title": "AzureTranslatorProviderSettings",
+      "type": "object"
+    },
+    "DeepLProviderSettings": {
+      "properties": {
+        "api_key": {
+          "default": "",
+          "title": "Api Key",
+          "type": "string"
+        },
+        "api_url": {
+          "default": "https://api-free.deepl.com/v2/translate",
+          "title": "Api Url",
+          "type": "string"
+        }
+      },
+      "title": "DeepLProviderSettings",
+      "type": "object"
+    },
+    "FreeWebTranslateProviderSettings": {
+      "properties": {},
+      "title": "FreeWebTranslateProviderSettings",
+      "type": "object"
+    },
+    "GoogleCloudTranslationV3ProviderSettings": {
+      "properties": {
+        "project_id": {
+          "default": "",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "access_token": {
+          "default": "",
+          "title": "Access Token",
+          "type": "string"
+        },
+        "location": {
+          "default": "global",
+          "title": "Location",
+          "type": "string"
+        },
+        "model": {
+          "default": "",
+          "title": "Model",
+          "type": "string"
+        }
+      },
+      "title": "GoogleCloudTranslationV3ProviderSettings",
+      "type": "object"
+    },
+    "GoogleGasUrlProviderSettings": {
+      "properties": {
+        "gas_url": {
+          "default": "",
+          "title": "Gas Url",
+          "type": "string"
+        }
+      },
+      "title": "GoogleGasUrlProviderSettings",
+      "type": "object"
+    },
+    "GoogleLegacyHttpConfig": {
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "language": {
+          "default": "ru-RU",
+          "title": "Language",
+          "type": "string"
+        },
+        "profanity_filter": {
+          "default": false,
+          "title": "Profanity Filter",
+          "type": "boolean"
+        },
+        "connect_timeout_ms": {
+          "default": 10000,
+          "title": "Connect Timeout Ms",
+          "type": "integer"
+        },
+        "send_timeout_ms": {
+          "default": 10000,
+          "title": "Send Timeout Ms",
+          "type": "integer"
+        },
+        "recv_timeout_ms": {
+          "default": 30000,
+          "title": "Recv Timeout Ms",
+          "type": "integer"
+        },
+        "max_queue_depth": {
+          "default": 50,
+          "title": "Max Queue Depth",
+          "type": "integer"
+        },
+        "reconnect_initial_ms": {
+          "default": 1000,
+          "title": "Reconnect Initial Ms",
+          "type": "integer"
+        },
+        "reconnect_max_ms": {
+          "default": 30000,
+          "title": "Reconnect Max Ms",
+          "type": "integer"
+        },
+        "endpoint_host": {
+          "default": "",
+          "title": "Endpoint Host",
+          "type": "string"
+        },
+        "pair_id_prefix": {
+          "default": "sst",
+          "title": "Pair Id Prefix",
+          "type": "string"
+        }
+      },
+      "title": "GoogleLegacyHttpConfig",
+      "type": "object"
+    },
+    "GoogleTranslateV2ProviderSettings": {
+      "properties": {
+        "api_key": {
+          "default": "",
+          "title": "Api Key",
+          "type": "string"
+        }
+      },
+      "title": "GoogleTranslateV2ProviderSettings",
+      "type": "object"
+    },
+    "GoogleWebProviderSettings": {
+      "properties": {},
+      "title": "GoogleWebProviderSettings",
+      "type": "object"
+    },
+    "LibreTranslateProviderSettings": {
+      "properties": {
+        "api_key": {
+          "default": "",
+          "title": "Api Key",
+          "type": "string"
+        },
+        "api_url": {
+          "default": "https://libretranslate.com/translate",
+          "title": "Api Url",
+          "type": "string"
+        }
+      },
+      "title": "LibreTranslateProviderSettings",
+      "type": "object"
+    },
+    "LlmTranslationProviderSettings": {
+      "properties": {
+        "api_key": {
+          "default": "",
+          "title": "Api Key",
+          "type": "string"
+        },
+        "base_url": {
+          "default": "",
+          "title": "Base Url",
+          "type": "string"
+        },
+        "model": {
+          "default": "",
+          "title": "Model",
+          "type": "string"
+        },
+        "custom_prompt": {
+          "default": "",
+          "title": "Custom Prompt",
+          "type": "string"
+        }
+      },
+      "title": "LlmTranslationProviderSettings",
+      "type": "object"
+    },
+    "ObsClosedCaptionsConfig": {
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "output_mode": {
+          "default": "disabled",
+          "title": "Output Mode",
+          "type": "string"
+        },
+        "connection": {
+          "$ref": "#/$defs/ObsClosedCaptionsConnectionConfig"
+        },
+        "debug_mirror": {
+          "$ref": "#/$defs/ObsClosedCaptionsDebugMirrorConfig"
+        },
+        "timing": {
+          "$ref": "#/$defs/ObsClosedCaptionsTimingConfig"
+        }
+      },
+      "title": "ObsClosedCaptionsConfig",
+      "type": "object"
+    },
+    "ObsClosedCaptionsConnectionConfig": {
+      "properties": {
+        "host": {
+          "default": "127.0.0.1",
+          "title": "Host",
+          "type": "string"
+        },
+        "port": {
+          "default": 4455,
+          "title": "Port",
+          "type": "integer"
+        },
+        "password": {
+          "default": "",
+          "title": "Password",
+          "type": "string"
+        }
+      },
+      "title": "ObsClosedCaptionsConnectionConfig",
+      "type": "object"
+    },
+    "ObsClosedCaptionsDebugMirrorConfig": {
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "input_name": {
+          "default": "CC_DEBUG",
+          "title": "Input Name",
+          "type": "string"
+        },
+        "send_partials": {
+          "default": true,
+          "title": "Send Partials",
+          "type": "boolean"
+        }
+      },
+      "title": "ObsClosedCaptionsDebugMirrorConfig",
+      "type": "object"
+    },
+    "ObsClosedCaptionsTimingConfig": {
+      "properties": {
+        "send_partials": {
+          "default": true,
+          "title": "Send Partials",
+          "type": "boolean"
+        },
+        "partial_throttle_ms": {
+          "default": 250,
+          "title": "Partial Throttle Ms",
+          "type": "integer"
+        },
+        "min_partial_delta_chars": {
+          "default": 3,
+          "title": "Min Partial Delta Chars",
+          "type": "integer"
+        },
+        "final_replace_delay_ms": {
+          "default": 0,
+          "title": "Final Replace Delay Ms",
+          "type": "integer"
+        },
+        "clear_after_ms": {
+          "default": 2500,
+          "title": "Clear After Ms",
+          "type": "integer"
+        },
+        "avoid_duplicate_text": {
+          "default": true,
+          "title": "Avoid Duplicate Text",
+          "type": "boolean"
+        }
+      },
+      "title": "ObsClosedCaptionsTimingConfig",
+      "type": "object"
+    },
+    "OverlayConfig": {
+      "properties": {
+        "preset": {
+          "default": "single",
+          "enum": [
+            "single",
+            "dual-line",
+            "stacked"
+          ],
+          "title": "Preset",
+          "type": "string"
+        },
+        "compact": {
+          "default": false,
+          "title": "Compact",
+          "type": "boolean"
+        }
+      },
+      "title": "OverlayConfig",
+      "type": "object"
+    },
+    "PublicLibreTranslateMirrorProviderSettings": {
+      "properties": {
+        "api_url": {
+          "default": "https://translate.fedilab.app/translate",
+          "title": "Api Url",
+          "type": "string"
+        }
+      },
+      "title": "PublicLibreTranslateMirrorProviderSettings",
+      "type": "object"
+    },
+    "RemoteConfig": {
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "role": {
+          "default": "disabled",
+          "enum": [
+            "disabled",
+            "controller",
+            "worker"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "session_id": {
+          "default": "",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "pair_code": {
+          "default": "",
+          "title": "Pair Code",
+          "type": "string"
+        },
+        "lan": {
+          "$ref": "#/$defs/RemoteLanConfig"
+        },
+        "controller": {
+          "$ref": "#/$defs/RemoteControllerConfig"
+        },
+        "worker": {
+          "$ref": "#/$defs/RemoteWorkerConfig"
+        }
+      },
+      "title": "RemoteConfig",
+      "type": "object"
+    },
+    "RemoteControllerConfig": {
+      "properties": {
+        "worker_url": {
+          "default": "",
+          "title": "Worker Url",
+          "type": "string"
+        },
+        "connect_timeout_ms": {
+          "default": 8000,
+          "title": "Connect Timeout Ms",
+          "type": "integer"
+        },
+        "reconnect_delay_ms": {
+          "default": 2000,
+          "title": "Reconnect Delay Ms",
+          "type": "integer"
+        }
+      },
+      "title": "RemoteControllerConfig",
+      "type": "object"
+    },
+    "RemoteLanConfig": {
+      "properties": {
+        "bind_enabled": {
+          "default": false,
+          "title": "Bind Enabled",
+          "type": "boolean"
+        },
+        "bind_host": {
+          "default": "0.0.0.0",
+          "title": "Bind Host",
+          "type": "string"
+        },
+        "port": {
+          "default": 8876,
+          "title": "Port",
+          "type": "integer"
+        }
+      },
+      "title": "RemoteLanConfig",
+      "type": "object"
+    },
+    "RemoteWorkerConfig": {
+      "properties": {
+        "allow_unpaired": {
+          "default": false,
+          "title": "Allow Unpaired",
+          "type": "boolean"
+        },
+        "heartbeat_timeout_ms": {
+          "default": 15000,
+          "title": "Heartbeat Timeout Ms",
+          "type": "integer"
+        }
+      },
+      "title": "RemoteWorkerConfig",
+      "type": "object"
+    },
+    "SubtitleLifecycleConfig": {
+      "properties": {
+        "completed_block_ttl_ms": {
+          "default": 4500,
+          "title": "Completed Block Ttl Ms",
+          "type": "integer"
+        },
+        "completed_source_ttl_ms": {
+          "default": 4500,
+          "title": "Completed Source Ttl Ms",
+          "type": "integer"
+        },
+        "completed_translation_ttl_ms": {
+          "default": 4500,
+          "title": "Completed Translation Ttl Ms",
+          "type": "integer"
+        },
+        "pause_to_finalize_ms": {
+          "default": 350,
+          "title": "Pause To Finalize Ms",
+          "type": "integer"
+        },
+        "allow_early_replace_on_next_final": {
+          "default": true,
+          "title": "Allow Early Replace On Next Final",
+          "type": "boolean"
+        },
+        "sync_source_and_translation_expiry": {
+          "default": true,
+          "title": "Sync Source And Translation Expiry",
+          "type": "boolean"
+        },
+        "hard_max_phrase_ms": {
+          "default": 5500,
+          "title": "Hard Max Phrase Ms",
+          "type": "integer"
+        }
+      },
+      "title": "SubtitleLifecycleConfig",
+      "type": "object"
+    },
+    "SubtitleOutputConfig": {
+      "properties": {
+        "show_source": {
+          "default": true,
+          "title": "Show Source",
+          "type": "boolean"
+        },
+        "show_translations": {
+          "default": true,
+          "title": "Show Translations",
+          "type": "boolean"
+        },
+        "max_translation_languages": {
+          "default": 2,
+          "title": "Max Translation Languages",
+          "type": "integer"
+        },
+        "display_order": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Display Order",
+          "type": "array"
+        }
+      },
+      "title": "SubtitleOutputConfig",
+      "type": "object"
+    },
+    "TranslationConfig": {
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "provider": {
+          "default": "google_translate_v2",
+          "enum": [
+            "google_translate_v2",
+            "google_cloud_translation_v3",
+            "google_gas_url",
+            "google_web",
+            "azure_translator",
+            "deepl",
+            "libretranslate",
+            "openai",
+            "openrouter",
+            "lm_studio",
+            "ollama",
+            "public_libretranslate_mirror",
+            "free_web_translate"
+          ],
+          "title": "Provider",
+          "type": "string"
+        },
+        "target_languages": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Target Languages",
+          "type": "array"
+        },
+        "timeout_ms": {
+          "default": 10000,
+          "title": "Timeout Ms",
+          "type": "integer"
+        },
+        "queue_max_size": {
+          "default": 8,
+          "title": "Queue Max Size",
+          "type": "integer"
+        },
+        "max_concurrent_jobs": {
+          "default": 2,
+          "title": "Max Concurrent Jobs",
+          "type": "integer"
+        },
+        "provider_settings": {
+          "$ref": "#/$defs/TranslationProviderSettings"
+        }
+      },
+      "title": "TranslationConfig",
+      "type": "object"
+    },
+    "TranslationProviderSettings": {
+      "properties": {
+        "google_translate_v2": {
+          "$ref": "#/$defs/GoogleTranslateV2ProviderSettings"
+        },
+        "google_cloud_translation_v3": {
+          "$ref": "#/$defs/GoogleCloudTranslationV3ProviderSettings"
+        },
+        "google_gas_url": {
+          "$ref": "#/$defs/GoogleGasUrlProviderSettings"
+        },
+        "google_web": {
+          "$ref": "#/$defs/GoogleWebProviderSettings"
+        },
+        "azure_translator": {
+          "$ref": "#/$defs/AzureTranslatorProviderSettings"
+        },
+        "deepl": {
+          "$ref": "#/$defs/DeepLProviderSettings"
+        },
+        "libretranslate": {
+          "$ref": "#/$defs/LibreTranslateProviderSettings"
+        },
+        "openai": {
+          "$ref": "#/$defs/LlmTranslationProviderSettings"
+        },
+        "openrouter": {
+          "$ref": "#/$defs/LlmTranslationProviderSettings"
+        },
+        "lm_studio": {
+          "$ref": "#/$defs/LlmTranslationProviderSettings"
+        },
+        "ollama": {
+          "$ref": "#/$defs/LlmTranslationProviderSettings"
+        },
+        "public_libretranslate_mirror": {
+          "$ref": "#/$defs/PublicLibreTranslateMirrorProviderSettings"
+        },
+        "free_web_translate": {
+          "$ref": "#/$defs/FreeWebTranslateProviderSettings"
+        }
+      },
+      "title": "TranslationProviderSettings",
+      "type": "object"
+    },
+    "UiConfig": {
+      "properties": {
+        "language": {
+          "default": "",
+          "enum": [
+            "",
+            "en",
+            "ru"
+          ],
+          "title": "Language",
+          "type": "string"
+        }
+      },
+      "title": "UiConfig",
+      "type": "object"
+    },
+    "UpdatesConfig": {
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "provider": {
+          "const": "github_releases",
+          "default": "github_releases",
+          "title": "Provider",
+          "type": "string"
+        },
+        "github_repo": {
+          "default": "",
+          "title": "Github Repo",
+          "type": "string"
+        },
+        "release_channel": {
+          "default": "stable",
+          "enum": [
+            "stable",
+            "prerelease"
+          ],
+          "title": "Release Channel",
+          "type": "string"
+        },
+        "check_interval_hours": {
+          "default": 12,
+          "title": "Check Interval Hours",
+          "type": "integer"
+        },
+        "last_checked_utc": {
+          "default": "",
+          "title": "Last Checked Utc",
+          "type": "string"
+        },
+        "latest_known_version": {
+          "default": "",
+          "title": "Latest Known Version",
+          "type": "string"
+        }
+      },
+      "title": "UpdatesConfig",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "config_version": {
+      "default": 5,
+      "title": "Config Version",
+      "type": "integer"
+    },
+    "profile": {
+      "default": "default",
+      "title": "Profile",
+      "type": "string"
+    },
+    "ui": {
+      "$ref": "#/$defs/UiConfig"
+    },
+    "source_lang": {
+      "default": "auto",
+      "title": "Source Lang",
+      "type": "string"
+    },
+    "targets": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Targets",
+      "type": "array"
+    },
+    "asr": {
+      "$ref": "#/$defs/AsrConfig"
+    },
+    "translation": {
+      "$ref": "#/$defs/TranslationConfig"
+    },
+    "overlay": {
+      "$ref": "#/$defs/OverlayConfig"
+    },
+    "obs_closed_captions": {
+      "$ref": "#/$defs/ObsClosedCaptionsConfig"
+    },
+    "audio": {
+      "$ref": "#/$defs/AudioConfig"
+    },
+    "remote": {
+      "$ref": "#/$defs/RemoteConfig"
+    },
+    "updates": {
+      "$ref": "#/$defs/UpdatesConfig"
+    },
+    "subtitle_output": {
+      "$ref": "#/$defs/SubtitleOutputConfig"
+    },
+    "subtitle_style": {
+      "additionalProperties": true,
+      "title": "Subtitle Style",
+      "type": "object"
+    },
+    "subtitle_lifecycle": {
+      "$ref": "#/$defs/SubtitleLifecycleConfig"
+    }
+  },
+  "title": "ConfigSchema",
+  "type": "object"
+}

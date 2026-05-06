@@ -11,6 +11,7 @@ from backend.core.parakeet_provider import AsrProviderStatus
 from backend.core.remote_session import RemoteSessionManager
 from backend.core.remote_signaling import RemoteSignalingManager
 from backend.models import AsrDiagnostics, ObsCaptionDiagnostics, RuntimeState, TranslationDiagnostics
+from backend.services.browser_asr_service import BrowserAsrService
 from backend.ws_manager import WebSocketManager
 
 
@@ -57,9 +58,19 @@ class FakeSessionLogger:
                 "details": dict(details or {}),
             }
         )
+        return {"ok": True, "logged": True}
 
     def flush(self) -> None:
         self.flush_count += 1
+
+    def diagnostics(self) -> dict[str, Any]:
+        return {
+            "client_log_events_received": len(self.records),
+            "client_log_events_written": len(self.records),
+            "client_log_events_dropped": 0,
+            "client_log_last_error": None,
+            "client_log_last_error_kind": None,
+        }
 
 
 class FakeStructuredRuntimeLogger:
@@ -81,7 +92,7 @@ class FakeStructuredRuntimeLogger:
 
 class FakeRuntimeOrchestrator:
     def __init__(self) -> None:
-        self.runtime_state = RuntimeState(is_running=False, status="idle")
+        self.runtime_state = RuntimeState(is_running=False, running=False, status="idle", phase="idle")
         self.start_calls: list[dict[str, Any]] = []
         self.stop_calls = 0
         self.apply_live_settings_calls: list[dict[str, Any]] = []
@@ -98,14 +109,16 @@ class FakeRuntimeOrchestrator:
         self.start_calls.append({"has_audio_inputs": has_audio_inputs, "device_id": device_id})
         self.runtime_state = RuntimeState(
             is_running=True,
+            running=True,
             status="listening",
+            phase="listening",
             started_at_utc="2026-01-01T00:00:00+00:00",
         )
         return self.runtime_state
 
     async def stop(self) -> RuntimeState:
         self.stop_calls += 1
-        self.runtime_state = RuntimeState(is_running=False, status="idle")
+        self.runtime_state = RuntimeState(is_running=False, running=False, status="idle", phase="idle")
         return self.runtime_state
 
     def status(self) -> RuntimeState:
@@ -133,7 +146,7 @@ class FakeRuntimeOrchestrator:
             selected_device="fake",
             selected_execution_provider="fake",
             partials_supported=True,
-            runtime_initialized=self.runtime_state.is_running,
+            runtime_initialized=self.runtime_state.running,
         )
 
     def translation_diagnostics(self) -> TranslationDiagnostics:
@@ -182,6 +195,7 @@ class AppStateSandbox(AbstractContextManager["AppStateSandbox"]):
         "runtime_orchestrator",
         "session_logger",
         "structured_runtime_logger",
+        "browser_asr_service",
     ]
 
     def __init__(self, *, config: dict[str, Any] | None = None, data_dir: Path | None = None) -> None:
@@ -191,7 +205,7 @@ class AppStateSandbox(AbstractContextManager["AppStateSandbox"]):
         self.paths = SimpleNamespace(
             root=base_dir,
             data_dir=base_dir / "user-data",
-            logs_dir=base_dir / "logs",
+            logs_dir=base_dir / "user-data" / "logs",
             config_path=base_dir / "user-data" / "config.json",
             models_dir=base_dir / "user-data" / "models",
             local_base_url="http://127.0.0.1:8765",
@@ -210,6 +224,7 @@ class AppStateSandbox(AbstractContextManager["AppStateSandbox"]):
         self.remote_session_manager = RemoteSessionManager()
         self.remote_signaling_manager = RemoteSignalingManager()
         self.ws_manager = WebSocketManager()
+        self.browser_asr_service = BrowserAsrService(app_module.app)
 
     def __enter__(self) -> "AppStateSandbox":
         for key in self._STATE_KEYS:
@@ -224,6 +239,7 @@ class AppStateSandbox(AbstractContextManager["AppStateSandbox"]):
         app_module.app.state.runtime_orchestrator = self.runtime_orchestrator
         app_module.app.state.session_logger = self.session_logger
         app_module.app.state.structured_runtime_logger = self.structured_runtime_logger
+        app_module.app.state.browser_asr_service = self.browser_asr_service
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:

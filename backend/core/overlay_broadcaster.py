@@ -16,6 +16,9 @@ class OverlayBroadcaster:
 
     async def publish(self, payload: dict[str, Any] | SubtitlePayloadEvent) -> None:
         body = payload.model_dump() if isinstance(payload, SubtitlePayloadEvent) else payload
+        body = dict(body)
+        body.setdefault("event_type", "overlay_update")
+        body["created_at_ms"] = int(time.time() * 1000)
         payload_signature = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         now_monotonic = time.perf_counter()
         if (

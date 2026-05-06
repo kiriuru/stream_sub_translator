@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
+
+from backend.core.api_errors import ApiException
 
 from backend.models import (
     ProfileDeleteResponse,
@@ -24,9 +26,20 @@ async def load_profile(name: str, request: Request) -> ProfileResponse:
     try:
         payload = request.app.state.profile_manager.load_profile(name)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise ApiException(
+            code="PROFILE_NOT_FOUND",
+            message=str(exc),
+            status_code=404,
+            details={"profile": name},
+            recommended_action="Choose an existing profile or create it first.",
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise ApiException(
+            code="PROFILE_INVALID",
+            message=str(exc),
+            status_code=400,
+            details={"profile": name},
+        ) from exc
     return ProfileResponse(name=name, payload=payload)
 
 
@@ -35,7 +48,12 @@ async def save_profile(name: str, body: ProfilePayload, request: Request) -> Pro
     try:
         path, saved_payload = request.app.state.profile_manager.save_profile(name, body.payload)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise ApiException(
+            code="PROFILE_SAVE_FAILED",
+            message=str(exc),
+            status_code=400,
+            details={"profile": name},
+        ) from exc
     return ProfileWriteResponse(name=name, saved_to=str(path), payload=saved_payload)
 
 
@@ -44,5 +62,10 @@ async def delete_profile(name: str, request: Request) -> ProfileDeleteResponse:
     try:
         deleted = request.app.state.profile_manager.delete_profile(name)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise ApiException(
+            code="PROFILE_DELETE_FAILED",
+            message=str(exc),
+            status_code=400,
+            details={"profile": name},
+        ) from exc
     return ProfileDeleteResponse(name=name, deleted=deleted)

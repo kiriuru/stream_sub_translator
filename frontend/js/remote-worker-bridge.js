@@ -67,7 +67,7 @@
 
   function log(message) {
     if (!logBox) return;
-    const text = String(message || "");
+    const text = window.SSTRedaction?.redactText ? window.SSTRedaction.redactText(message) : String(message || "");
     if (!VERBOSE_LOGS && isNoisyLogMessage(text)) {
       return;
     }
@@ -89,9 +89,12 @@
 
   function setStatus(message, level) {
     if (!statusLine) return;
-    statusLine.classList.remove("ok", "warn", "bad");
-    if (level) statusLine.classList.add(level);
-    statusLine.textContent = message;
+    if (level) {
+      statusLine.dataset.status = level;
+    } else {
+      delete statusLine.dataset.status;
+    }
+    statusLine.textContent = window.SSTRedaction?.redactText ? window.SSTRedaction.redactText(message) : String(message || "");
   }
 
   function parseQuery() {
@@ -150,7 +153,7 @@
     const nextAttempt = state.reconnectAttempt + 1;
     const delayMs = reconnectDelayMs(nextAttempt);
     const delaySec = (delayMs / 1000).toFixed(1);
-    setStatus(`Connection lost, reconnect in ${delaySec}s...`, "warn");
+    setStatus(`Connection lost, reconnect in ${delaySec}s...`, "warning");
     log(`reconnect scheduled (${reason}) in ${delaySec}s`);
     state.reconnectTimer = window.setTimeout(() => {
       state.reconnectTimer = null;
@@ -537,7 +540,7 @@
     logPcmStatsIfNeeded(true);
 
     if (!silent) {
-      setStatus(manual ? "Stopped." : "Bridge restarted.", "warn");
+    setStatus(manual ? "Stopped." : "Bridge restarted.", manual ? "disabled" : "ready");
       if (manual) {
         log("bridge stopped");
       }
@@ -690,7 +693,7 @@
     const pairCode = String(pairCodeInput?.value || "").trim();
     if (!sessionId || !pairCode) {
       state.manualStop = true;
-      setStatus("Session ID and Pair Code are required.", "bad");
+      setStatus("Session ID and Pair Code are required.", "error");
       return;
     }
     persistValues();
@@ -734,10 +737,10 @@
     state.pc.onconnectionstatechange = () => {
       log(`pc state: ${state.pc?.connectionState || "unknown"}`);
       if (state.pc?.connectionState === "connected") {
-        setStatus("WebRTC connection established. Forwarding audio to local worker.", "ok");
+      setStatus("WebRTC connection established. Forwarding audio to local worker.", "running");
       }
       if (state.pc?.connectionState === "failed") {
-        setStatus("WebRTC connection failed.", "bad");
+      setStatus("WebRTC connection failed.", "error");
         scheduleReconnect("webrtc connection failed");
       }
       if (state.pc?.connectionState === "disconnected" && !state.manualStop) {
@@ -750,13 +753,13 @@
     };
 
     state.signalingWs = new WebSocket(signalWsUrl);
-    setStatus("Connecting worker signaling...", "warn");
+    setStatus("Connecting worker signaling...", "loading");
     log(`signaling -> ${signalWsUrl}`);
 
     state.signalingWs.onopen = () => {
       state.running = true;
       resetReconnectState();
-      setStatus("Worker signaling connected. Waiting for controller offer...", "warn");
+    setStatus("Worker signaling connected. Waiting for controller offer...", "loading");
       state.heartbeatTimer = window.setInterval(() => {
         if (state.signalingWs?.readyState === WebSocket.OPEN) {
           state.signalingWs.send(JSON.stringify({ type: "heartbeat" }));
@@ -783,19 +786,19 @@
           controllerConnected
             ? "Controller peer is connected."
             : "Waiting for controller peer...",
-          controllerConnected ? "ok" : "warn"
+      controllerConnected ? "running" : "loading"
         );
         return;
       }
       if (messageType === "error") {
         const errorMessage = String(message.message || "unknown");
-        setStatus(`Signaling error: ${errorMessage}`, "bad");
+      setStatus(`Signaling error: ${errorMessage}`, "error");
         log(`error: ${errorMessage}`);
         if (isFatalPairingMessage(errorMessage)) {
           state.fatalPairingError = true;
           state.manualStop = true;
           resetReconnectState();
-          setStatus("Pairing expired or invalid. Create a new pair and start bridge again.", "bad");
+      setStatus("Pairing expired or invalid. Create a new pair and start bridge again.", "error");
           log("fatal pairing error detected; automatic reconnect is stopped");
         }
       }
@@ -806,7 +809,7 @@
     };
     state.signalingWs.onclose = () => {
       if (state.running) {
-        setStatus("Worker signaling websocket disconnected.", "warn");
+      setStatus("Worker signaling websocket disconnected.", "warning");
       }
       state.running = false;
       if (!state.manualStop && !state.isClosing) {
@@ -830,13 +833,13 @@
 
   connectBtn?.addEventListener("click", () => {
     startBridge().catch((error) => {
-      setStatus(`Start failed: ${error}`, "bad");
+      setStatus(`Start failed: ${error}`, "error");
       log(`start failed: ${error}`);
     });
   });
   stopBtn?.addEventListener("click", () => {
     stopBridge({ manual: true }).catch((error) => {
-      setStatus(`Stop failed: ${error}`, "bad");
+      setStatus(`Stop failed: ${error}`, "error");
     });
   });
 

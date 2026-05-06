@@ -9,5 +9,5 @@ router = APIRouter(prefix="/api/devices", tags=["devices"])
 
 @router.get("/audio-inputs", response_model=AudioInputsResponse)
 async def audio_inputs(request: Request) -> AudioInputsResponse:
-    devices = request.app.state.audio_device_manager.list_input_devices()
-    return AudioInputsResponse(devices=devices, source="sounddevice")
+    service = request.app.state.runtime_service
+    return service.audio_inputs()

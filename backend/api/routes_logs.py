@@ -12,10 +12,12 @@ router = APIRouter(prefix="/api/logs", tags=["logs"])
 async def log_client_event(payload: ClientLogEventRequest, request: Request) -> ClientLogEventResponse:
     session_logger = getattr(request.app.state, "session_logger", None)
     if session_logger is not None:
-        session_logger.log(
+        result = session_logger.log(
             payload.channel,
             payload.message,
             source=payload.source,
             details=payload.details,
         )
-    return ClientLogEventResponse()
+        if isinstance(result, dict):
+            return ClientLogEventResponse.model_validate(result)
+    return ClientLogEventResponse(ok=True, logged=False, reason="logger_unavailable")
