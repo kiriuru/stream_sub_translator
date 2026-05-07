@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import Any
 
 import httpx
@@ -28,28 +27,20 @@ class RuntimeService:
         return self._app.state.runtime_orchestrator
 
     def _current_config(self) -> dict[str, Any]:
+        config_state_service = getattr(self._app.state, "config_state_service", None)
+        if config_state_service is not None:
+            return config_state_service.current_payload()
         payload = getattr(self._app.state, "config", {})
         return payload if isinstance(payload, dict) else {}
 
     def _apply_runtime_start_config(self, payload: dict[str, Any] | None) -> None:
         if not isinstance(payload, dict) or not payload:
             return
-        config_manager = getattr(self._app.state, "config_manager", None)
-        if config_manager is not None and hasattr(config_manager, "normalize_profile_payload"):
-            normalized = config_manager.normalize_profile_payload(deepcopy(payload))
-        else:
-            normalized = deepcopy(payload)
-        self._app.state.config = normalized
-        remote_session_manager = getattr(self._app.state, "remote_session_manager", None)
-        if remote_session_manager is None:
+        config_state_service = getattr(self._app.state, "config_state_service", None)
+        if config_state_service is not None:
+            config_state_service.set_runtime_start_snapshot(payload)
             return
-        remote = normalized.get("remote", {})
-        if not isinstance(remote, dict):
-            remote = {}
-        remote_session_manager.preload(
-            session_id=str(remote.get("session_id", "") or "").strip() or None,
-            pair_code=str(remote.get("pair_code", "") or "").strip() or None,
-        )
+        self._app.state.config = dict(payload)
 
     def _remote_config(self) -> dict[str, Any]:
         remote = self._current_config().get("remote", {})
@@ -215,6 +206,9 @@ class RuntimeService:
                 "remote_diagnostics": remote_diagnostics,
                 "overlay": overlay,
                 "metrics": metrics,
+                "active_config_source": getattr(getattr(self._app.state, "active_config_state", None), "source", None),
+                "active_config_persisted": getattr(getattr(self._app.state, "active_config_state", None), "persisted", None),
+                "active_config_hash": getattr(getattr(self._app.state, "active_config_state", None), "hash", None),
             }
         )
 

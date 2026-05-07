@@ -50,7 +50,7 @@ flowchart LR
   E --> I["Exporter / Logs / Diagnostics"]
 ```
 
-Основной runtime hub по-прежнему привязан к `subtitle_router`, но в `0.3.0` значительная часть orchestration вокруг него вынесена в services/bootstrap слои.
+`RuntimeOrchestrator` now physically lives in `backend/core/runtime_orchestrator.py`, while `subtitle_router.py` stays focused on subtitle lifecycle/presentation routing. A small compatibility shim is still kept for legacy imports from `backend.core.subtitle_router`.
 
 ## 4. Backend Structure
 
@@ -87,6 +87,7 @@ flowchart LR
 
 - `backend/services/runtime_service.py`
 - `backend/services/settings_service.py`
+- `backend/services/config_state_service.py`
 - `backend/services/asr_service.py`
 - `backend/services/browser_asr_service.py`
 - `backend/services/translation_service.py`
@@ -98,6 +99,7 @@ flowchart LR
 Назначение:
 
 - держать route-facing orchestration;
+- централизовать active in-memory config state metadata;
 - уменьшить объём логики внутри route handlers;
 - сделать `app.state` dependencies более явными и тестируемыми.
 
@@ -140,9 +142,9 @@ flowchart LR
 
 Практически это означает:
 
-- `RuntimeOrchestrator` по-прежнему импортируется стабильно через `backend/core/runtime_orchestrator.py`;
-- orchestration responsibilities постепенно выносятся из одного большого runtime hub в domain-specific helpers под `backend/core/runtime/`;
-- `subtitle_router.py` остаётся high-risk lifecycle surface и по-прежнему держит ключевую completed/partial subtitle state machine.
+- `RuntimeOrchestrator` physically lives in `backend/core/runtime_orchestrator.py`;
+- `backend/core/subtitle_router.py` keeps the subtitle lifecycle state machine and a compatibility-only `RuntimeOrchestrator` import shim;
+- orchestration responsibilities постепенно выносятся из одного большого runtime hub в domain-specific helpers под `backend/core/runtime/`.
 
 ### 4.5 Config package
 
@@ -188,7 +190,12 @@ flowchart LR
   - `providers/openai_compatible.py`
   - `providers/experimental_google_web.py`
 
-Это не меняет product surface, но делает локальный AI и translation wiring более явными для тестов, docs и следующих этапов декомпозиции.
+Physical extraction has started, but is not complete:
+
+- `backend/asr/parakeet/model_installer.py` now contains the real Parakeet model installer/constants;
+- `backend/translation/base.py`, `providers/google_v2.py`, and `providers/google_v3.py` now contain real implementations;
+- `backend/core/parakeet_provider.py` and `backend/core/translation_engine.py` remain stable compatibility entrypoints;
+- several package modules still exist as compatibility shims while extraction continues.
 
 ### 4.7 Schemas
 
@@ -206,6 +213,7 @@ flowchart LR
 
 - project-local paths
 - config manager
+- active config state service
 - profile manager
 - session/runtime loggers
 - WebSocket manager
@@ -264,6 +272,7 @@ flowchart LR
 Дополнительный current-branch contract:
 
 - `LocalConfigManager.normalize_profile_payload()` используется не только для save/load, но и для runtime-start normalization of unsaved dashboard snapshots.
+- active config state is tracked explicitly via `source`, `persisted`, and `hash` metadata.
 
 ## 7. HTTP Surface
 
@@ -289,8 +298,9 @@ Primary local endpoints:
 - accepts `device_id`;
 - accepts optional `config_payload`;
 - normalizes that payload through the config manager when available;
-- applies it to `app.state.config` for the current runtime start only;
+- applies it to the active in-memory config state for the current runtime start only;
 - may preload remote session fields from `remote.session_id` and `remote.pair_code`;
+- marks active config state as `runtime_start_snapshot` with `persisted = false`;
 - does not persist `user-data/config.json` unless the user later saves settings explicitly.
 
 Remote endpoints:
@@ -480,7 +490,7 @@ Client event route:
 
 ## 15. Overlay and Translation Routing
 
-`backend/core/subtitle_router.py` remains the main subtitle/event coordination point.
+`backend/core/subtitle_router.py` remains the main subtitle/event coordination point for subtitle lifecycle only.
 
 Core responsibilities:
 
@@ -567,7 +577,7 @@ Current verification command set used on the release work:
 
 Observed result:
 
-- `135 tests`
+- `141 tests`
 - `OK`
 
 ## 20. Product Invariants Preserved in 0.3.0

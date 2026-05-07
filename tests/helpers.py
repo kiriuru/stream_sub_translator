@@ -11,6 +11,7 @@ from backend.core.parakeet_provider import AsrProviderStatus
 from backend.core.remote_session import RemoteSessionManager
 from backend.core.remote_signaling import RemoteSignalingManager
 from backend.models import AsrDiagnostics, ObsCaptionDiagnostics, RuntimeState, TranslationDiagnostics
+from backend.services.config_state_service import ConfigStateService
 from backend.services.browser_asr_service import BrowserAsrService
 from backend.ws_manager import WebSocketManager
 
@@ -194,6 +195,8 @@ class AppStateSandbox(AbstractContextManager["AppStateSandbox"]):
         "app_settings",
         "config_manager",
         "config",
+        "active_config_state",
+        "config_state_service",
         "remote_session_manager",
         "remote_signaling_manager",
         "ws_manager",
@@ -231,15 +234,17 @@ class AppStateSandbox(AbstractContextManager["AppStateSandbox"]):
         self.remote_signaling_manager = RemoteSignalingManager()
         self.ws_manager = WebSocketManager()
         self.browser_asr_service = BrowserAsrService(app_module.app)
+        self.config_state_service = ConfigStateService(app_module.app)
 
     def __enter__(self) -> "AppStateSandbox":
         for key in self._STATE_KEYS:
             self.saved[key] = getattr(app_module.app.state, key)
         app_module.app.state.app_settings = self.paths
         app_module.app.state.config_manager = self.config_manager
-        app_module.app.state.config = dict(self.config)
+        app_module.app.state.config_state_service = self.config_state_service
         app_module.app.state.remote_session_manager = self.remote_session_manager
         app_module.app.state.remote_signaling_manager = self.remote_signaling_manager
+        self.config_state_service.set_loaded_from_disk(self.config)
         app_module.app.state.ws_manager = self.ws_manager
         app_module.app.state.audio_device_manager = self.audio_device_manager
         app_module.app.state.runtime_orchestrator = self.runtime_orchestrator

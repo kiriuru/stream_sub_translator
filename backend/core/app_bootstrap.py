@@ -14,6 +14,7 @@ from backend.core.remote_session import RemoteSessionManager
 from backend.core.session_logger import SessionLogManager
 from backend.core.structured_runtime_logger import StructuredRuntimeLogger
 from backend.core.runtime_orchestrator import RuntimeOrchestrator
+from backend.services.config_state_service import ConfigStateService
 from backend.services import (
     AsrService,
     BrowserAsrService,
@@ -36,20 +37,13 @@ def initialize_app_state(app: FastAPI) -> None:
     remote_session_manager = RemoteSessionManager()
     remote_signaling_manager = RemoteSignalingManager()
 
-    remote_config = config.get("remote", {}) if isinstance(config, dict) else {}
-    if not isinstance(remote_config, dict):
-        remote_config = {}
-    remote_session_manager.preload(
-        session_id=str(remote_config.get("session_id", "") or "").strip() or None,
-        pair_code=str(remote_config.get("pair_code", "") or "").strip() or None,
-    )
-
     app.state.paths = paths
     app.state.app_settings = settings
     app.state.config_manager = config_manager
-    app.state.config = config
     app.state.remote_session_manager = remote_session_manager
     app.state.remote_signaling_manager = remote_signaling_manager
+    app.state.config_state_service = ConfigStateService(app)
+    app.state.config_state_service.set_loaded_from_disk(config)
 
     ws_manager = WebSocketManager()
     audio_device_manager = AudioDeviceManager()

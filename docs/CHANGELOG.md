@@ -11,20 +11,22 @@ Post-`0.3.0` branch follow-up focused on internal modularization and runtime sta
 ### Architecture follow-up
 
 - monolithic `backend/config.py` has been replaced by the `backend/config/` package with explicit `defaults.py`, `secrets.py`, and domain normalizers under `backend/config/normalizers/`;
-- runtime orchestration is now split further across `backend/core/runtime/` helpers, with `backend/core/runtime_orchestrator.py` kept as the stable import entrypoint used by bootstrap wiring;
-- local Parakeet runtime responsibilities are grouped under `backend/asr/parakeet/` and translation provider wiring under `backend/translation/`;
+- `RuntimeOrchestrator` now physically lives in `backend/core/runtime_orchestrator.py`, while `backend/core/subtitle_router.py` keeps subtitle lifecycle logic and a compatibility-only import shim;
+- runtime orchestration is now split further across `backend/core/runtime/` helpers, with `backend/core/runtime_orchestrator.py` used directly by bootstrap wiring;
+- physical extraction has started for `backend/asr/parakeet/` and `backend/translation/`, while stable compatibility entrypoints remain in `backend/core/parakeet_provider.py` and `backend/core/translation_engine.py`;
 - the docs now describe the real launcher profile surface: `Quick Start (Browser Speech)`, `NVIDIA GPU (CUDA)`, `CPU-only`, `Remote Controller`, and `Remote Worker`.
 
 ### Runtime start contract
 
 - `POST /api/runtime/start` now accepts an optional `config_payload` snapshot alongside `device_id`;
 - the dashboard sends its current normalized in-memory config snapshot when the user presses `Start`, so runtime-only changes can take effect immediately without forcing `Save Settings` first;
-- runtime start applies the snapshot in memory only and does not persist it to `user-data/config.json` unless the user explicitly saves settings;
+- runtime start applies the snapshot in memory only, tracks it as active config state metadata, and does not persist it to `user-data/config.json` unless the user explicitly saves settings;
 - remote session preload now also reads `remote.session_id` and `remote.pair_code` from that runtime-start snapshot so controller/worker pairing can follow unsaved UI changes cleanly.
 
 ### Tests and verification
 
 - added API coverage proving that `/api/runtime/start` uses the unsaved config snapshot without mutating persisted config payloads;
+- added runtime status coverage for `active_config_source`, `active_config_persisted`, and `active_config_hash`;
 - added architecture coverage asserting that the new `backend/config/`, `backend/core/runtime/`, `backend/asr/parakeet/`, and `backend/translation/` entrypoints exist and import cleanly.
 
 ## 0.3.0

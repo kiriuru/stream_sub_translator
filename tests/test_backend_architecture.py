@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib
 import unittest
 from pathlib import Path
 
@@ -89,6 +90,14 @@ class BackendArchitectureTests(unittest.TestCase):
 
         self.assertTrue(callable(ensure_official_eu_parakeet_model))
         self.assertIn("google_translate_v2", build_default_provider_registry())
+
+    def test_runtime_orchestrator_and_subtitle_router_import_cleanly(self) -> None:
+        runtime_module = importlib.import_module("backend.core.runtime_orchestrator")
+        subtitle_module = importlib.import_module("backend.core.subtitle_router")
+
+        self.assertTrue(hasattr(runtime_module, "RuntimeOrchestrator"))
+        self.assertTrue(hasattr(subtitle_module, "SubtitleRouter"))
+        self.assertIs(subtitle_module.RuntimeOrchestrator, runtime_module.RuntimeOrchestrator)
 
 
 if __name__ == "__main__":

@@ -49,6 +49,8 @@ class ApiAndWebSocketTests(unittest.TestCase):
             runtime_status = client.get("/api/runtime/status")
             self.assertEqual(runtime_status.status_code, 200)
             self.assertEqual(runtime_status.json()["status"], "idle")
+            self.assertEqual(runtime_status.json()["active_config_source"], "disk")
+            self.assertTrue(runtime_status.json()["active_config_persisted"])
 
             runtime_start = client.post("/api/runtime/start", json={"device_id": "mic0"})
             self.assertEqual(runtime_start.status_code, 200)
@@ -232,9 +234,61 @@ class ApiAndWebSocketTests(unittest.TestCase):
             self.assertEqual(response.json()["runtime"]["status"], "listening")
             self.assertEqual(app_module.app.state.config["asr"]["mode"], "browser_google")
             self.assertEqual(app_module.app.state.config["asr"]["provider_preference"], "official_eu_parakeet_low_latency")
+            self.assertEqual(app_module.app.state.active_config_state.source, "runtime_start_snapshot")
+            self.assertFalse(app_module.app.state.active_config_state.persisted)
             self.assertEqual(sandbox.config_manager.payload["asr"]["mode"], "local")
             self.assertEqual(sandbox.config_manager.saved_payloads, [])
             self.assertEqual(sandbox.runtime_orchestrator.start_calls[-1]["device_id"], None)
+
+    def test_runtime_start_snapshot_preloads_remote_pairing_without_persisting_config(self) -> None:
+        persisted_config = {
+            "source_lang": "ru",
+            "asr": {"mode": "local", "provider_preference": "official_eu_parakeet_low_latency"},
+            "translation": {"enabled": False, "target_languages": []},
+            "subtitle_output": {"show_source": True, "show_translations": False},
+            "remote": {"enabled": False, "role": "disabled", "session_id": "", "pair_code": ""},
+        }
+        runtime_snapshot = {
+            **persisted_config,
+            "remote": {
+                "enabled": True,
+                "role": "controller",
+                "session_id": "snapshot-session",
+                "pair_code": "123456",
+            },
+        }
+        with AppStateSandbox(config=persisted_config) as sandbox, TestClient(app_module.app) as client:
+            response = client.post("/api/runtime/start", json={"config_payload": runtime_snapshot})
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(app_module.app.state.active_config_state.source, "runtime_start_snapshot")
+            self.assertFalse(app_module.app.state.active_config_state.persisted)
+            self.assertEqual(sandbox.config_manager.saved_payloads, [])
+            accepted, reason = sandbox.remote_session_manager.verify_pairing(
+                session_id="snapshot-session",
+                pair_code="123456",
+            )
+            self.assertTrue(accepted, msg=reason)
+            self.assertEqual(sandbox.config_manager.payload["remote"]["session_id"], "")
+
+    def test_settings_save_marks_active_config_as_persisted(self) -> None:
+        config = {
+            "source_lang": "ru",
+            "asr": {"mode": "local", "provider_preference": "official_eu_parakeet_low_latency"},
+            "translation": {"enabled": False, "target_languages": []},
+            "subtitle_output": {"show_source": True, "show_translations": False},
+            "remote": {"enabled": False, "role": "disabled"},
+        }
+        with AppStateSandbox(config=config) as sandbox, TestClient(app_module.app) as client:
+            response = client.post(
+                "/api/settings/save",
+                json={"payload": {**config, "source_lang": "ja"}},
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(app_module.app.state.active_config_state.source, "settings_save")
+            self.assertTrue(app_module.app.state.active_config_state.persisted)
+            self.assertEqual(sandbox.config_manager.payload["source_lang"], "ja")
 
     def test_client_event_logging_returns_ok_when_logger_reports_write_failure(self) -> None:
         with AppStateSandbox() as sandbox, TestClient(app_module.app) as client:

@@ -22,6 +22,9 @@ class SettingsService:
         self._app = app
 
     def _config_payload(self) -> dict[str, Any]:
+        config_state_service = getattr(self._app.state, "config_state_service", None)
+        if config_state_service is not None:
+            return config_state_service.current_payload()
         payload = getattr(self._app.state, "config", {})
         return payload if isinstance(payload, dict) else {}
 
@@ -83,33 +86,21 @@ class SettingsService:
                 markers.update(self._sensitive_field_markers(item, prefix=f"{prefix}[{index}]"))
         return markers
 
-    def _sync_remote_pairing_session(self) -> None:
-        manager = getattr(self._app.state, "remote_session_manager", None)
-        if manager is None:
-            return
-        remote = self._config_payload().get("remote", {})
-        if not isinstance(remote, dict):
-            remote = {}
-        manager.preload(
-            session_id=str(remote.get("session_id", "") or "").strip() or None,
-            pair_code=str(remote.get("pair_code", "") or "").strip() or None,
-        )
-
     def load(self) -> SettingsLoadResponse:
         config_manager = self._app.state.config_manager
         payload = config_manager.load()
-        self._app.state.config = payload
-        self._sync_remote_pairing_session()
+        config_state_service = getattr(self._app.state, "config_state_service", None)
+        active_payload = config_state_service.set_loaded_from_disk(payload) if config_state_service is not None else payload
         self._log_event(
             "settings_loaded",
             payload={
                 "config_path": str(self._app.state.app_settings.config_path),
-                "settings_summary": self._settings_summary(payload),
+                "settings_summary": self._settings_summary(active_payload),
             },
         )
         return SettingsLoadResponse(
-            payload=payload,
-            subtitle_style_presets=config_manager.subtitle_style_presets(payload),
+            payload=active_payload,
+            subtitle_style_presets=config_manager.subtitle_style_presets(active_payload),
             font_catalog=config_manager.font_catalog(),
             loaded_from=str(self._app.state.app_settings.config_path),
         )
@@ -118,24 +109,24 @@ class SettingsService:
         config_manager = self._app.state.config_manager
         previous_payload = deepcopy(self._config_payload())
         saved_payload = config_manager.save(payload.payload)
-        self._app.state.config = saved_payload
-        self._sync_remote_pairing_session()
+        config_state_service = getattr(self._app.state, "config_state_service", None)
+        active_payload = config_state_service.set_settings_saved(saved_payload) if config_state_service is not None else saved_payload
         self._log_event(
             "settings_saved",
             payload={
                 "config_path": str(self._app.state.app_settings.config_path),
-                "settings_summary": self._settings_summary(saved_payload, previous_payload=previous_payload),
+                "settings_summary": self._settings_summary(active_payload, previous_payload=previous_payload),
             },
         )
         live_applied = False
         runtime_orchestrator = getattr(self._app.state, "runtime_orchestrator", None)
         if runtime_orchestrator is not None:
-            await runtime_orchestrator.apply_live_settings(saved_payload)
+            await runtime_orchestrator.apply_live_settings(active_payload)
             live_applied = True
         return SettingsSaveResponse(
             saved_to=str(self._app.state.app_settings.config_path),
-            payload=saved_payload,
-            subtitle_style_presets=config_manager.subtitle_style_presets(saved_payload),
+            payload=active_payload,
+            subtitle_style_presets=config_manager.subtitle_style_presets(active_payload),
             font_catalog=config_manager.font_catalog(),
             live_applied=live_applied,
         )
@@ -159,16 +150,16 @@ class SettingsService:
         remote["pair_code"] = str(pair_code or "").strip()
         payload["remote"] = remote
         saved_payload = config_manager.save(payload)
-        self._app.state.config = saved_payload
-        self._sync_remote_pairing_session()
+        config_state_service = getattr(self._app.state, "config_state_service", None)
+        active_payload = config_state_service.set_settings_saved(saved_payload) if config_state_service is not None else saved_payload
         self._log_event(
             "remote_pairing_saved",
             payload={
                 "config_path": str(self._app.state.app_settings.config_path),
-                "remote": redact_mapping(saved_payload.get("remote", {})) if isinstance(saved_payload, dict) else {},
+                "remote": redact_mapping(active_payload.get("remote", {})) if isinstance(active_payload, dict) else {},
             },
         )
-        return saved_payload
+        return active_payload
 
     def build_worker_sync_sections(self) -> tuple[dict[str, Any], list[str]]:
         config = self._config_payload()

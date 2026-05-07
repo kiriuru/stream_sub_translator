@@ -90,6 +90,9 @@ class RuntimeStatus(SchemaModel):
     started_at_utc: str | None = None
     last_error: str | None = None
     status_message: str | None = None
+    active_config_source: Literal["disk", "settings_save", "runtime_start_snapshot"] | None = None
+    active_config_persisted: bool | None = None
+    active_config_hash: str | None = None
     asr: AsrRuntimeStatus = Field(default_factory=AsrRuntimeStatus)
     translation: TranslationRuntimeStatus = Field(default_factory=TranslationRuntimeStatus)
     overlay: OverlayRuntimeStatus = Field(default_factory=OverlayRuntimeStatus)

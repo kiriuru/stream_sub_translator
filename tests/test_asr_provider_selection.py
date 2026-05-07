@@ -7,7 +7,7 @@ from unittest import mock
 
 from backend.core.cache_manager import CacheManager
 from backend.core.parakeet_provider import AsrProviderDiagnostics, AsrProviderStatus
-from backend.core.subtitle_router import RuntimeOrchestrator
+from backend.core.runtime_orchestrator import RuntimeOrchestrator
 from backend.models import ObsCaptionDiagnostics
 
 
@@ -149,7 +149,7 @@ class AsrProviderSelectionTests(unittest.IsolatedAsyncioTestCase):
         config = _config("browser_google")
         runtime = self._build_runtime(config)
 
-        with mock.patch("backend.core.subtitle_router.AudioCapture", _FakeAudioCapture), mock.patch.object(
+        with mock.patch("backend.core.runtime_orchestrator.AudioCapture", _FakeAudioCapture), mock.patch.object(
             runtime._asr_engine,  # noqa: SLF001
             "initialize_runtime",
             side_effect=AssertionError("Parakeet must not initialize for browser_google"),
@@ -166,7 +166,7 @@ class AsrProviderSelectionTests(unittest.IsolatedAsyncioTestCase):
         config = _config("browser_google_experimental")
         runtime = self._build_runtime(config)
 
-        with mock.patch("backend.core.subtitle_router.AudioCapture", _FakeAudioCapture), mock.patch.object(
+        with mock.patch("backend.core.runtime_orchestrator.AudioCapture", _FakeAudioCapture), mock.patch.object(
             runtime._asr_engine,  # noqa: SLF001
             "initialize_runtime",
             side_effect=AssertionError("Parakeet must not initialize for browser_google_experimental"),
@@ -215,7 +215,7 @@ class AsrProviderSelectionTests(unittest.IsolatedAsyncioTestCase):
                 runtime_initialized=True,
             )
 
-        with mock.patch("backend.core.subtitle_router.AudioCapture", _FakeAudioCapture), mock.patch.object(
+        with mock.patch("backend.core.runtime_orchestrator.AudioCapture", _FakeAudioCapture), mock.patch.object(
             runtime._asr_engine, "initialize_runtime", side_effect=_initialize_runtime  # noqa: SLF001
         ), mock.patch.object(runtime._asr_engine, "diagnostics", side_effect=_diagnostics):  # noqa: SLF001
             state = await runtime.start(has_audio_inputs=True, device_id="mic0")
@@ -263,7 +263,7 @@ class AsrProviderSelectionTests(unittest.IsolatedAsyncioTestCase):
                 runtime_initialized=True,
             )
 
-        with mock.patch("backend.core.subtitle_router.AudioCapture", _FakeAudioCapture), mock.patch.object(
+        with mock.patch("backend.core.runtime_orchestrator.AudioCapture", _FakeAudioCapture), mock.patch.object(
             runtime._asr_engine, "initialize_runtime", side_effect=_initialize_runtime  # noqa: SLF001
         ), mock.patch.object(runtime._asr_engine, "diagnostics", side_effect=_diagnostics):  # noqa: SLF001
             state = await runtime.start(has_audio_inputs=True, device_id="mic0")

@@ -30,11 +30,17 @@ class RuntimeStatusContractTests(unittest.TestCase):
         self.assertIn("overlay", payload)
         self.assertIn("obs_captions", payload)
         self.assertIn("metrics", payload)
+        self.assertIn("active_config_source", payload)
+        self.assertIn("active_config_persisted", payload)
+        self.assertIn("active_config_hash", payload)
         self.assertIsInstance(payload["asr"], dict)
         self.assertIsInstance(payload["translation"], dict)
         self.assertEqual(payload["phase"], "idle")
         self.assertEqual(payload["overlay"]["preset"], "single")
         self.assertEqual(payload["translation"]["target_languages"], ["en"])
+        self.assertEqual(payload["active_config_source"], "disk")
+        self.assertTrue(payload["active_config_persisted"])
+        self.assertIsInstance(payload["active_config_hash"], str)
 
 
 if __name__ == "__main__":

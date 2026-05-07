@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-from backend.core.translation_engine import (
+from backend.translation.base import (
     PROVIDER_GROUP_LLM,
     PROVIDER_GROUP_LOCAL_LLM,
-    AzureTranslatorProvider,
     BaseTranslationProvider,
+)
+from backend.translation.providers.google_v2 import GoogleTranslateV2Provider
+from backend.translation.providers.google_v3 import GoogleCloudTranslationV3Provider
+from backend.core.translation_engine import (
+    AzureTranslatorProvider,
     DeepLProvider,
     FreeWebTranslateProvider,
-    GoogleCloudTranslationV3Provider,
     GoogleGasUrlProvider,
-    GoogleTranslateV2Provider,
     GoogleWebProvider,
     LibreTranslateProvider,
     OpenAICompatibleChatProvider,
