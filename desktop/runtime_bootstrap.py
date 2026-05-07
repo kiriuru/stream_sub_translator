@@ -69,7 +69,7 @@ def detect_runtime_paths() -> DesktopRuntimePaths:
         project_root=project_root,
         bundle_root=bundle_root,
         data_dir=data_dir,
-        logs_dir=project_root / "logs",
+        logs_dir=data_dir / "logs",
         runtime_root=runtime_root,
         cache_root=runtime_root / "cache",
         temp_root=runtime_root / "tmp",
@@ -115,7 +115,7 @@ def _copy_if_missing(source: Path, destination: Path) -> None:
 
 
 def _migrate_legacy_logs_dir(paths: DesktopRuntimePaths) -> None:
-    legacy_logs_dir = paths.data_dir / "logs"
+    legacy_logs_dir = paths.project_root / "logs"
     target_logs_dir = paths.logs_dir
     if not legacy_logs_dir.exists() or legacy_logs_dir.resolve() == target_logs_dir.resolve():
         return
@@ -125,8 +125,9 @@ def _migrate_legacy_logs_dir(paths: DesktopRuntimePaths) -> None:
             continue
         destination = target_logs_dir / legacy_item.name
         if destination.exists():
+            legacy_item.unlink(missing_ok=True)
             continue
-        _copy_if_missing(legacy_item, destination)
+        shutil.move(str(legacy_item), str(destination))
     try:
         legacy_logs_dir.rmdir()
     except OSError:

@@ -23,8 +23,11 @@ This README describes the current desktop product surface for the `0.3.0` code l
 - app initialization is centralized through `backend/core/app_bootstrap.py`;
 - config now uses explicit migrations and has a generated JSON Schema;
 - dashboard frontend is modular ES module JavaScript without any build step;
+- translation routing is now managed through stable `translation_1 .. translation_5` slot cards with per-line provider selection;
+- provider settings editing can follow the selected translation slot and warns when enabled lines are missing required credentials;
 - Browser Speech lifecycle is supervised and more resilient to `onend`, reconnect, stale worker state, and client-event/logging failures;
 - dashboard/runtime WebSocket paths are more defensive under reconnect and dead-socket scenarios;
+- desktop launcher/bootstrap logs and runtime models now stay under `user-data/`, with legacy root `logs/` migrated forward automatically;
 - `/google-asr-experimental` is documented as a separate experimental browser worker path;
 - local backend ASR is now limited to the supported Parakeet providers only.
 
@@ -68,6 +71,7 @@ Current extracted layout:
 - hidden internal runtime executable: `.sst-runtime.exe`
 - user data: `user-data/`
 - app logs: `user-data/logs/`
+- local models: `user-data/models/`
 
 Build it from source with:
 
@@ -112,6 +116,10 @@ On first launch the bootstrap launcher extracts and/or creates:
 - `.venv/`
 - `user-data/`
 - `user-data/logs/`
+- `user-data/models/`
+- `fonts/`
+
+If an older desktop install still has root-level `logs/`, the launcher/runtime migrates those files into `user-data/logs/`.
 
 These folders are normal for the desktop flow and should be kept next to the executable.
 
@@ -192,10 +200,14 @@ Visual layout was not redesigned in `0.3.0`; the major change is the internal mo
 - Configure provider credentials/endpoints/model/prompt where applicable.
 - `Google Cloud Translation - Advanced (v3)` is available as a separate provider and uses `project_id` plus OAuth access token instead of a v2 API key.
 - Configure up to five translation lines with their own enabled state, target language, provider, and optional label.
+- The Translation tab now shows each `translation_1 .. translation_5` slot as a separate card with an explicit per-line provider selector.
+- Selecting a translation line switches the provider settings editor to that line's provider, while `translation.provider` remains the default provider for new lines and legacy compatibility.
+- The provider settings panel can also be pointed at a provider manually when no translation slot is selected.
 - Duplicate target languages are supported when they live in different translation slots.
 - Overlay and preview ordering now follow stable slot ids such as `translation_1 .. translation_5`, not target language alone.
 - Review latest translated output.
 - Provider settings remain global per provider under `translation.provider_settings`; API keys are not duplicated into per-line config.
+- The dashboard warns when enabled translation lines point at providers with missing required settings.
 - Translation now stays off the live source-final path: source finals are published first, translation fan-out runs asynchronously per configured line, and stale jobs are dropped when no longer lifecycle-relevant.
 
 ### Subtitles
@@ -251,6 +263,7 @@ Visual layout was not redesigned in `0.3.0`; the major change is the internal mo
 - Runtime diagnostics and latency metrics.
 - Advanced ASR controls.
 - Live event feed with bounded logging behavior.
+- Wider dashboard localization coverage, including runtime progress, remote tools, style slot editor labels, and diagnostics strings.
 - Config save/export/import.
 - Profile load/save/delete.
 - `Export Diagnostics` creates a local ZIP with redacted config, runtime/preflight snapshots, latest session log, and backend log.
@@ -372,11 +385,17 @@ Created next to the executable:
   - `exports/`
   - `models/`
   - `cache/`
+  - `secrets/`
+  - `debug/`
 - `user-data/logs/`
+  - `bootstrap-launcher.log`
+  - `desktop-launcher.log`
   - `backend.log`
   - `runtime-events.jsonl`
   - `session-latest.jsonl`
   - browser/client logs as applicable to the current runtime path
+
+Legacy desktop installs that still contain root-level `logs/` are migrated into `user-data/logs/` during launcher/runtime startup.
 
 Useful diagnostics paths:
 
@@ -402,7 +421,7 @@ To update SST Desktop:
 
 1. Close the app.
 2. Replace the public `Stream Subtitle Translator.exe`.
-3. Keep existing `.python/`, `.venv/`, `user-data/`, and `logs/` if you want to preserve local runtime state, settings, and history.
+3. Keep existing `.python/`, `.venv/`, `user-data/`, and `fonts/` if you want to preserve local runtime state, settings, history, and project-local font assets.
 4. If `app-runtime/` or `.sst-runtime.exe` were damaged, use:
    - `--repair`
    - `--reset-runtime`
@@ -420,6 +439,9 @@ Build output:
 - `dist\Stream Subtitle Translator\`
 - bootstrap launcher:
   - `dist\bootstrap-launcher\`
+- publish script defaults:
+  - `F:\AI\stream-sub-translator-desktop-release`
+  - `F:\AI\stream-sub-translator-desktop-release-clean`
 
 ## Troubleshooting
 
@@ -448,13 +470,21 @@ Run the current regression suite with:
 
 The current `0.3.0` verification run for the pending changes used:
 
-- `python -m compileall backend tests`
+- `python -m compileall backend tests desktop`
 - `.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`
+- `cmd /c build-desktop.bat`
+- `cmd /c build-bootstrap-launcher.bat`
+- `powershell -NoProfile -ExecutionPolicy Bypass -File .\publish-desktop-releases.ps1`
 
 Result:
 
-- `130 tests`
+- `155 tests`
 - `OK`
+- release artifacts refreshed:
+  - `dist\Stream Subtitle Translator\Stream Subtitle Translator.exe`
+  - `dist\bootstrap-launcher\Stream Subtitle Translator.exe`
+  - `F:\AI\stream-sub-translator-desktop-release\Stream Subtitle Translator.exe`
+  - `F:\AI\stream-sub-translator-desktop-release-clean\Stream Subtitle Translator.exe`
 
 ## Privacy and Runtime Scope
 

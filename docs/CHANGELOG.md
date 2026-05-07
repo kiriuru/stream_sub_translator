@@ -16,6 +16,21 @@ Post-`0.3.0` branch follow-up focused on internal modularization and runtime sta
 - translation provider extraction is now completed for the current provider set under `backend/translation/providers/`, while `backend/core/translation_engine.py` remains the compatibility engine/shim entrypoint;
 - the docs now describe the real launcher profile surface: `Quick Start (Browser Speech)`, `NVIDIA GPU (CUDA)`, `CPU-only`, `Remote Controller`, and `Remote Worker`.
 
+### Dashboard and UX follow-up
+
+- the Translation tab is now split into a routing/slot panel plus a separate provider settings panel;
+- each `translation_1 .. translation_5` slot is rendered as a stable card with explicit `enabled`, `target_lang`, `provider`, and `label` controls;
+- selecting a translation slot retargets the shared provider settings editor to that slot's provider, while the editor can still be switched manually when no slot is selected;
+- the dashboard now warns when enabled translation slots use providers with missing required settings;
+- i18n coverage was extended across runtime progress labels, style slot editor controls, remote LAN tools, diagnostics strings, and other previously hard-coded dashboard copy.
+
+### Desktop storage and release alignment
+
+- backend, desktop launcher, and bootstrap launcher now align on `user-data/logs/` for user-facing logs instead of splitting between `user-data/logs/` and root `logs/`;
+- legacy root `logs/` folders are migrated forward automatically during launcher/runtime startup;
+- local runtime model storage is aligned on `user-data/models/`;
+- release documentation and publish guidance now reflect the actual bootstrap release targets and current desktop layout.
+
 ### Translation follow-up
 
 - translation configuration now supports per-line provider selection through `translation.lines`;
@@ -36,7 +51,22 @@ Post-`0.3.0` branch follow-up focused on internal modularization and runtime sta
 
 - added API coverage proving that `/api/runtime/start` uses the unsaved config snapshot without mutating persisted config payloads;
 - added runtime status coverage for `active_config_source`, `active_config_persisted`, and `active_config_hash`;
-- added architecture coverage asserting that the new `backend/config/`, `backend/core/runtime/`, `backend/asr/parakeet/`, and `backend/translation/` entrypoints exist and import cleanly.
+- added architecture coverage asserting that the new `backend/config/`, `backend/core/runtime/`, `backend/asr/parakeet/`, and `backend/translation/` entrypoints exist and import cleanly;
+- added desktop path regression coverage for `user-data/logs` placement and legacy root `logs/` migration in the launcher/bootstrap flow;
+- verified the current branch with:
+  - `python -m compileall backend tests desktop`
+  - `.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`
+  - `cmd /c build-desktop.bat`
+  - `cmd /c build-bootstrap-launcher.bat`
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\publish-desktop-releases.ps1`
+- verification result:
+  - `155 tests`
+  - `OK`
+  - refreshed artifacts:
+    - `dist\Stream Subtitle Translator\Stream Subtitle Translator.exe`
+    - `dist\bootstrap-launcher\Stream Subtitle Translator.exe`
+    - `F:\AI\stream-sub-translator-desktop-release\Stream Subtitle Translator.exe`
+    - `F:\AI\stream-sub-translator-desktop-release-clean\Stream Subtitle Translator.exe`
 
 ## 0.3.0
 

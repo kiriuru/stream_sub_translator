@@ -101,7 +101,7 @@ def detect_app_paths() -> AppPaths:
         profiles_dir=user_data_dir / "profiles",
         logs_dir=user_data_dir / "logs",
         secrets_dir=user_data_dir / "secrets",
-        models_dir=backend_root / "data" / "models",
+        models_dir=user_data_dir / "models",
         debug_dir=user_data_dir / "debug",
         debug_asr_segments_dir=user_data_dir / "debug" / "asr-segments",
         session_db_path=user_data_dir / "session-log.sqlite3",
@@ -134,8 +134,9 @@ def _migrate_legacy_logs_dir(paths: AppPaths) -> None:
             continue
         destination = target_logs_dir / legacy_item.name
         if destination.exists():
+            legacy_item.unlink(missing_ok=True)
             continue
-        _copy_if_missing(legacy_item, destination)
+        shutil.move(str(legacy_item), str(destination))
     try:
         legacy_logs_dir.rmdir()
     except OSError:

@@ -11,7 +11,7 @@ function renderProgress(runtime, elements) {
   card.hidden = !shouldShow;
   if (!shouldShow) {
     elements.progressPercent.textContent = "0%";
-    elements.progressText.textContent = getCurrentLocale() === "ru" ? "Подготавливается локальный runtime..." : "Preparing local runtime...";
+    elements.progressText.textContent = t("runtime.progress.preparing");
     elements.progressFill.style.width = "0%";
     return;
   }
@@ -19,10 +19,10 @@ function renderProgress(runtime, elements) {
   const percent = percentMatch ? Number.parseFloat(percentMatch[1]) : (runtime?.status === "starting" ? 12 : 0);
   elements.progressTitle.textContent =
     message.toLowerCase().includes("browser speech")
-      ? (getCurrentLocale() === "ru" ? "Запуск browser speech" : "Browser Speech")
-      : (getCurrentLocale() === "ru" ? "Подготовка runtime" : "Runtime Progress");
+      ? t("runtime.progress.browser_speech")
+      : t("runtime.progress.title");
   elements.progressPercent.textContent = Number.isFinite(percent) ? `${Math.round(percent)}%` : "...";
-  elements.progressText.textContent = message || (getCurrentLocale() === "ru" ? "Подготавливается локальный runtime..." : "Preparing local runtime...");
+  elements.progressText.textContent = message || t("runtime.progress.preparing");
   elements.progressFill.style.width = `${Math.max(0, Math.min(100, percent || 0))}%`;
 }
 

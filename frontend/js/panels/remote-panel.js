@@ -1,4 +1,5 @@
 import { subscribe } from "../core/store.js";
+import { t } from "../dashboard/helpers.js";
 
 export function mountRemotePanel(root, { store, actions, api, logger }) {
   const elements = {
@@ -47,15 +48,25 @@ export function mountRemotePanel(root, { store, actions, api, logger }) {
     const data = await api.getRemoteState();
     const remote = data?.remote || {};
     const pairing = data?.pairing || {};
-    elements.stateText.textContent =
-      `Remote state: enabled=${Boolean(remote.enabled)} role=${remote.effective_role || remote.configured_role || "disabled"} session=${pairing.session_id || remote.session_id || "none"} active=${Boolean(pairing.is_active)} controller_online=${Boolean(pairing.controller_online)} worker_online=${Boolean(pairing.worker_online)}`;
+    elements.stateText.textContent = t("remote.tools.state.template", {
+      enabled: Boolean(remote.enabled),
+      role: remote.effective_role || remote.configured_role || "disabled",
+      session: pairing.session_id || remote.session_id || "none",
+      active: Boolean(pairing.is_active),
+      controller_online: Boolean(pairing.controller_online),
+      worker_online: Boolean(pairing.worker_online),
+    });
   }
 
   async function refreshWorkerStatus() {
     await applyRemoteConfig("controller");
     const data = await api.getRemoteWorkerRuntimeStatus();
     const runtime = data?.worker_runtime || {};
-    elements.workerText.textContent = `Worker runtime: running=${Boolean(runtime.is_running)} status=${runtime.status || "unknown"}${runtime.status_message ? ` message=${runtime.status_message}` : ""}`;
+    elements.workerText.textContent = t("remote.tools.worker.status_template", {
+      running: Boolean(runtime.is_running),
+      status: runtime.status || "unknown",
+      message: runtime.status_message ? ` message=${runtime.status_message}` : "",
+    });
   }
 
   elements.createPairBtn?.addEventListener("click", async () => {
@@ -69,25 +80,38 @@ export function mountRemotePanel(root, { store, actions, api, logger }) {
   elements.workerHealthBtn?.addEventListener("click", async () => {
     await applyRemoteConfig("controller");
     const data = await api.getRemoteWorkerHealth();
-    elements.workerText.textContent = `Worker health: status=${data?.health?.status || "unknown"} url=${data?.worker_url || "n/a"}`;
+    elements.workerText.textContent = t("remote.tools.worker.health_template", {
+      status: data?.health?.status || "unknown",
+      url: data?.worker_url || "n/a",
+    });
   });
   elements.workerSyncBtn?.addEventListener("click", async () => {
     await applyRemoteConfig("controller");
     const data = await api.syncRemoteWorkerSettings();
-    elements.workerText.textContent = `Worker settings synced: translation=${Boolean(data?.worker_translation_enabled)} targets=${(data?.worker_target_languages || []).join(",") || "none"} asr_mode=${data?.worker_asr_mode || "local"}`;
+    elements.workerText.textContent = t("remote.tools.worker.sync_template", {
+      translation: Boolean(data?.worker_translation_enabled),
+      targets: (data?.worker_target_languages || []).join(",") || "none",
+      asr_mode: data?.worker_asr_mode || "local",
+    });
     logger("[remote] worker settings synced from controller");
   });
   elements.workerStatusBtn?.addEventListener("click", refreshWorkerStatus);
   elements.workerStartBtn?.addEventListener("click", async () => {
     await applyRemoteConfig("controller");
     const data = await api.startRemoteWorkerRuntime();
-    elements.workerText.textContent = `Worker start: status=${data?.worker_runtime?.status || "unknown"} running=${Boolean(data?.worker_runtime?.is_running)}`;
+    elements.workerText.textContent = t("remote.tools.worker.start_template", {
+      status: data?.worker_runtime?.status || "unknown",
+      running: Boolean(data?.worker_runtime?.is_running),
+    });
     logger("[remote] worker runtime start requested");
   });
   elements.workerStopBtn?.addEventListener("click", async () => {
     await applyRemoteConfig("controller");
     const data = await api.stopRemoteWorkerRuntime();
-    elements.workerText.textContent = `Worker stop: status=${data?.worker_runtime?.status || "unknown"} running=${Boolean(data?.worker_runtime?.is_running)}`;
+    elements.workerText.textContent = t("remote.tools.worker.stop_template", {
+      status: data?.worker_runtime?.status || "unknown",
+      running: Boolean(data?.worker_runtime?.is_running),
+    });
     logger("[remote] worker runtime stop requested");
   });
   elements.prepareRunBtn?.addEventListener("click", async () => {
@@ -113,7 +137,7 @@ export function mountRemotePanel(root, { store, actions, api, logger }) {
   const unsubscribe = subscribe((snapshot) => fillFromConfig(snapshot));
   refreshRemoteState().catch(() => {
     if (elements.stateText) {
-      elements.stateText.textContent = "Remote state: initial load failed.";
+      elements.stateText.textContent = t("remote.tools.state.failed");
     }
   });
   return () => unsubscribe();

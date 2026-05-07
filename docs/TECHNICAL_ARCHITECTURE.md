@@ -354,6 +354,7 @@ Runtime/event expectations:
 
 Supporting module groups:
 
+- `frontend/js/i18n.js`
 - `frontend/js/core/`
   - store
   - API client
@@ -396,6 +397,13 @@ Supporting module groups:
 
 - `overlay/overlay.html`
 - related JS/CSS assets
+
+### 10.5 Current dashboard UX follow-up
+
+- the Translation tab now renders stable `translation_1 .. translation_5` slot cards instead of one flat language-order list;
+- each slot card owns `enabled`, `target_lang`, `provider`, and `label` editing for that slot;
+- the shared provider settings editor follows the selected slot's provider, but can still be switched manually when no slot is selected;
+- diagnostics and remote tools text now flow through the same `frontend/js/i18n.js` localization layer as the rest of the dashboard.
 
 ## 11. Browser Speech Classic Path
 
@@ -548,7 +556,10 @@ Expected local data roots:
 
 - `user-data/`
 - `user-data/logs/`
+- `user-data/models/`
 - models/cache/export/profile paths under that local runtime root
+
+Legacy desktop installs that still contain root-level `logs/` are migrated into `user-data/logs/` during launcher/runtime startup so the desktop shell and backend stay aligned on one local log root.
 
 Default bind target:
 
@@ -583,13 +594,21 @@ All continue to be served by the Python application.
 
 Current verification command set used on the release work:
 
-- `python -m compileall backend tests`
+- `python -m compileall backend tests desktop`
 - `.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`
+- `cmd /c build-desktop.bat`
+- `cmd /c build-bootstrap-launcher.bat`
+- `powershell -NoProfile -ExecutionPolicy Bypass -File .\publish-desktop-releases.ps1`
 
 Observed result:
 
-- `141 tests`
+- `155 tests`
 - `OK`
+- refreshed artifacts:
+  - `dist\Stream Subtitle Translator\Stream Subtitle Translator.exe`
+  - `dist\bootstrap-launcher\Stream Subtitle Translator.exe`
+  - `F:\AI\stream-sub-translator-desktop-release\Stream Subtitle Translator.exe`
+  - `F:\AI\stream-sub-translator-desktop-release-clean\Stream Subtitle Translator.exe`
 
 ## 20. Product Invariants Preserved in 0.3.0
 

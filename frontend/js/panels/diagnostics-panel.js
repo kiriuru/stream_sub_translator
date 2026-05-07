@@ -1,5 +1,5 @@
 import { subscribe } from "../core/store.js";
-import { appendTextLog, escapeHtml, formatMetric, formatOptionalMetric, getCurrentLocale } from "../dashboard/helpers.js";
+import { appendTextLog, formatMetric, formatOptionalMetric, t } from "../dashboard/helpers.js";
 
 function renderLogBox(logBox, logs) {
   if (!logBox) {
@@ -87,7 +87,7 @@ export function mountDiagnosticsPanel(root, { store, actions, events }) {
             `mode: ${browserWorker.browser_mode || "n/a"}`,
             `socket: ${browserWorker.websocket_state || "n/a"}`,
           ].join(" | ")
-        : (getCurrentLocale() === "ru" ? "Browser worker не подключён." : "Browser worker not connected.");
+        : t("tools.runtime.browser_worker.not_connected");
     }
     if (elements.obsCcDiagnosticsText) {
       elements.obsCcDiagnosticsText.textContent = [
@@ -98,7 +98,7 @@ export function mountDiagnosticsPanel(root, { store, actions, events }) {
       ].filter(Boolean).join(" | ");
     }
     if (elements.logsDiscoverabilityText) {
-      elements.logsDiscoverabilityText.textContent = "Logs are stored in user-data/logs/: backend.log, runtime-events.jsonl, session-latest.jsonl.";
+      elements.logsDiscoverabilityText.textContent = t("tools.runtime.logs_location");
     }
     if (elements.configJson && snapshot.config) {
       elements.configJson.value = JSON.stringify(snapshot.config, null, 2);
@@ -114,7 +114,7 @@ export function mountDiagnosticsPanel(root, { store, actions, events }) {
   });
   elements.diagnosticsExportBtn?.addEventListener("click", () => {
     actions.exportDiagnostics().catch(() => {
-      appendTextLog(elements.logBox, getCurrentLocale() === "ru" ? "Не удалось экспортировать diagnostics." : "Failed to export diagnostics.");
+      appendTextLog(elements.logBox, t("tools.runtime.export_failed"));
     });
   });
   elements.configImportBtn?.addEventListener("click", async () => {

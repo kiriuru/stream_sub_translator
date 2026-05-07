@@ -18,6 +18,28 @@ import { mountTranslationPanel } from "./panels/translation-panel.js";
 
 let actionsRef = null;
 
+function initializeLocaleSwitcher(actions) {
+  const select = document.querySelector("#ui-language-select");
+  if (!select) {
+    return () => {};
+  }
+
+  const applyCurrentLocale = () => {
+    select.value = getCurrentLocale();
+  };
+
+  const onChange = () => {
+    actions.setUiLanguage(select.value || "en");
+  };
+
+  select.addEventListener("change", onChange);
+  applyCurrentLocale();
+
+  return () => {
+    select.removeEventListener("change", onChange);
+  };
+}
+
 function initializeTabs(actions) {
   const buttons = [...document.querySelectorAll("[data-tab-target]")];
   const panels = [...document.querySelectorAll("[data-tab-panel]")];
@@ -73,6 +95,7 @@ async function bootstrap() {
   window.__appLog = logger;
   window.__persistDashboardLog = logger;
 
+  const destroyLocaleSwitcher = initializeLocaleSwitcher(actions);
   initializeTabs(actions);
 
   const mounts = [
@@ -89,6 +112,10 @@ async function bootstrap() {
   ];
 
   window.addEventListener("sst:locale-changed", () => {
+    const localeSelect = document.querySelector("#ui-language-select");
+    if (localeSelect) {
+      localeSelect.value = getCurrentLocale();
+    }
     store.updateState({ ui: { uiLanguage: getCurrentLocale() } });
   });
 
@@ -116,6 +143,7 @@ async function bootstrap() {
   ws.connect();
 
   window.addEventListener("beforeunload", () => {
+    destroyLocaleSwitcher();
     mounts.forEach((destroy) => destroy?.());
     ws.disconnect();
   });

@@ -17,7 +17,18 @@ export function clone(value) {
 }
 
 export function t(key, variables) {
-  return window.I18n?.t ? window.I18n.t(key, variables) : key;
+  if (window.I18n?.t) {
+    return window.I18n.t(key, variables);
+  }
+  const fallback = String(key || "")
+    .split(".")
+    .pop()
+    .replace(/[_-]+/g, " ")
+    .trim();
+  if (!fallback) {
+    return "";
+  }
+  return fallback.charAt(0).toUpperCase() + fallback.slice(1);
 }
 
 export function getCurrentLocale() {
@@ -58,17 +69,31 @@ export function getLanguageLabel(code) {
   return localizePair(LANGUAGE_LABELS, code, item?.label || code);
 }
 
+export function getSubtitleSlotLabel(slotId) {
+  const normalized = String(slotId || "").trim().toLowerCase();
+  if (normalized === "source") {
+    return t("common.source");
+  }
+  if (/^translation_[1-5]$/.test(normalized)) {
+    return t(`obs.output.${normalized}`);
+  }
+  return normalized || t("common.unknown");
+}
+
 export function getRecognitionLanguageLabel(code) {
   const item = BROWSER_RECOGNITION_LANGUAGES.find((entry) => entry.code === code);
   return localizePair(BROWSER_RECOGNITION_LABELS, code, item?.label || code);
 }
 
 export function getProviderMeta(providerName) {
-  const current = PROVIDERS[providerName] || PROVIDERS.google_translate_v2;
+  const resolvedProviderName = PROVIDERS[providerName] ? providerName : "google_translate_v2";
+  const current = PROVIDERS[resolvedProviderName];
   const locale = getCurrentLocale();
   return {
     ...current,
     group: PROVIDER_GROUP_KEYS[current.group]?.[locale] || current.group,
+    hint: t(`provider.${resolvedProviderName}.hint`),
+    status: t(`provider.${resolvedProviderName}.status`),
   };
 }
 

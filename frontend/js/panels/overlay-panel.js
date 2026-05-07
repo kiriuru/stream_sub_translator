@@ -1,5 +1,5 @@
 import { subscribe } from "../core/store.js";
-import { escapeHtml, getCurrentLocale, getLanguageLabel, setElementVisibility, t } from "../dashboard/helpers.js";
+import { escapeHtml, getCurrentLocale, getSubtitleSlotLabel, setElementVisibility, t } from "../dashboard/helpers.js";
 
 function renderPreview(container, payload, state) {
   if (!container) {
@@ -96,7 +96,7 @@ export function mountOverlayPanel(root, { store, actions, logger }) {
       config.subtitle_output?.display_order?.forEach((code) => {
         const li = document.createElement("li");
         li.dataset.code = code;
-        li.textContent = code === "source" ? t("common.source") : `${getLanguageLabel(code)} (${code})`;
+        li.textContent = getSubtitleSlotLabel(code);
         li.classList.toggle("active", code === snapshot.ui.selectedSubtitleOrderItem);
         li.addEventListener("click", () => actions.updateSubtitleSelection(code));
         elements.displayOrder.appendChild(li);

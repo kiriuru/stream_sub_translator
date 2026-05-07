@@ -191,13 +191,11 @@ export function createDashboardActions({ store, api, logger }) {
       window.I18n.setLocale(locale);
     }
     const nextState = store.getState();
-    const enabledTranslationSlots = (Array.isArray(normalized.translation.lines) ? normalized.translation.lines : [])
-      .filter((line) => line?.enabled !== false)
-      .map((line) => String(line.slot_id || "").toLowerCase())
+    const configuredTranslationSlots = (Array.isArray(normalized.translation.lines) ? normalized.translation.lines : [])
+      .map((line) => String(line?.slot_id || "").toLowerCase())
       .filter(Boolean);
-    const translationSelection = enabledTranslationSlots.includes(nextState.ui.selectedTranslationLanguage)
-      ? nextState.ui.selectedTranslationLanguage
-      : enabledTranslationSlots[0] || null;
+    const currentTranslationSelection = String(nextState.ui.selectedTranslationLanguage || "").toLowerCase() || null;
+    const translationSelection = currentTranslationSelection || configuredTranslationSlots[0] || null;
     const subtitleSelection = normalized.subtitle_output.display_order.includes(nextState.ui.selectedSubtitleOrderItem)
       ? nextState.ui.selectedSubtitleOrderItem
       : normalized.subtitle_output.display_order[0] || null;

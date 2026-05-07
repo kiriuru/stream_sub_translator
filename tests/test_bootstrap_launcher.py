@@ -32,8 +32,8 @@ class BootstrapLauncherTests(unittest.TestCase):
         root = Path(self.temp_dir.name)
         self.launcher = object.__new__(bootstrap_module.BootstrapLauncher)
         self.launcher._paths = SimpleNamespace(
-            logs_dir=root / "logs",
-            log_path=root / "logs" / "bootstrap-launcher.log",
+            logs_dir=root / "user-data" / "logs",
+            log_path=root / "user-data" / "logs" / "bootstrap-launcher.log",
             exe_dir=root,
         )
         self.launcher._log = lambda message: None
@@ -58,6 +58,16 @@ class BootstrapLauncherTests(unittest.TestCase):
 
         self.assertFalse(args.repair)
         self.assertTrue(args.reset_runtime)
+
+    def test_migrate_legacy_logs_dir_moves_root_logs_into_user_data(self) -> None:
+        legacy_logs_dir = self.launcher._paths.exe_dir / "logs"
+        legacy_logs_dir.mkdir(parents=True, exist_ok=True)
+        (legacy_logs_dir / "bootstrap-launcher.log").write_text("legacy", encoding="utf-8")
+
+        self.launcher._migrate_legacy_logs_dir()
+
+        self.assertTrue((self.launcher._paths.logs_dir / "bootstrap-launcher.log").exists())
+        self.assertFalse(legacy_logs_dir.exists())
 
 
 if __name__ == "__main__":

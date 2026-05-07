@@ -10,6 +10,7 @@ Post-release follow-up for the current `main` branch now lives in [CHANGELOG.md]
 Current note:
 
 - per-translation-line provider selection, slot-based translation identity, and the backend translation provider extraction cleanup are post-`0.3.0` main-branch follow-up work and are documented in [CHANGELOG.md](./CHANGELOG.md) under `Unreleased`, not as part of the shipped `0.3.0` delta itself.
+- the current `main` branch follow-up also includes the split Translation tab UI, broader dashboard i18n coverage, and desktop storage alignment around `user-data/logs/` and `user-data/models/`; those changes are likewise tracked under `Unreleased`.
 
 ## Кратко
 

@@ -523,6 +523,7 @@ class DesktopLauncher:
         self._debug_webview = debug_webview
         self._log_path = self._paths.logs_dir / "desktop-launcher.log"
         self._legacy_log_path = self._paths.project_root / ".tmp" / "desktop-launcher.log"
+        self._migrate_legacy_logs_dir()
         self._ensure_launcher_log_files()
         self._shutdown_started = threading.Event()
         self._startup_error_message: str | None = None
@@ -537,6 +538,25 @@ class DesktopLauncher:
         self._browser_worker_last_error: str | None = None
         self._context = self._build_context()
         self._write_log("launcher initialized")
+
+    def _migrate_legacy_logs_dir(self) -> None:
+        legacy_logs_dir = self._paths.project_root / "logs"
+        target_logs_dir = self._paths.logs_dir
+        if not legacy_logs_dir.exists() or legacy_logs_dir.resolve() == target_logs_dir.resolve():
+            return
+        target_logs_dir.mkdir(parents=True, exist_ok=True)
+        for legacy_item in legacy_logs_dir.glob("*"):
+            if not legacy_item.is_file():
+                continue
+            destination = target_logs_dir / legacy_item.name
+            if destination.exists():
+                legacy_item.unlink(missing_ok=True)
+                continue
+            os.replace(legacy_item, destination)
+        try:
+            legacy_logs_dir.rmdir()
+        except OSError:
+            pass
 
     def _ensure_launcher_log_files(self) -> None:
         log_dir = self._paths.logs_dir
