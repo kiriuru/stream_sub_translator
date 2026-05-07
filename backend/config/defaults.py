@@ -128,6 +128,15 @@ def build_default_config(prefer_gpu_default: bool) -> dict[str, Any]:
             "enabled": False,
             "provider": "google_translate_v2",
             "target_languages": ["en"],
+            "lines": [
+                {
+                    "slot_id": "translation_1",
+                    "enabled": True,
+                    "target_lang": "en",
+                    "provider": "google_translate_v2",
+                    "label": "EN",
+                }
+            ],
             "timeout_ms": 10000,
             "queue_max_size": 8,
             "max_concurrent_jobs": 2,
@@ -192,7 +201,7 @@ def build_default_config(prefer_gpu_default: bool) -> dict[str, Any]:
             "show_source": True,
             "show_translations": True,
             "max_translation_languages": 2,
-            "display_order": ["source", "en"],
+            "display_order": ["source", "translation_1"],
         },
         "subtitle_style": build_style_from_preset("clean_default"),
         "subtitle_lifecycle": {

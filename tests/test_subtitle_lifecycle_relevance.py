@@ -14,12 +14,28 @@ def _config() -> dict[str, Any]:
         "translation": {
             "enabled": True,
             "target_languages": ["en", "de"],
+            "lines": [
+                {
+                    "slot_id": "translation_1",
+                    "enabled": True,
+                    "target_lang": "en",
+                    "provider": "google_translate_v2",
+                    "label": "EN",
+                },
+                {
+                    "slot_id": "translation_2",
+                    "enabled": True,
+                    "target_lang": "de",
+                    "provider": "google_translate_v2",
+                    "label": "DE",
+                },
+            ],
         },
         "subtitle_output": {
             "show_source": True,
             "show_translations": True,
             "max_translation_languages": 2,
-            "display_order": ["source", "en", "de"],
+            "display_order": ["source", "translation_1", "translation_2"],
         },
         "overlay": {
             "preset": "stacked",
@@ -75,6 +91,8 @@ class SubtitleLifecycleRelevanceTests(unittest.IsolatedAsyncioTestCase):
                 provider="google_translate_v2",
                 translations=[
                     TranslationItem(
+                        slot_id="translation_1",
+                        label="EN",
                         target_lang="en",
                         text="Hello",
                         provider="google_translate_v2",
@@ -98,6 +116,8 @@ class SubtitleLifecycleRelevanceTests(unittest.IsolatedAsyncioTestCase):
                 provider="google_translate_v2",
                 translations=[
                     TranslationItem(
+                        slot_id="translation_2",
+                        label="DE",
                         target_lang="de",
                         text="Hallo",
                         provider="google_translate_v2",

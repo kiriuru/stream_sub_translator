@@ -6,16 +6,17 @@ import httpx
 
 from backend.translation.base import (
     BaseTranslationProvider,
-    PROVIDER_GROUP_STABLE,
+    PROVIDER_GROUP_EXPERIMENTAL,
     TranslationProviderError,
     TranslationProviderInfo,
 )
 
 
-class LibreTranslateProvider(BaseTranslationProvider):
+class PublicLibreTranslateMirrorProvider(BaseTranslationProvider):
     info = TranslationProviderInfo(
-        name="libretranslate",
-        group=PROVIDER_GROUP_STABLE,
+        name="public_libretranslate_mirror",
+        group=PROVIDER_GROUP_EXPERIMENTAL,
+        experimental=True,
     )
 
     async def translate(
@@ -26,30 +27,27 @@ class LibreTranslateProvider(BaseTranslationProvider):
         target_lang: str,
         provider_settings: dict[str, str],
     ) -> tuple[str, dict[str, Any]]:
-        api_url = provider_settings.get("api_url", "").strip() or "https://libretranslate.com/translate"
-        payload: dict[str, str] = {
+        api_url = provider_settings.get("api_url", "").strip() or "https://translate.fedilab.app/translate"
+        payload = {
             "q": text,
             "source": self._normalize_source_lang(source_lang),
             "target": target_lang,
             "format": "text",
         }
-        api_key = provider_settings.get("api_key", "").strip()
-        if api_key:
-            payload["api_key"] = api_key
-
         async with httpx.AsyncClient() as client:
             data = await self._get_json(
                 client,
                 url=api_url,
                 method="POST",
                 json=payload,
-                error_prefix="LibreTranslate request failed",
+                error_prefix="Public LibreTranslate mirror request failed",
             )
-
         translated = data.get("translatedText") or data.get("translation")
         if not translated:
-            raise TranslationProviderError("LibreTranslate returned an empty translation.")
-        return str(translated), self.diagnostics(provider_settings)
+            raise TranslationProviderError("Public LibreTranslate mirror returned an empty translation.")
+        diagnostics = self.diagnostics(provider_settings)
+        diagnostics["status_message"] = "Experimental public LibreTranslate mirror. Availability may change."
+        return str(translated), diagnostics
 
 
-__all__ = ["LibreTranslateProvider"]
+__all__ = ["PublicLibreTranslateMirrorProvider"]

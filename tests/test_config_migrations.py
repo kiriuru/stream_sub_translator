@@ -49,6 +49,25 @@ class ConfigMigrationTests(unittest.TestCase):
         self.assertIn("translation", migrated)
         self.assertFalse(migrated["remote"]["enabled"])
         self.assertEqual(migrated["translation"]["target_languages"], ["en", "ja"])
+        self.assertEqual(
+            migrated["translation"]["lines"],
+            [
+                {
+                    "slot_id": "translation_1",
+                    "enabled": True,
+                    "target_lang": "en",
+                    "provider": "google_translate_v2",
+                    "label": "EN",
+                },
+                {
+                    "slot_id": "translation_2",
+                    "enabled": True,
+                    "target_lang": "ja",
+                    "provider": "google_translate_v2",
+                    "label": "JA",
+                },
+            ],
+        )
         self.assertIn("custom_presets", migrated["subtitle_style"])
 
     def test_migrate_config_renames_legacy_parakeet_provider(self) -> None:
@@ -146,7 +165,59 @@ class ConfigMigrationTests(unittest.TestCase):
         self.assertEqual(loaded["asr"]["provider_preference"], "official_eu_parakeet_low_latency")
         self.assertFalse(loaded["remote"]["enabled"])
         self.assertEqual(loaded["translation"]["target_languages"], ["fr"])
+        self.assertEqual(loaded["translation"]["lines"][0]["slot_id"], "translation_1")
         self.assertEqual(loaded["subtitle_style"]["preset"], "clean_default")
+
+    def test_migration_maps_legacy_display_order_to_translation_slots(self) -> None:
+        migrated = migrate_config(
+            {
+                "config_version": 5,
+                "translation": {
+                    "enabled": True,
+                    "provider": "google_translate_v2",
+                    "target_languages": ["en", "ja"],
+                },
+                "subtitle_output": {
+                    "display_order": ["ja", "source", "en"],
+                },
+            }
+        )
+
+        self.assertEqual(migrated["subtitle_output"]["display_order"], ["translation_2", "source", "translation_1"])
+
+    def test_migration_keeps_duplicate_target_languages_when_lines_exist(self) -> None:
+        migrated = migrate_config(
+            {
+                "config_version": 5,
+                "translation": {
+                    "enabled": True,
+                    "provider": "google_translate_v2",
+                    "lines": [
+                        {
+                            "slot_id": "translation_1",
+                            "enabled": True,
+                            "target_lang": "en",
+                            "provider": "google_translate_v2",
+                        },
+                        {
+                            "slot_id": "translation_2",
+                            "enabled": True,
+                            "target_lang": "en",
+                            "provider": "openai",
+                            "label": "",
+                        },
+                    ],
+                },
+                "subtitle_output": {
+                    "display_order": ["translation_2", "translation_1"],
+                },
+            }
+        )
+
+        self.assertEqual([line["target_lang"] for line in migrated["translation"]["lines"]], ["en", "en"])
+        self.assertEqual([line["provider"] for line in migrated["translation"]["lines"]], ["google_translate_v2", "openai"])
+        self.assertEqual(migrated["translation"]["target_languages"], ["en"])
+        self.assertEqual(migrated["subtitle_output"]["display_order"], ["translation_2", "translation_1", "source"])
 
 
 if __name__ == "__main__":

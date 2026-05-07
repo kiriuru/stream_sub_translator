@@ -3,26 +3,62 @@ from __future__ import annotations
 from typing import Any
 
 
-def normalize_display_order(*, display_order: list[Any], target_languages: list[str]) -> list[str]:
+_CANONICAL_SLOT_IDS = tuple(f"translation_{index}" for index in range(1, 6))
+
+
+def _enabled_slot_ids(translation_lines: list[dict[str, Any]]) -> list[str]:
+    return [
+        str(line.get("slot_id") or "").strip().lower()
+        for line in translation_lines
+        if line.get("enabled", True) and str(line.get("slot_id") or "").strip()
+    ]
+
+
+def _legacy_language_map(translation_lines: list[dict[str, Any]]) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for line in translation_lines:
+        if not line.get("enabled", True):
+            continue
+        target_lang = str(line.get("target_lang") or "").strip().lower()
+        slot_id = str(line.get("slot_id") or "").strip().lower()
+        if target_lang and slot_id and target_lang not in mapping:
+            mapping[target_lang] = slot_id
+    return mapping
+
+
+def normalize_display_order(*, display_order: list[Any], translation_lines: list[dict[str, Any]]) -> list[str]:
+    enabled_slots = _enabled_slot_ids(translation_lines)
+    language_to_slot = _legacy_language_map(translation_lines)
     normalized_order: list[str] = []
+
     for item in display_order:
-        value = str(item).lower()
-        if value == "source" or value in target_languages:
+        value = str(item).strip().lower()
+        if value == "source":
             if value not in normalized_order:
                 normalized_order.append(value)
+            continue
+        if value in enabled_slots:
+            if value not in normalized_order:
+                normalized_order.append(value)
+            continue
+        mapped_slot = language_to_slot.get(value)
+        if mapped_slot and mapped_slot not in normalized_order:
+            normalized_order.append(mapped_slot)
+
     if "source" not in normalized_order:
         normalized_order.append("source")
-    for target_lang in target_languages:
-        if target_lang not in normalized_order:
-            normalized_order.append(target_lang)
+    for slot_id in enabled_slots:
+        if slot_id not in normalized_order:
+            normalized_order.append(slot_id)
     return normalized_order
 
 
-def normalize_subtitle_output_config(payload: Any, *, target_languages: list[str]) -> dict[str, Any]:
+def normalize_subtitle_output_config(payload: Any, *, translation_lines: list[dict[str, Any]]) -> dict[str, Any]:
     subtitle_output = payload if isinstance(payload, dict) else {}
-    display_order = subtitle_output.get("display_order", ["source", *target_languages])
+    default_display_order = ["source", *_enabled_slot_ids(translation_lines)]
+    display_order = subtitle_output.get("display_order", default_display_order)
     if not isinstance(display_order, list):
-        display_order = ["source", *target_languages]
+        display_order = default_display_order
     try:
         max_translation_languages = int(subtitle_output.get("max_translation_languages", 2) or 0)
     except (TypeError, ValueError):
@@ -33,7 +69,7 @@ def normalize_subtitle_output_config(payload: Any, *, target_languages: list[str
         "max_translation_languages": max(0, min(5, max_translation_languages)),
         "display_order": normalize_display_order(
             display_order=display_order,
-            target_languages=target_languages,
+            translation_lines=translation_lines,
         ),
     }
 

@@ -223,6 +223,32 @@ class ApiAndWebSocketTests(unittest.TestCase):
                 "mode": "browser_google",
                 "provider_preference": "official_eu_parakeet_low_latency",
             },
+            "translation": {
+                "enabled": True,
+                "provider": "google_translate_v2",
+                "target_languages": ["en"],
+                "lines": [
+                    {
+                        "slot_id": "translation_1",
+                        "enabled": True,
+                        "target_lang": "en",
+                        "provider": "google_translate_v2",
+                        "label": "EN",
+                    },
+                    {
+                        "slot_id": "translation_2",
+                        "enabled": True,
+                        "target_lang": "en",
+                        "provider": "openai",
+                        "label": "EN-AI",
+                    },
+                ],
+            },
+            "subtitle_output": {
+                "show_source": True,
+                "show_translations": True,
+                "display_order": ["source", "translation_2", "translation_1"],
+            },
         }
         with AppStateSandbox(config=persisted_config) as sandbox, TestClient(app_module.app) as client:
             response = client.post(
@@ -234,6 +260,14 @@ class ApiAndWebSocketTests(unittest.TestCase):
             self.assertEqual(response.json()["runtime"]["status"], "listening")
             self.assertEqual(app_module.app.state.config["asr"]["mode"], "browser_google")
             self.assertEqual(app_module.app.state.config["asr"]["provider_preference"], "official_eu_parakeet_low_latency")
+            self.assertEqual(
+                [line["provider"] for line in app_module.app.state.config["translation"]["lines"]],
+                ["google_translate_v2", "openai"],
+            )
+            self.assertEqual(
+                app_module.app.state.config["subtitle_output"]["display_order"],
+                ["source", "translation_2", "translation_1"],
+            )
             self.assertEqual(app_module.app.state.active_config_state.source, "runtime_start_snapshot")
             self.assertFalse(app_module.app.state.active_config_state.persisted)
             self.assertEqual(sandbox.config_manager.payload["asr"]["mode"], "local")

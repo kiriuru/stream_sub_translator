@@ -769,9 +769,71 @@
         },
         "provider_settings": {
           "$ref": "#/$defs/TranslationProviderSettings"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/$defs/TranslationLineConfig"
+          },
+          "title": "Lines",
+          "type": "array"
         }
       },
       "title": "TranslationConfig",
+      "type": "object"
+    },
+    "TranslationLineConfig": {
+      "properties": {
+        "slot_id": {
+          "enum": [
+            "translation_1",
+            "translation_2",
+            "translation_3",
+            "translation_4",
+            "translation_5"
+          ],
+          "title": "Slot Id",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "target_lang": {
+          "title": "Target Lang",
+          "type": "string"
+        },
+        "provider": {
+          "default": "google_translate_v2",
+          "enum": [
+            "google_translate_v2",
+            "google_cloud_translation_v3",
+            "google_gas_url",
+            "google_web",
+            "azure_translator",
+            "deepl",
+            "libretranslate",
+            "openai",
+            "openrouter",
+            "lm_studio",
+            "ollama",
+            "public_libretranslate_mirror",
+            "free_web_translate"
+          ],
+          "title": "Provider",
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slot_id",
+        "target_lang"
+      ],
+      "title": "TranslationLineConfig",
       "type": "object"
     },
     "TranslationProviderSettings": {
@@ -884,7 +946,7 @@
   },
   "properties": {
     "config_version": {
-      "default": 5,
+      "default": 6,
       "title": "Config Version",
       "type": "integer"
     },

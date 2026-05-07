@@ -137,14 +137,71 @@ class SubtitleRouter:
         subtitle_output = config.get("subtitle_output", {}) if isinstance(config, dict) else {}
         if not isinstance(translation_config, dict) or not isinstance(subtitle_output, dict):
             return False
-        target_languages = translation_config.get("target_languages", [])
+        translation_lines = self._enabled_translation_lines(translation_config)
         return bool(
             translation_config.get("enabled")
             and subtitle_output.get("show_translations", True)
             and int(subtitle_output.get("max_translation_languages", 0) or 0) > 0
-            and isinstance(target_languages, list)
-            and any(str(item).strip() for item in target_languages)
+            and bool(translation_lines)
         )
+
+    @staticmethod
+    def _translation_lines(translation_config: dict[str, Any]) -> list[dict[str, Any]]:
+        lines = translation_config.get("lines", []) if isinstance(translation_config, dict) else []
+        return [line for line in lines if isinstance(line, dict)]
+
+    @classmethod
+    def _enabled_translation_lines(cls, translation_config: dict[str, Any]) -> list[dict[str, Any]]:
+        return [
+            line
+            for line in cls._translation_lines(translation_config)
+            if line.get("enabled", True)
+            and str(line.get("slot_id") or "").strip()
+            and str(line.get("target_lang") or "").strip()
+        ]
+
+    @classmethod
+    def _translation_slot_map(cls, translation_config: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        return {
+            str(line.get("slot_id")).strip().lower(): line
+            for line in cls._enabled_translation_lines(translation_config)
+        }
+
+    @classmethod
+    def _legacy_language_to_slot_map(cls, translation_config: dict[str, Any]) -> dict[str, str]:
+        mapping: dict[str, str] = {}
+        for line in cls._enabled_translation_lines(translation_config):
+            target_lang = str(line.get("target_lang") or "").strip().lower()
+            slot_id = str(line.get("slot_id") or "").strip().lower()
+            if target_lang and slot_id and target_lang not in mapping:
+                mapping[target_lang] = slot_id
+        return mapping
+
+    @classmethod
+    def _resolved_display_order(cls, translation_config: dict[str, Any], subtitle_output: dict[str, Any]) -> list[str]:
+        enabled_slots = list(cls._translation_slot_map(translation_config).keys())
+        language_to_slot = cls._legacy_language_to_slot_map(translation_config)
+        raw_display_order = subtitle_output.get("display_order", ["source", *enabled_slots]) if isinstance(subtitle_output, dict) else ["source", *enabled_slots]
+        normalized_order: list[str] = []
+        for item in raw_display_order if isinstance(raw_display_order, list) else []:
+            value = str(item).strip().lower()
+            if value == "source":
+                if value not in normalized_order:
+                    normalized_order.append(value)
+                continue
+            if value in enabled_slots:
+                if value not in normalized_order:
+                    normalized_order.append(value)
+                continue
+            mapped_slot = language_to_slot.get(value)
+            if mapped_slot and mapped_slot not in normalized_order:
+                normalized_order.append(mapped_slot)
+        if "source" not in normalized_order:
+            normalized_order.append("source")
+        for slot_id in enabled_slots:
+            if slot_id not in normalized_order:
+                normalized_order.append(slot_id)
+        return normalized_order
 
     def _should_suppress_source_partial_display(self) -> bool:
         config = self.config_getter()
@@ -246,24 +303,27 @@ class SubtitleRouter:
         record["provider"] = event.provider
         translations = dict(record.get("translations", {}))
         for item in event.translations:
-            translations[item.target_lang] = {
+            translation_key = str(item.slot_id or item.target_lang).strip().lower()
+            if not translation_key:
+                continue
+            translations[translation_key] = {
+                "slot_id": item.slot_id,
+                "target_lang": item.target_lang,
+                "label": item.label,
                 "text": item.text,
+                "provider": item.provider,
                 "success": item.success,
                 "error": item.error,
             }
         record["translations"] = translations
         config = self.config_getter()
         translation_config = config.get("translation", {}) if isinstance(config, dict) else {}
-        target_languages = [
-            str(item).strip().lower()
-            for item in translation_config.get("target_languages", [])
-            if str(item).strip()
-        ] if isinstance(translation_config, dict) else []
+        required_slot_ids = list(self._translation_slot_map(translation_config).keys()) if isinstance(translation_config, dict) else []
         received_targets = {str(item).strip().lower() for item in translations.keys() if str(item).strip()}
         record["translation_received"] = bool(
             event.is_complete
-            or not target_languages
-            or all(target_lang in received_targets for target_lang in target_languages)
+            or not required_slot_ids
+            or all(slot_id in received_targets for slot_id in required_slot_ids)
         )
         was_exported = event.sequence in self._exported_sequences
         should_promote = (
@@ -299,14 +359,13 @@ class SubtitleRouter:
         show_source = bool(subtitle_output.get("show_source", True))
         show_translations = bool(subtitle_output.get("show_translations", True))
         max_translation_languages = max(0, min(5, int(subtitle_output.get("max_translation_languages", 0) or 0)))
-        display_order = [
-            str(item).lower()
-            for item in subtitle_output.get("display_order", ["source", *translation_config.get("target_languages", [])])
-        ]
-        target_languages = [str(item).lower() for item in translation_config.get("target_languages", [])]
+        translation_slots = self._translation_slot_map(translation_config if isinstance(translation_config, dict) else {})
+        display_order = self._resolved_display_order(
+            translation_config if isinstance(translation_config, dict) else {},
+            subtitle_output if isinstance(subtitle_output, dict) else {},
+        )
         items: list[SubtitleLineItem] = []
         visible_items: list[SubtitleLineItem] = []
-        visible_translation_count = 0
 
         for code in display_order:
             if code == "source":
@@ -323,25 +382,24 @@ class SubtitleRouter:
                     visible_items.append(source_item)
                 continue
 
-            if code not in target_languages:
+            line_config = translation_slots.get(code)
+            if line_config is None:
                 continue
 
             translation = record["translations"].get(code)
             success = bool(translation and translation.get("success", False))
             text = str(translation.get("text", "")) if translation else ""
             error = str(translation.get("error")) if translation and translation.get("error") else None
-            next_translation_slot = (
-                f"translation_{visible_translation_count + 1}"
-                if visible_translation_count < 5
-                else None
-            )
-            can_show = show_translations and visible_translation_count < max_translation_languages and success and bool(text)
+            can_show = show_translations and len([item for item in visible_items if item.kind == "translation"]) < max_translation_languages and success and bool(text)
             item = SubtitleLineItem(
                 kind="translation",
-                lang=code,
-                label=code.upper(),
+                lang=str(translation.get("target_lang") if translation else line_config.get("target_lang", code)),
+                label=str(translation.get("label") if translation and translation.get("label") else line_config.get("label") or str(line_config.get("target_lang", code)).upper()),
                 text=text,
-                style_slot=next_translation_slot if can_show else None,
+                style_slot=code if can_show else None,
+                slot_id=code,
+                target_lang=str(translation.get("target_lang") if translation else line_config.get("target_lang", code)),
+                provider=str(translation.get("provider")) if translation and translation.get("provider") else None,
                 visible=can_show,
                 success=success,
                 error=error,
@@ -349,7 +407,6 @@ class SubtitleRouter:
             items.append(item)
             if can_show:
                 visible_items.append(item)
-                visible_translation_count += 1
 
         line1 = visible_items[0].text if len(visible_items) > 0 else ""
         line2 = "\n".join(item.text for item in visible_items[1:]) if len(visible_items) > 1 else ""
@@ -730,17 +787,10 @@ class SubtitleRouter:
             if isinstance(subtitle_output, dict)
             else 0
         )
-        display_order = [
-            str(item).lower()
-            for item in subtitle_output.get(
-                "display_order",
-                ["source", *translation_config.get("target_languages", [])] if isinstance(translation_config, dict) else ["source"],
-            )
-        ] if isinstance(subtitle_output, dict) else list(completed_payload.display_order)
-        target_languages = [
-            str(item).lower()
-            for item in translation_config.get("target_languages", [])
-        ] if isinstance(translation_config, dict) else []
+        display_order = self._resolved_display_order(
+            translation_config if isinstance(translation_config, dict) else {},
+            subtitle_output if isinstance(subtitle_output, dict) else {},
+        ) if isinstance(subtitle_output, dict) else list(completed_payload.display_order)
         active_source_lang = active_partial_source_lang or completed_payload.source_lang
         source_item = SubtitleLineItem(
             kind="source",
@@ -753,7 +803,6 @@ class SubtitleRouter:
 
         items: list[SubtitleLineItem] = []
         visible_items: list[SubtitleLineItem] = []
-        visible_translation_count = 0
         for code in display_order:
             if code == "source":
                 items.append(source_item)
@@ -761,14 +810,11 @@ class SubtitleRouter:
                     visible_items.append(source_item)
                 continue
 
-            if code not in target_languages:
-                continue
-
             translation_item = next(
                 (
                     item
                     for item in completed_payload.items
-                    if item.kind == "translation" and item.lang == code
+                    if item.kind == "translation" and str(item.slot_id or item.lang).lower() == code
                 ),
                 None,
             )
@@ -778,23 +824,21 @@ class SubtitleRouter:
                 preserve_completed_translations
                 and
                 show_translations
-                and visible_translation_count < max_translation_languages
+                and len([item for item in visible_items if item.kind == "translation"]) < max_translation_languages
                 and bool(translation_item.success)
                 and bool(translation_item.text)
             )
             if not preserve_completed_translations and bool(translation_item.text):
                 self._increment_counter_metric("overlay_stale_translation_suppressed", 1)
-            next_translation_slot = f"translation_{visible_translation_count + 1}" if can_show else None
             updated_translation_item = translation_item.model_copy(
                 update={
                     "visible": can_show,
-                    "style_slot": next_translation_slot,
+                    "style_slot": code if can_show else None,
                 }
             )
             items.append(updated_translation_item)
             if updated_translation_item.visible and updated_translation_item.text:
                 visible_items.append(updated_translation_item)
-                visible_translation_count += 1
 
         line1 = visible_items[0].text if visible_items else ""
         line2 = "\n".join(item.text for item in visible_items[1:]) if len(visible_items) > 1 else ""
@@ -837,10 +881,10 @@ class SubtitleRouter:
         overlay = config.get("overlay", {}) if isinstance(config, dict) else {}
         translation_config = config.get("translation", {}) if isinstance(config, dict) else {}
         subtitle_output = config.get("subtitle_output", {}) if isinstance(config, dict) else {}
-        display_order = [
-            str(item).lower()
-            for item in subtitle_output.get("display_order", ["source", *translation_config.get("target_languages", [])])
-        ] if isinstance(subtitle_output, dict) and isinstance(translation_config, dict) else []
+        display_order = self._resolved_display_order(
+            translation_config if isinstance(translation_config, dict) else {},
+            subtitle_output if isinstance(subtitle_output, dict) else {},
+        ) if isinstance(subtitle_output, dict) else []
         if active_partial_text and completed_payload is None:
             return SubtitlePayloadEvent(
                 sequence=active_partial_sequence or 0,

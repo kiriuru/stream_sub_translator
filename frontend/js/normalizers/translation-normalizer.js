@@ -17,7 +17,13 @@ export function normalizeTranslationResult(payload) {
     used_default_prompt: current.used_default_prompt === true,
     is_complete: current.is_complete !== false,
     translations: (Array.isArray(current.translations) ? current.translations : []).map((item) => ({
+      slot_id: String(item?.slot_id || "").toLowerCase(),
+      label: String(item?.label || ""),
       target_lang: String(item?.target_lang || "").toLowerCase(),
+      provider: String(item?.provider || ""),
+      provider_group: String(item?.provider_group || ""),
+      experimental: item?.experimental === true,
+      local_provider: item?.local_provider === true,
       text: String(item?.text || ""),
       success: item?.success !== false,
       error: String(item?.error || ""),

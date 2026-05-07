@@ -225,7 +225,7 @@ class LocalConfigManager:
         normalized["targets"] = list(normalized["translation"]["target_languages"])
         normalized["subtitle_output"] = normalize_subtitle_output_config(
             normalized.get("subtitle_output", {}),
-            target_languages=normalized["translation"]["target_languages"],
+            translation_lines=normalized["translation"]["lines"],
         )
         normalized["subtitle_style"] = normalize_subtitle_style_config(normalized.get("subtitle_style", {}))
         normalized["subtitle_lifecycle"] = normalize_subtitle_lifecycle_config(

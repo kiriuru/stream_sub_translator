@@ -8,7 +8,7 @@ import time
 from typing import Any, Awaitable, Callable
 
 from backend.core.structured_runtime_logger import StructuredRuntimeLogger
-from backend.core.translation_engine import PreparedTranslationRequest, TranslationEngine
+from backend.core.translation_engine import PreparedTranslationLine, PreparedTranslationRequest, TranslationEngine
 from backend.models import TranslationEvent, TranslationItem
 
 logger = logging.getLogger(__name__)
@@ -78,6 +78,7 @@ class TranslationDispatcher:
             "translation_last_runtime_reason": None,
             "translation_last_provider": None,
             "translation_last_target_lang": None,
+            "translation_last_slot_id": None,
             "translation_last_timeout_ms": None,
         }
         self._last_logged_queue_depth: int | None = None
@@ -287,7 +288,7 @@ class TranslationDispatcher:
     async def _run_job(self, job: _QueuedJob) -> None:
         translation_config: dict[str, Any] | None = None
         prepared: PreparedTranslationRequest | None = None
-        target_tasks: list[asyncio.Task] = []
+        line_tasks: list[asyncio.Task] = []
         try:
             translation_config = self._translation_config()
             if not translation_config.get("enabled"):
@@ -305,7 +306,7 @@ class TranslationDispatcher:
             prepared = self._translation_engine.prepare_request(translation_config)
             async with self._lock:
                 self._set_metric_locked("translation_last_provider", prepared.provider_name)
-            if not prepared.target_languages:
+            if not prepared.lines:
                 self._log_event(
                     "translation_publish_skipped",
                     job_id=job.job_id,
@@ -316,7 +317,7 @@ class TranslationDispatcher:
                     target_languages=[],
                     relevant=self._is_sequence_relevant(job.sequence),
                     fresh=self._is_sequence_relevant(job.sequence),
-                    reason="no_target_languages",
+                    reason="no_translation_lines",
                 )
                 return
             if not self._is_sequence_relevant(job.sequence):
@@ -332,6 +333,7 @@ class TranslationDispatcher:
                     source_text_len=len(job.source_text),
                     provider=prepared.provider_name,
                     target_languages=list(prepared.target_languages),
+                    slot_ids=[line.slot_id for line in prepared.lines],
                     relevant=False,
                     fresh=False,
                     reason="job_not_relevant",
@@ -339,34 +341,35 @@ class TranslationDispatcher:
                 return
             timeout_seconds = self._provider_timeout_seconds()
             timeout_ms = int(timeout_seconds * 1000)
-            target_tasks = [
+            line_tasks = [
                 asyncio.create_task(
-                    self._translate_one_target(
+                    self._translate_one_line(
                         job=job,
-                        prepared=prepared,
-                        target_lang=target_lang,
+                        line=line,
                         timeout_seconds=timeout_seconds,
                     )
                 )
-                for target_lang in prepared.target_languages
+                for line in prepared.lines
             ]
             published_items: list[TranslationItem] = []
             final_status_message: str | None = None
-            for target_lang in prepared.target_languages:
+            for line in prepared.lines:
                 self._log_event(
-                    "translation_target_started",
+                    "translation_line_started",
                     job_id=job.job_id,
                     sequence=job.sequence,
                     source_lang=job.source_lang,
                     source_text_len=len(job.source_text),
-                    target_lang=target_lang,
+                    slot_id=line.slot_id,
+                    label=line.label,
+                    target_lang=line.target_lang,
                     target_languages=list(prepared.target_languages),
-                    provider=prepared.provider_name,
+                    provider=line.provider_name,
                     timeout_ms=timeout_ms,
                     relevant=True,
                     fresh=True,
                 )
-            for task in asyncio.as_completed(target_tasks):
+            for task in asyncio.as_completed(line_tasks):
                 result = await task
                 item = result.item
                 provider_latency_ms = round(result.provider_latency_ms, 2)
@@ -374,6 +377,8 @@ class TranslationDispatcher:
                 async with self._lock:
                     self._metrics["translation_provider_latency_ms"] = provider_latency_ms
                     self._metrics["translation_last_target_lang"] = item.target_lang
+                    self._metrics["translation_last_slot_id"] = item.slot_id
+                    self._metrics["translation_last_provider"] = item.provider
                     self._metrics["translation_last_timeout_ms"] = timeout_ms
                     if result.outcome in {"timeout", "error"}:
                         self._set_runtime_reason_locked(result.reason or item.error or result.outcome)
@@ -384,9 +389,11 @@ class TranslationDispatcher:
                     "sequence": job.sequence,
                     "source_lang": job.source_lang,
                     "source_text_len": len(job.source_text),
+                    "slot_id": item.slot_id,
+                    "label": item.label,
                     "target_lang": item.target_lang,
                     "target_languages": list(prepared.target_languages),
-                    "provider": prepared.provider_name,
+                    "provider": item.provider,
                     "latency_ms": provider_latency_ms,
                     "queue_latency_ms": self._metrics.get("translation_queue_latency_ms"),
                     "timeout_ms": timeout_ms,
@@ -394,11 +401,11 @@ class TranslationDispatcher:
                     "fresh": is_relevant,
                 }
                 if result.outcome == "timeout":
-                    self._log_event("translation_target_timeout", reason=result.reason, **event_fields)
+                    self._log_event("translation_line_timeout", reason=result.reason, **event_fields)
                 elif result.outcome == "error":
-                    self._log_event("translation_target_error", reason=result.reason or item.error, **event_fields)
+                    self._log_event("translation_line_error", reason=result.reason or item.error, **event_fields)
                 else:
-                    self._log_event("translation_target_done", reason=result.reason, **event_fields)
+                    self._log_event("translation_line_done", reason=result.reason, **event_fields)
                 if self._stopped:
                     self._log_event(
                         "translation_publish_skipped",
@@ -406,8 +413,10 @@ class TranslationDispatcher:
                         sequence=job.sequence,
                         source_lang=job.source_lang,
                         source_text_len=len(job.source_text),
+                        slot_id=item.slot_id,
+                        label=item.label,
                         target_lang=item.target_lang,
-                        provider=prepared.provider_name,
+                        provider=item.provider,
                         relevant=False,
                         fresh=False,
                         reason="dispatcher_stopped",
@@ -425,9 +434,11 @@ class TranslationDispatcher:
                         sequence=job.sequence,
                         source_lang=job.source_lang,
                         source_text_len=len(job.source_text),
+                        slot_id=item.slot_id,
+                        label=item.label,
                         target_lang=item.target_lang,
                         target_languages=list(prepared.target_languages),
-                        provider=prepared.provider_name,
+                        provider=item.provider,
                         latency_ms=provider_latency_ms,
                         timeout_ms=timeout_ms,
                         relevant=False,
@@ -440,8 +451,10 @@ class TranslationDispatcher:
                         sequence=job.sequence,
                         source_lang=job.source_lang,
                         source_text_len=len(job.source_text),
+                        slot_id=item.slot_id,
+                        label=item.label,
                         target_lang=item.target_lang,
-                        provider=prepared.provider_name,
+                        provider=item.provider,
                         relevant=False,
                         fresh=False,
                         reason="stale_result",
@@ -452,10 +465,10 @@ class TranslationDispatcher:
                     source_text=job.source_text,
                     source_lang=job.source_lang,
                     translations=[item],
-                    provider=prepared.provider_name,
-                    provider_group=prepared.provider_group,
-                    experimental=prepared.experimental,
-                    local_provider=prepared.local_provider,
+                    provider=item.provider or prepared.provider_name,
+                    provider_group=item.provider_group or prepared.provider_group,
+                    experimental=bool(item.experimental) if item.experimental is not None else prepared.experimental,
+                    local_provider=bool(item.local_provider) if item.local_provider is not None else prepared.local_provider,
                     used_default_prompt=False,
                     status_message=status_message,
                     is_complete=False,
@@ -470,8 +483,10 @@ class TranslationDispatcher:
                     sequence=job.sequence,
                     source_lang=job.source_lang,
                     source_text_len=len(job.source_text),
+                    slot_id=item.slot_id,
+                    label=item.label,
                     target_lang=item.target_lang,
-                    provider=prepared.provider_name,
+                    provider=item.provider,
                     relevant=True,
                     fresh=True,
                     reason="target_result",
@@ -495,8 +510,8 @@ class TranslationDispatcher:
                 source_text=job.source_text,
                 source_lang=job.source_lang,
                 translations=list(published_items),
-                provider=prepared.provider_name,
-                provider_group=prepared.provider_group,
+                provider=prepared.provider_name if len({item.provider for item in published_items if item.provider}) <= 1 else "mixed",
+                provider_group=prepared.provider_group if len({item.provider_group for item in published_items if item.provider_group}) <= 1 else "mixed",
                 experimental=prepared.experimental,
                 local_provider=prepared.local_provider,
                 used_default_prompt=False,
@@ -516,9 +531,9 @@ class TranslationDispatcher:
                 reason="job_complete",
             )
         except asyncio.CancelledError:
-            for task in target_tasks:
+            for task in line_tasks:
                 task.cancel()
-            await asyncio.gather(*target_tasks, return_exceptions=True)
+            await asyncio.gather(*line_tasks, return_exceptions=True)
             raise
         except Exception as exc:
             logger.exception("Translation dispatcher job failed for sequence=%s", job.sequence)
@@ -562,12 +577,11 @@ class TranslationDispatcher:
                 if self._queue:
                     self._queue_event.set()
 
-    async def _translate_one_target(
+    async def _translate_one_line(
         self,
         *,
         job: _QueuedJob,
-        prepared: PreparedTranslationRequest,
-        target_lang: str,
+        line: PreparedTranslationLine,
         timeout_seconds: float,
     ) -> _TargetResult:
         started_at = time.perf_counter()
@@ -576,9 +590,14 @@ class TranslationDispatcher:
                 self._translation_engine.translate_target(
                     source_text=job.source_text,
                     source_lang=job.source_lang,
-                    provider_name=prepared.provider_name,
-                    provider_settings=prepared.provider_settings,
-                    target_lang=target_lang,
+                    provider_name=line.provider_name,
+                    provider_settings=line.provider_settings,
+                    target_lang=line.target_lang,
+                    slot_id=line.slot_id,
+                    label=line.label,
+                    provider_group=line.provider_group,
+                    experimental=line.experimental,
+                    local_provider=line.local_provider,
                 ),
                 timeout=timeout_seconds,
             )
@@ -594,9 +613,14 @@ class TranslationDispatcher:
             timeout_ms = int(timeout_seconds * 1000)
             return _TargetResult(
                 item=TranslationItem(
-                    target_lang=target_lang,
+                    target_lang=line.target_lang,
                     text="",
-                    provider=prepared.provider_name,
+                    provider=line.provider_name,
+                    provider_group=line.provider_group,
+                    experimental=line.experimental,
+                    local_provider=line.local_provider,
+                    slot_id=line.slot_id,
+                    label=line.label,
                     cached=False,
                     success=False,
                     error=f"Translation timed out after {timeout_ms} ms.",
@@ -611,9 +635,14 @@ class TranslationDispatcher:
         except Exception as exc:
             return _TargetResult(
                 item=TranslationItem(
-                    target_lang=target_lang,
+                    target_lang=line.target_lang,
                     text="",
-                    provider=prepared.provider_name,
+                    provider=line.provider_name,
+                    provider_group=line.provider_group,
+                    experimental=line.experimental,
+                    local_provider=line.local_provider,
+                    slot_id=line.slot_id,
+                    label=line.label,
                     cached=False,
                     success=False,
                     error=str(exc),

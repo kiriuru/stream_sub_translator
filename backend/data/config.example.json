@@ -1,5 +1,5 @@
 {
-  "config_version": 5,
+  "config_version": 6,
   "profile": "default",
   "ui": {
     "language": ""
@@ -123,6 +123,15 @@
     "target_languages": [
       "en"
     ],
+    "lines": [
+      {
+        "slot_id": "translation_1",
+        "enabled": true,
+        "target_lang": "en",
+        "provider": "google_translate_v2",
+        "label": "EN"
+      }
+    ],
     "timeout_ms": 10000,
     "queue_max_size": 8,
     "max_concurrent_jobs": 2,
@@ -189,7 +198,7 @@
     "max_translation_languages": 2,
     "display_order": [
       "source",
-      "en"
+      "translation_1"
     ]
   },
   "subtitle_style": {

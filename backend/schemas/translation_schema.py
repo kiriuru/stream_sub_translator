@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -11,6 +13,11 @@ class TranslationItem(SchemaModel):
     target_lang: str
     text: str
     provider: str
+    slot_id: str | None = None
+    label: str | None = None
+    provider_group: str | None = None
+    experimental: bool | None = None
+    local_provider: bool | None = None
     cached: bool = False
     success: bool = True
     error: str | None = None
@@ -50,6 +57,11 @@ class TranslationDiagnostics(SchemaModel):
     target_languages: list[str] = Field(default_factory=list)
     provider_endpoint: str | None = None
     uses_default_prompt: bool = False
+    line_count: int = 0
+    enabled_line_count: int = 0
+    line_providers: list[str] = Field(default_factory=list)
+    line_target_languages: list[str] = Field(default_factory=list)
+    line_missing_fields: dict[str, list[str]] = Field(default_factory=dict)
     queue_depth: int = 0
     jobs_started: int = 0
     jobs_cancelled: int = 0
@@ -67,4 +79,5 @@ class TranslationRuntimeStatus(SchemaModel):
     status: str = "disabled"
     summary: str | None = None
     target_languages: list[str] = Field(default_factory=list)
+    lines: list[dict[str, Any]] = Field(default_factory=list)
     diagnostics: TranslationDiagnostics | None = None

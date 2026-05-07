@@ -42,17 +42,38 @@ class CacheManager:
         except OSError:
             pass
 
-    def make_translation_key(self, source_text: str, source_lang: str, target_lang: str) -> str:
+    def make_translation_key(
+        self,
+        source_text: str,
+        source_lang: str,
+        target_lang: str,
+        provider_name: str | None = None,
+    ) -> str:
+        if provider_name:
+            return f"{provider_name}::{source_lang}::{target_lang}::{source_text}"
         return f"{source_lang}::{target_lang}::{source_text}"
 
-    def get_translation(self, source_text: str, source_lang: str, target_lang: str) -> str | None:
-        key = self.make_translation_key(source_text, source_lang, target_lang)
+    def get_translation(
+        self,
+        source_text: str,
+        source_lang: str,
+        target_lang: str,
+        provider_name: str | None = None,
+    ) -> str | None:
+        key = self.make_translation_key(source_text, source_lang, target_lang, provider_name)
         with self._lock:
             payload = self._read()
             return payload.get(key)
 
-    def set_translation(self, source_text: str, source_lang: str, target_lang: str, value: str) -> None:
-        key = self.make_translation_key(source_text, source_lang, target_lang)
+    def set_translation(
+        self,
+        source_text: str,
+        source_lang: str,
+        target_lang: str,
+        value: str,
+        provider_name: str | None = None,
+    ) -> None:
+        key = self.make_translation_key(source_text, source_lang, target_lang, provider_name)
         with self._lock:
             payload = self._read()
             payload[key] = value

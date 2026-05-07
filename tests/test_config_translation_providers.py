@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from backend.config import AppSettings, LocalConfigManager
+from backend.schemas.config_schema import TranslationConfig, TranslationLineConfig
 
 
 class ConfigTranslationProviderTests(unittest.TestCase):
@@ -41,6 +42,7 @@ class ConfigTranslationProviderTests(unittest.TestCase):
         self.assertEqual(settings["access_token"], "ya29.token-value")
         self.assertEqual(settings["location"], "us-central1")
         self.assertEqual(settings["model"], "general/nmt")
+        self.assertEqual(normalized["translation"]["lines"][0]["provider"], "google_cloud_translation_v3")
 
     def test_save_keeps_google_cloud_translation_v3_modern_config_shape(self) -> None:
         saved = self.manager.save(
@@ -271,8 +273,27 @@ class ConfigTranslationProviderTests(unittest.TestCase):
         self.assertFalse(loaded["asr"]["browser"]["continuous_results"])
         self.assertEqual(loaded["translation"]["provider"], "google_translate_v2")
         self.assertEqual(loaded["translation"]["target_languages"], ["en", "ja"])
+        self.assertEqual(
+            loaded["translation"]["lines"],
+            [
+                {
+                    "slot_id": "translation_1",
+                    "enabled": True,
+                    "target_lang": "en",
+                    "provider": "google_translate_v2",
+                    "label": "EN",
+                },
+                {
+                    "slot_id": "translation_2",
+                    "enabled": True,
+                    "target_lang": "ja",
+                    "provider": "google_translate_v2",
+                    "label": "JA",
+                },
+            ],
+        )
         self.assertEqual(loaded["translation"]["timeout_ms"], 12000)
-        self.assertEqual(loaded["subtitle_output"]["display_order"], ["ja", "source", "en"])
+        self.assertEqual(loaded["subtitle_output"]["display_order"], ["translation_2", "source", "translation_1"])
         self.assertFalse(loaded["subtitle_output"]["show_source"])
         self.assertEqual(loaded["subtitle_lifecycle"]["pause_to_finalize_ms"], 420)
         self.assertFalse(loaded["subtitle_lifecycle"]["allow_early_replace_on_next_final"])
@@ -287,6 +308,67 @@ class ConfigTranslationProviderTests(unittest.TestCase):
         self.assertEqual(loaded["updates"]["github_repo"], "kiriuru/stream_sub_translator")
         self.assertEqual(loaded["updates"]["latest_known_version"], "0.2.9.9")
         self.assertEqual(saved, loaded)
+
+    def test_duplicate_target_language_lines_remain_valid(self) -> None:
+        saved = self.manager.save(
+            {
+                "translation": {
+                    "enabled": True,
+                    "provider": "google_translate_v2",
+                    "target_languages": ["en"],
+                    "lines": [
+                        {
+                            "slot_id": "translation_1",
+                            "enabled": True,
+                            "target_lang": "en",
+                            "provider": "google_translate_v2",
+                            "label": "EN-G",
+                        },
+                        {
+                            "slot_id": "translation_2",
+                            "enabled": True,
+                            "target_lang": "en",
+                            "provider": "openai",
+                            "label": "EN-AI",
+                        },
+                    ],
+                },
+                "subtitle_output": {
+                    "display_order": ["translation_2", "source", "translation_1"],
+                },
+            }
+        )
+
+        self.assertEqual([line["target_lang"] for line in saved["translation"]["lines"]], ["en", "en"])
+        self.assertEqual([line["provider"] for line in saved["translation"]["lines"]], ["google_translate_v2", "openai"])
+        self.assertEqual(saved["translation"]["target_languages"], ["en"])
+        self.assertEqual(saved["subtitle_output"]["display_order"], ["translation_2", "source", "translation_1"])
+
+    def test_schema_accepts_translation_line_config(self) -> None:
+        config = TranslationConfig(
+            enabled=True,
+            provider="google_translate_v2",
+            target_languages=["en"],
+            lines=[
+                TranslationLineConfig(
+                    slot_id="translation_1",
+                    enabled=True,
+                    target_lang="en",
+                    provider="google_translate_v2",
+                    label="EN",
+                ),
+                TranslationLineConfig(
+                    slot_id="translation_2",
+                    enabled=True,
+                    target_lang="en",
+                    provider="openai",
+                    label="EN-AI",
+                ),
+            ],
+        )
+
+        self.assertEqual(len(config.lines), 2)
+        self.assertEqual(config.lines[1].provider, "openai")
 
 
 if __name__ == "__main__":

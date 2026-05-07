@@ -1,483 +1,38 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from html import unescape
+from dataclasses import dataclass, field
 import logging
 import socket
 from typing import Any
-from urllib.parse import parse_qs, quote_plus, urlparse
-
-import httpx
+from urllib.parse import urlparse
 
 from backend.core.cache_manager import CacheManager
 from backend.models import TranslationDiagnostics, TranslationItem
 from backend.translation.base import (
     PROVIDER_GROUP_EXPERIMENTAL,
-    PROVIDER_GROUP_LLM,
-    PROVIDER_GROUP_LOCAL_LLM,
     PROVIDER_GROUP_STABLE,
     BaseTranslationProvider,
+    SUPPORTED_TRANSLATION_PROVIDERS,
     TranslationProviderError,
     TranslationProviderInfo,
 )
+from backend.translation.providers.azure import AzureTranslatorProvider
+from backend.translation.providers.deepl import DeepLProvider
+from backend.translation.providers.experimental_google_web import FreeWebTranslateProvider, GoogleWebProvider
+from backend.translation.providers.google_gas import GoogleGasUrlProvider
 from backend.translation.providers.google_v2 import GoogleTranslateV2Provider
 from backend.translation.providers.google_v3 import GoogleCloudTranslationV3Provider
+from backend.translation.providers.libretranslate import LibreTranslateProvider
+from backend.translation.providers.openai_compatible import OpenAICompatibleChatProvider
+from backend.translation.providers.public_mirrors import PublicLibreTranslateMirrorProvider
+from backend.translation.registry import build_default_provider_registry
 
-DEFAULT_SUBTITLE_TRANSLATION_PROMPT = (
-    "You are a subtitle translator for livestream captions. "
-    "Translate only the user subtitle text into the requested target language. "
-    "Do not explain anything. Do not add notes, prefixes, or assistant-style chatter. "
-    "Keep the output concise, readable, and subtitle-friendly. "
-    "Preserve names, game terms, UI labels, and obvious proper nouns when appropriate."
-)
 
 logger = logging.getLogger(__name__)
 
-
-class GoogleGasUrlProvider(BaseTranslationProvider):
-    info = TranslationProviderInfo(
-        name="google_gas_url",
-        group=PROVIDER_GROUP_EXPERIMENTAL,
-        experimental=True,
-    )
-
-    async def translate(
-        self,
-        *,
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        provider_settings: dict[str, str],
-    ) -> tuple[str, dict[str, Any]]:
-        gas_url = provider_settings.get("gas_url", "").strip()
-        if not gas_url:
-            raise TranslationProviderError("Google GAS URL is missing.")
-
-        payload = {
-            "text": text,
-            "source_lang": self._normalize_source_lang(source_lang),
-            "target_lang": target_lang,
-        }
-
-        async with httpx.AsyncClient() as client:
-            data = await self._get_json(
-                client,
-                url=gas_url,
-                method="POST",
-                json=payload,
-                error_prefix="Google GAS URL request failed",
-            )
-
-        translated = (
-            data.get("translatedText")
-            or data.get("text")
-            or data.get("translation")
-            or data.get("output")
-        )
-        if not translated:
-            raise TranslationProviderError(
-                "Google GAS URL returned no translated text. Expected one of: translatedText, text, translation, output."
-            )
-        diagnostics = self.diagnostics(provider_settings)
-        diagnostics["status_message"] = "Experimental Google GAS URL provider. Reliability depends on your script."
-        return str(translated), diagnostics
-
-
-class GoogleWebProvider(BaseTranslationProvider):
-    info = TranslationProviderInfo(
-        name="google_web",
-        group=PROVIDER_GROUP_EXPERIMENTAL,
-        experimental=True,
-    )
-
-    async def translate(
-        self,
-        *,
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        provider_settings: dict[str, str],
-    ) -> tuple[str, dict[str, Any]]:
-        normalized_source = self._normalize_source_lang(source_lang)
-        url = (
-            "https://translate.googleapis.com/translate_a/single"
-            f"?client=gtx&sl={quote_plus(normalized_source)}&tl={quote_plus(target_lang)}&dt=t&q={quote_plus(text)}"
-        )
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(url, timeout=20.0)
-                response.raise_for_status()
-                payload = response.json()
-            except Exception as exc:
-                raise self._http_error("Google Web request failed", exc) from exc
-
-        translated_parts: list[str] = []
-        if isinstance(payload, list) and payload:
-            first = payload[0]
-            if isinstance(first, list):
-                for item in first:
-                    if isinstance(item, list) and item:
-                        translated_parts.append(str(item[0]))
-        translated = "".join(translated_parts).strip()
-        if not translated:
-            raise TranslationProviderError("Google Web returned an empty translation.")
-        diagnostics = self.diagnostics(provider_settings)
-        diagnostics["status_message"] = "Experimental Google Web provider. Best-effort only."
-        return translated, diagnostics
-
-
-class AzureTranslatorProvider(BaseTranslationProvider):
-    info = TranslationProviderInfo(
-        name="azure_translator",
-        group=PROVIDER_GROUP_STABLE,
-        stable=True,
-    )
-
-    async def translate(
-        self,
-        *,
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        provider_settings: dict[str, str],
-    ) -> tuple[str, dict[str, Any]]:
-        api_key = provider_settings.get("api_key", "").strip()
-        endpoint = provider_settings.get("endpoint", "").strip() or "https://api.cognitive.microsofttranslator.com"
-        region = provider_settings.get("region", "").strip()
-        if not api_key:
-            raise TranslationProviderError("Azure Translator API key is missing.")
-        if not endpoint:
-            raise TranslationProviderError("Azure Translator endpoint is missing.")
-
-        params: dict[str, str] = {
-            "api-version": "3.0",
-            "to": target_lang,
-        }
-        normalized_source = self._normalize_source_lang(source_lang)
-        if normalized_source != "auto":
-            params["from"] = normalized_source
-
-        headers = {
-            "Ocp-Apim-Subscription-Key": api_key,
-            "Content-Type": "application/json",
-        }
-        if region:
-            headers["Ocp-Apim-Subscription-Region"] = region
-
-        async with httpx.AsyncClient() as client:
-            payload = await self._get_json(
-                client,
-                url=f"{endpoint.rstrip('/')}/translate",
-                method="POST",
-                params=params,
-                json=[{"Text": text}],
-                headers=headers,
-                error_prefix="Azure Translator request failed",
-            )
-
-        translations = payload[0].get("translations", []) if isinstance(payload, list) and payload else []
-        translated = translations[0].get("text") if translations else None
-        if not translated:
-            raise TranslationProviderError("Azure Translator returned an empty translation.")
-        return str(translated), self.diagnostics(provider_settings)
-
-
-class DeepLProvider(BaseTranslationProvider):
-    info = TranslationProviderInfo(
-        name="deepl",
-        group=PROVIDER_GROUP_STABLE,
-    )
-
-    async def translate(
-        self,
-        *,
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        provider_settings: dict[str, str],
-    ) -> tuple[str, dict[str, Any]]:
-        api_key = provider_settings.get("api_key", "").strip()
-        if not api_key:
-            raise TranslationProviderError("DeepL API key is missing.")
-
-        api_url = provider_settings.get("api_url", "").strip() or "https://api-free.deepl.com/v2/translate"
-        data: dict[str, str] = {
-            "auth_key": api_key,
-            "text": text,
-            "target_lang": target_lang.upper(),
-        }
-        normalized_source = self._normalize_source_lang(source_lang)
-        if normalized_source != "auto":
-            data["source_lang"] = normalized_source.upper()
-
-        async with httpx.AsyncClient() as client:
-            payload = await self._get_json(
-                client,
-                url=api_url,
-                method="POST",
-                data=data,
-                error_prefix="DeepL request failed",
-            )
-
-        translations = payload.get("translations", [])
-        if not translations:
-            raise TranslationProviderError("DeepL returned an empty translation.")
-        return str(translations[0].get("text", "")), self.diagnostics(provider_settings)
-
-
-class LibreTranslateProvider(BaseTranslationProvider):
-    info = TranslationProviderInfo(
-        name="libretranslate",
-        group=PROVIDER_GROUP_STABLE,
-    )
-
-    async def translate(
-        self,
-        *,
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        provider_settings: dict[str, str],
-    ) -> tuple[str, dict[str, Any]]:
-        api_url = provider_settings.get("api_url", "").strip() or "https://libretranslate.com/translate"
-        payload: dict[str, str] = {
-            "q": text,
-            "source": self._normalize_source_lang(source_lang),
-            "target": target_lang,
-            "format": "text",
-        }
-        api_key = provider_settings.get("api_key", "").strip()
-        if api_key:
-            payload["api_key"] = api_key
-
-        async with httpx.AsyncClient() as client:
-            data = await self._get_json(
-                client,
-                url=api_url,
-                method="POST",
-                json=payload,
-                error_prefix="LibreTranslate request failed",
-            )
-
-        translated = data.get("translatedText")
-        if not translated:
-            raise TranslationProviderError("LibreTranslate returned an empty translation.")
-        return str(translated), self.diagnostics(provider_settings)
-
-
-class OpenAICompatibleChatProvider(BaseTranslationProvider):
-    def __init__(
-        self,
-        *,
-        name: str,
-        group: str,
-        default_base_url: str,
-        requires_api_key: bool,
-        local_provider: bool = False,
-    ) -> None:
-        self.info = TranslationProviderInfo(
-            name=name,
-            group=group,
-            stable=group == PROVIDER_GROUP_STABLE,
-            local_provider=local_provider,
-        )
-        self.default_base_url = default_base_url
-        self.requires_api_key = requires_api_key
-
-    def diagnostics(self, provider_settings: dict[str, str]) -> dict[str, Any]:
-        custom_prompt = provider_settings.get("custom_prompt", "").strip()
-        diagnostics = super().diagnostics(provider_settings)
-        diagnostics["used_default_prompt"] = not bool(custom_prompt)
-        diagnostics["status_message"] = (
-            "Using built-in subtitle translation prompt."
-            if not custom_prompt
-            else "Using custom subtitle translation prompt."
-        )
-        return diagnostics
-
-    def _build_endpoint(self, provider_settings: dict[str, str]) -> str:
-        base_url = provider_settings.get("base_url", "").strip() or self.default_base_url
-        normalized = base_url.rstrip("/")
-        if normalized.endswith("/chat/completions"):
-            return normalized
-        if normalized.endswith("/v1"):
-            return f"{normalized}/chat/completions"
-        return f"{normalized}/v1/chat/completions"
-
-    def _build_prompt_messages(
-        self,
-        *,
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        provider_settings: dict[str, str],
-    ) -> tuple[list[dict[str, str]], bool]:
-        custom_prompt = provider_settings.get("custom_prompt", "").strip()
-        system_prompt = custom_prompt or DEFAULT_SUBTITLE_TRANSLATION_PROMPT
-        normalized_source = self._normalize_source_lang(source_lang)
-        if normalized_source == "auto":
-            user_prompt = (
-                f"Detect the source language and translate the subtitle text into '{target_lang}'. "
-                "Return only the translated subtitle text.\n\n"
-                f"Subtitle text:\n{text}"
-            )
-        else:
-            user_prompt = (
-                f"Translate the subtitle text from '{normalized_source}' into '{target_lang}'. "
-                "Return only the translated subtitle text.\n\n"
-                f"Subtitle text:\n{text}"
-            )
-        return [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ], not bool(custom_prompt)
-
-    async def translate(
-        self,
-        *,
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        provider_settings: dict[str, str],
-    ) -> tuple[str, dict[str, Any]]:
-        api_key = provider_settings.get("api_key", "").strip()
-        if self.requires_api_key and not api_key:
-            raise TranslationProviderError(f"{self.info.name} API key is missing.")
-
-        model = provider_settings.get("model", "").strip()
-        if not model:
-            raise TranslationProviderError(f"{self.info.name} model is missing.")
-
-        messages, used_default_prompt = self._build_prompt_messages(
-            text=text,
-            source_lang=source_lang,
-            target_lang=target_lang,
-            provider_settings=provider_settings,
-        )
-        headers = {"Content-Type": "application/json"}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        if self.info.name == "openrouter":
-            headers.setdefault("HTTP-Referer", "http://127.0.0.1:8765")
-            headers.setdefault("X-Title", "Stream Subtitle Translator")
-
-        payload = {
-            "model": model,
-            "messages": messages,
-            "temperature": 0.1,
-            "stream": False,
-        }
-
-        async with httpx.AsyncClient() as client:
-            data = await self._get_json(
-                client,
-                url=self._build_endpoint(provider_settings),
-                method="POST",
-                json=payload,
-                headers=headers,
-                timeout=45.0,
-                error_prefix=f"{self.info.name} translation request failed",
-            )
-
-        choices = data.get("choices", [])
-        message = choices[0].get("message", {}) if choices else {}
-        content = message.get("content")
-        if isinstance(content, list):
-            text_parts: list[str] = []
-            for item in content:
-                if isinstance(item, dict) and item.get("type") == "text":
-                    text_parts.append(str(item.get("text", "")))
-            content = "".join(text_parts).strip()
-        if not content:
-            raise TranslationProviderError(f"{self.info.name} returned an empty translation.")
-
-        diagnostics = self.diagnostics(provider_settings)
-        diagnostics["used_default_prompt"] = used_default_prompt
-        return str(content).strip(), diagnostics
-
-
-class PublicLibreTranslateMirrorProvider(BaseTranslationProvider):
-    info = TranslationProviderInfo(
-        name="public_libretranslate_mirror",
-        group=PROVIDER_GROUP_EXPERIMENTAL,
-        experimental=True,
-    )
-
-    async def translate(
-        self,
-        *,
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        provider_settings: dict[str, str],
-    ) -> tuple[str, dict[str, Any]]:
-        api_url = provider_settings.get("api_url", "").strip() or "https://translate.fedilab.app/translate"
-        payload = {
-            "q": text,
-            "source": self._normalize_source_lang(source_lang),
-            "target": target_lang,
-            "format": "text",
-        }
-
-        async with httpx.AsyncClient() as client:
-            data = await self._get_json(
-                client,
-                url=api_url,
-                method="POST",
-                json=payload,
-                error_prefix="Public LibreTranslate mirror request failed",
-            )
-
-        translated = data.get("translatedText")
-        if not translated:
-            raise TranslationProviderError("Public LibreTranslate mirror returned an empty translation.")
-        diagnostics = self.diagnostics(provider_settings)
-        diagnostics["status_message"] = "Experimental public mirror. Availability may vary."
-        return str(translated), diagnostics
-
-
-class FreeWebTranslateProvider(BaseTranslationProvider):
-    info = TranslationProviderInfo(
-        name="free_web_translate",
-        group=PROVIDER_GROUP_EXPERIMENTAL,
-        experimental=True,
-    )
-
-    async def translate(
-        self,
-        *,
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        provider_settings: dict[str, str],
-    ) -> tuple[str, dict[str, Any]]:
-        normalized_source = self._normalize_source_lang(source_lang)
-        url = (
-            "https://translate.googleapis.com/translate_a/single"
-            f"?client=gtx&sl={quote_plus(normalized_source)}&tl={quote_plus(target_lang)}&dt=t&q={quote_plus(text)}"
-        )
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(url, timeout=20.0)
-                response.raise_for_status()
-                payload = response.json()
-            except Exception as exc:
-                raise self._http_error("Free Web Translate request failed", exc) from exc
-
-        translated_parts: list[str] = []
-        if isinstance(payload, list) and payload:
-            first = payload[0]
-            if isinstance(first, list):
-                for item in first:
-                    if isinstance(item, list) and item:
-                        translated_parts.append(str(item[0]))
-        translated = "".join(translated_parts).strip()
-        if not translated:
-            raise TranslationProviderError("Free Web Translate returned an empty translation.")
-        diagnostics = self.diagnostics(provider_settings)
-        diagnostics["status_message"] = "Experimental no-key web provider. Behavior may change without notice."
-        return translated, diagnostics
+_DEFAULT_PROVIDER_NAME = "google_translate_v2"
+_CANONICAL_TRANSLATION_SLOTS = tuple(f"translation_{index}" for index in range(1, 6))
 
 
 @dataclass
@@ -494,6 +49,19 @@ class TranslationBatch:
 
 
 @dataclass
+class PreparedTranslationLine:
+    slot_id: str
+    target_lang: str
+    provider_name: str
+    provider: BaseTranslationProvider | None
+    provider_settings: dict[str, str]
+    provider_group: str
+    experimental: bool = False
+    local_provider: bool = False
+    label: str | None = None
+
+
+@dataclass
 class PreparedTranslationRequest:
     provider_name: str
     provider: BaseTranslationProvider | None
@@ -502,49 +70,82 @@ class PreparedTranslationRequest:
     provider_group: str
     experimental: bool = False
     local_provider: bool = False
+    lines: list[PreparedTranslationLine] = field(default_factory=list)
 
 
 class TranslationEngine:
     def __init__(self, cache_manager: CacheManager) -> None:
         self.cache_manager = cache_manager
-        self.providers: dict[str, BaseTranslationProvider] = {
-            GoogleTranslateV2Provider.info.name: GoogleTranslateV2Provider(),
-            GoogleCloudTranslationV3Provider.info.name: GoogleCloudTranslationV3Provider(),
-            GoogleGasUrlProvider.info.name: GoogleGasUrlProvider(),
-            GoogleWebProvider.info.name: GoogleWebProvider(),
-            AzureTranslatorProvider.info.name: AzureTranslatorProvider(),
-            DeepLProvider.info.name: DeepLProvider(),
-            LibreTranslateProvider.info.name: LibreTranslateProvider(),
-            "openai": OpenAICompatibleChatProvider(
-                name="openai",
-                group=PROVIDER_GROUP_LLM,
-                default_base_url="https://api.openai.com/v1",
-                requires_api_key=True,
-            ),
-            "openrouter": OpenAICompatibleChatProvider(
-                name="openrouter",
-                group=PROVIDER_GROUP_LLM,
-                default_base_url="https://openrouter.ai/api/v1",
-                requires_api_key=True,
-            ),
-            "lm_studio": OpenAICompatibleChatProvider(
-                name="lm_studio",
-                group=PROVIDER_GROUP_LOCAL_LLM,
-                default_base_url="http://127.0.0.1:1234/v1",
-                requires_api_key=False,
-                local_provider=True,
-            ),
-            "ollama": OpenAICompatibleChatProvider(
-                name="ollama",
-                group=PROVIDER_GROUP_LOCAL_LLM,
-                default_base_url="http://127.0.0.1:11434/v1",
-                requires_api_key=False,
-                local_provider=True,
-            ),
-            PublicLibreTranslateMirrorProvider.info.name: PublicLibreTranslateMirrorProvider(),
-            FreeWebTranslateProvider.info.name: FreeWebTranslateProvider(),
-        }
+        self.providers: dict[str, BaseTranslationProvider] = build_default_provider_registry()
         self._last_settings_signature: tuple[tuple[str, str], ...] | None = None
+
+    def _supported_provider_name(self, raw_provider_name: Any) -> str:
+        provider_name = str(raw_provider_name or _DEFAULT_PROVIDER_NAME).strip()
+        if provider_name not in SUPPORTED_TRANSLATION_PROVIDERS:
+            return _DEFAULT_PROVIDER_NAME
+        return provider_name
+
+    def _normalized_provider_settings_map(self, translation_config: dict[str, Any]) -> dict[str, dict[str, str]]:
+        provider_settings_map = translation_config.get("provider_settings", {})
+        if not isinstance(provider_settings_map, dict):
+            return {}
+        normalized: dict[str, dict[str, str]] = {}
+        for provider_name, provider_settings in provider_settings_map.items():
+            if not isinstance(provider_settings, dict):
+                continue
+            normalized[str(provider_name)] = {str(key): str(value) for key, value in provider_settings.items()}
+        return normalized
+
+    def _normalize_target_languages(self, target_languages: list[str]) -> list[str]:
+        clean_target_languages = [
+            str(item).strip().lower()
+            for item in target_languages
+            if str(item).strip()
+        ]
+        return list(dict.fromkeys(clean_target_languages))
+
+    def _normalized_configured_lines(self, translation_config: dict[str, Any]) -> list[dict[str, Any]]:
+        default_provider = self._supported_provider_name(translation_config.get("provider", _DEFAULT_PROVIDER_NAME))
+        raw_lines = translation_config.get("lines", [])
+        normalized_lines: list[dict[str, Any]] = []
+
+        if isinstance(raw_lines, list) and raw_lines:
+            for index, raw_line in enumerate(raw_lines):
+                if not isinstance(raw_line, dict):
+                    continue
+                slot_id = str(raw_line.get("slot_id") or "").strip().lower()
+                if slot_id not in _CANONICAL_TRANSLATION_SLOTS:
+                    slot_id = _CANONICAL_TRANSLATION_SLOTS[index] if index < len(_CANONICAL_TRANSLATION_SLOTS) else ""
+                target_lang = str(raw_line.get("target_lang") or "").strip().lower()
+                provider_name = self._supported_provider_name(raw_line.get("provider", default_provider))
+                if not slot_id or not target_lang:
+                    continue
+                normalized_lines.append(
+                    {
+                        "slot_id": slot_id,
+                        "enabled": bool(raw_line.get("enabled", True)),
+                        "target_lang": target_lang,
+                        "provider": provider_name,
+                        "label": str(raw_line.get("label") or "").strip() or target_lang.upper(),
+                    }
+                )
+
+        if not normalized_lines:
+            legacy_targets = self._normalize_target_languages(translation_config.get("target_languages", []))
+            if not legacy_targets:
+                legacy_targets = ["en"]
+            normalized_lines = [
+                {
+                    "slot_id": _CANONICAL_TRANSLATION_SLOTS[index],
+                    "enabled": True,
+                    "target_lang": target_lang,
+                    "provider": default_provider,
+                    "label": target_lang.upper(),
+                }
+                for index, target_lang in enumerate(legacy_targets[: len(_CANONICAL_TRANSLATION_SLOTS)])
+            ]
+
+        return normalized_lines[: len(_CANONICAL_TRANSLATION_SLOTS)]
 
     def _required_fields_for_provider(self, provider_name: str) -> list[str]:
         if provider_name == "google_translate_v2":
@@ -555,7 +156,7 @@ class TranslationEngine:
             return ["gas_url"]
         if provider_name == "azure_translator":
             return ["api_key", "endpoint"]
-        if provider_name in {"deepl"}:
+        if provider_name == "deepl":
             return ["api_key"]
         if provider_name in {"openai", "openrouter"}:
             return ["api_key", "model"]
@@ -604,158 +205,216 @@ class TranslationEngine:
                 summary="Translation disabled.",
             )
 
-        provider_name = str(translation_config.get("provider", "google_translate_v2")).strip()
-        provider = self.providers.get(provider_name)
-        target_languages = [
-            str(item).strip().lower()
-            for item in translation_config.get("target_languages", [])
-            if str(item).strip()
-        ]
-        provider_settings_map = translation_config.get("provider_settings", {})
-        provider_settings = provider_settings_map.get(provider_name, {}) if isinstance(provider_settings_map, dict) else {}
-        if not isinstance(provider_settings, dict):
-            provider_settings = {}
-        normalized_settings = {str(k): str(v).strip() for k, v in provider_settings.items()}
+        configured_lines = self._normalized_configured_lines(translation_config)
+        enabled_lines = [line for line in configured_lines if line.get("enabled", True)]
+        provider_settings_map = self._normalized_provider_settings_map(translation_config)
+        missing_by_line: dict[str, list[str]] = {}
+        missing_fields: list[str] = []
+        line_providers: list[str] = []
+        line_target_languages: list[str] = []
+        line_missing_fields: dict[str, list[str]] = {}
+        unreachable_local_providers: dict[str, str] = {}
+        used_default_prompt = False
+        any_experimental = False
+        any_local = False
+        all_ready = True
+        any_configured = bool(enabled_lines)
 
-        if provider is None:
+        if not enabled_lines:
             return TranslationDiagnostics(
                 enabled=True,
-                provider=provider_name,
-                status="error",
-                summary=f"Translation provider '{provider_name}' is not supported.",
-                reason="Unsupported provider.",
-                target_languages=target_languages,
-                configured=False,
-                ready=False,
-                degraded=True,
-            )
-
-        missing_fields = [
-            field_name
-            for field_name in self._required_fields_for_provider(provider_name)
-            if not normalized_settings.get(field_name, "").strip()
-        ]
-        diagnostics = provider.diagnostics(normalized_settings)
-        endpoint = self._provider_endpoint_for_summary(provider_name, normalized_settings)
-        uses_default_prompt = bool(diagnostics.get("used_default_prompt", False))
-
-        if not target_languages:
-            return TranslationDiagnostics(
-                enabled=True,
-                provider=provider_name,
-                provider_group=str(diagnostics.get("provider_group", provider.info.group)),
-                experimental=bool(diagnostics.get("experimental", provider.info.experimental)),
-                local_provider=bool(diagnostics.get("local_provider", provider.info.local_provider)),
+                provider=self._supported_provider_name(translation_config.get("provider", _DEFAULT_PROVIDER_NAME)),
                 configured=False,
                 ready=False,
                 degraded=True,
                 status="partial",
-                summary="Translation enabled, but no target languages are configured.",
-                reason="Add at least one target language.",
-                missing_fields=[],
-                target_languages=target_languages,
-                provider_endpoint=endpoint,
-                uses_default_prompt=uses_default_prompt,
+                summary="Translation enabled, but no translation lines are configured.",
+                reason="Enable at least one translation line.",
+                target_languages=[],
+                line_count=len(configured_lines),
+                enabled_line_count=0,
+                line_providers=[],
+                line_target_languages=[],
+                line_missing_fields={},
             )
 
-        if missing_fields:
+        diagnostics_by_provider: list[dict[str, Any]] = []
+        for line in enabled_lines:
+            provider_name = self._supported_provider_name(line["provider"])
+            provider = self.providers.get(provider_name)
+            provider_settings = provider_settings_map.get(provider_name, {})
+            normalized_settings = {str(key): str(value).strip() for key, value in provider_settings.items()}
+            line_providers.append(provider_name)
+            line_target_languages.append(str(line["target_lang"]))
+
+            if provider is None:
+                missing = ["provider"]
+                missing_by_line[line["slot_id"]] = missing
+                line_missing_fields[line["slot_id"]] = missing
+                missing_fields.extend(missing)
+                all_ready = False
+                continue
+
+            diagnostics = provider.diagnostics(normalized_settings)
+            diagnostics_by_provider.append(diagnostics)
+            used_default_prompt = used_default_prompt or bool(diagnostics.get("used_default_prompt", False))
+            any_experimental = any_experimental or bool(provider.info.experimental)
+            any_local = any_local or bool(provider.info.local_provider)
+
+            missing = [
+                field_name
+                for field_name in self._required_fields_for_provider(provider_name)
+                if not normalized_settings.get(field_name, "").strip()
+            ]
+            if missing:
+                missing_by_line[line["slot_id"]] = missing
+                line_missing_fields[line["slot_id"]] = missing
+                missing_fields.extend(missing)
+                all_ready = False
+                continue
+
+            if provider.info.local_provider:
+                endpoint = self._provider_endpoint_for_summary(provider_name, normalized_settings)
+                reachable, reason = self._check_local_endpoint(endpoint)
+                if not reachable and reason:
+                    unreachable_local_providers[line["slot_id"]] = reason
+                    all_ready = False
+
+        primary_provider = line_providers[0] if line_providers and len(set(line_providers)) == 1 else "mixed"
+        primary_group = (
+            diagnostics_by_provider[0].get("provider_group")
+            if diagnostics_by_provider and len({item.get("provider_group") for item in diagnostics_by_provider}) == 1
+            else "mixed"
+        )
+        endpoint = None
+        if line_providers:
+            first_provider = line_providers[0]
+            endpoint = self._provider_endpoint_for_summary(first_provider, provider_settings_map.get(first_provider, {}))
+
+        if missing_by_line:
+            summary = (
+                f"Translation providers are partially configured across {len(enabled_lines)} enabled line(s)."
+                if len(set(line_providers)) > 1
+                else f"Translation provider '{primary_provider}' is partially configured."
+            )
             return TranslationDiagnostics(
                 enabled=True,
-                provider=provider_name,
-                provider_group=str(diagnostics.get("provider_group", provider.info.group)),
-                experimental=bool(diagnostics.get("experimental", provider.info.experimental)),
-                local_provider=bool(diagnostics.get("local_provider", provider.info.local_provider)),
-                configured=False,
+                provider=primary_provider,
+                provider_group=str(primary_group),
+                experimental=any_experimental,
+                local_provider=any_local,
+                configured=any_configured,
                 ready=False,
                 degraded=True,
                 status="partial",
-                summary=f"Translation provider '{provider_name}' is partially configured.",
-                reason=f"Missing required settings: {', '.join(missing_fields)}.",
-                missing_fields=missing_fields,
-                target_languages=target_languages,
+                summary=summary,
+                reason="Missing required settings on one or more translation lines.",
+                missing_fields=list(dict.fromkeys(missing_fields)),
+                target_languages=line_target_languages,
                 provider_endpoint=endpoint,
-                uses_default_prompt=uses_default_prompt,
+                uses_default_prompt=used_default_prompt,
+                line_count=len(configured_lines),
+                enabled_line_count=len(enabled_lines),
+                line_providers=line_providers,
+                line_target_languages=line_target_languages,
+                line_missing_fields=line_missing_fields,
             )
 
-        if provider.info.local_provider:
-            reachable, reason = self._check_local_endpoint(endpoint)
+        if unreachable_local_providers:
             return TranslationDiagnostics(
                 enabled=True,
-                provider=provider_name,
-                provider_group=str(diagnostics.get("provider_group", provider.info.group)),
-                experimental=bool(diagnostics.get("experimental", provider.info.experimental)),
-                local_provider=True,
+                provider=primary_provider,
+                provider_group=str(primary_group),
+                experimental=any_experimental,
+                local_provider=any_local,
                 configured=True,
-                ready=reachable,
-                degraded=not reachable,
-                status="ready" if reachable else "degraded",
-                summary=(
-                    f"Local translation provider '{provider_name}' is ready."
-                    if reachable
-                    else f"Local translation provider '{provider_name}' is configured but unreachable."
+                ready=False,
+                degraded=True,
+                status="degraded",
+                summary="One or more local translation providers are configured but unreachable.",
+                reason="; ".join(
+                    f"{slot_id}: {reason}"
+                    for slot_id, reason in unreachable_local_providers.items()
                 ),
-                reason=reason,
                 missing_fields=[],
-                target_languages=target_languages,
+                target_languages=line_target_languages,
                 provider_endpoint=endpoint,
-                uses_default_prompt=uses_default_prompt,
+                uses_default_prompt=used_default_prompt,
+                line_count=len(configured_lines),
+                enabled_line_count=len(enabled_lines),
+                line_providers=line_providers,
+                line_target_languages=line_target_languages,
+                line_missing_fields={},
             )
 
-        if provider.info.experimental:
+        if any_experimental and not any_local:
             return TranslationDiagnostics(
                 enabled=True,
-                provider=provider_name,
-                provider_group=str(diagnostics.get("provider_group", provider.info.group)),
+                provider=primary_provider,
+                provider_group=str(primary_group),
                 experimental=True,
-                local_provider=bool(diagnostics.get("local_provider", provider.info.local_provider)),
+                local_provider=any_local,
                 configured=True,
                 ready=True,
                 degraded=True,
                 status="experimental",
-                summary=f"Experimental translation provider '{provider_name}' is configured best-effort.",
+                summary="Experimental translation provider configuration is active on one or more lines.",
                 reason="Experimental providers may fail or change behavior without notice.",
                 missing_fields=[],
-                target_languages=target_languages,
+                target_languages=line_target_languages,
                 provider_endpoint=endpoint,
-                uses_default_prompt=uses_default_prompt,
+                uses_default_prompt=used_default_prompt,
+                line_count=len(configured_lines),
+                enabled_line_count=len(enabled_lines),
+                line_providers=line_providers,
+                line_target_languages=line_target_languages,
+                line_missing_fields={},
             )
 
         return TranslationDiagnostics(
             enabled=True,
-            provider=provider_name,
-            provider_group=str(diagnostics.get("provider_group", provider.info.group)),
-            experimental=bool(diagnostics.get("experimental", provider.info.experimental)),
-            local_provider=bool(diagnostics.get("local_provider", provider.info.local_provider)),
+            provider=primary_provider,
+            provider_group=str(primary_group),
+            experimental=any_experimental,
+            local_provider=any_local,
             configured=True,
-            ready=True,
+            ready=all_ready,
             degraded=False,
             status="ready",
-            summary=f"Translation provider '{provider_name}' is configured.",
-            reason=diagnostics.get("status_message"),
+            summary=(
+                f"Translation provider '{primary_provider}' is configured."
+                if primary_provider != "mixed"
+                else f"Mixed-provider translation is configured across {len(enabled_lines)} enabled line(s)."
+            ),
+            reason=None,
             missing_fields=[],
-            target_languages=target_languages,
+            target_languages=line_target_languages,
             provider_endpoint=endpoint,
-            uses_default_prompt=uses_default_prompt,
+            uses_default_prompt=used_default_prompt,
+            line_count=len(configured_lines),
+            enabled_line_count=len(enabled_lines),
+            line_providers=line_providers,
+            line_target_languages=line_target_languages,
+            line_missing_fields={},
         )
 
     def _build_settings_signature(self, translation_config: dict[str, Any]) -> tuple[tuple[str, str], ...]:
         if not isinstance(translation_config, dict):
             return ()
-        provider = str(translation_config.get("provider", "")).strip()
-        provider_settings_map = translation_config.get("provider_settings", {})
-        provider_settings = provider_settings_map.get(provider, {}) if isinstance(provider_settings_map, dict) else {}
-        if not isinstance(provider_settings, dict):
-            provider_settings = {}
-        target_languages = translation_config.get("target_languages", [])
-        if not isinstance(target_languages, list):
-            target_languages = []
         signature_payload: dict[str, str] = {
             "enabled": str(bool(translation_config.get("enabled", False))),
-            "provider": provider,
-            "targets": ",".join(str(item).strip().lower() for item in target_languages if str(item).strip()),
+            "provider": self._supported_provider_name(translation_config.get("provider", "")),
         }
-        for key, value in provider_settings.items():
-            signature_payload[f"provider_setting:{key}"] = str(value)
+        for index, line in enumerate(self._normalized_configured_lines(translation_config)):
+            signature_payload[f"line:{index}:slot_id"] = str(line.get("slot_id", ""))
+            signature_payload[f"line:{index}:enabled"] = str(bool(line.get("enabled", True)))
+            signature_payload[f"line:{index}:target_lang"] = str(line.get("target_lang", ""))
+            signature_payload[f"line:{index}:provider"] = str(line.get("provider", ""))
+            signature_payload[f"line:{index}:label"] = str(line.get("label", ""))
+        provider_settings_map = self._normalized_provider_settings_map(translation_config)
+        for provider_name, provider_settings in sorted(provider_settings_map.items()):
+            for key, value in sorted(provider_settings.items()):
+                signature_payload[f"provider_setting:{provider_name}:{key}"] = str(value)
         return tuple(sorted(signature_payload.items()))
 
     def apply_live_settings(self, translation_config: dict[str, Any]) -> None:
@@ -764,36 +423,48 @@ class TranslationEngine:
             self.cache_manager.clear_translation_cache()
         self._last_settings_signature = new_signature
 
-    @staticmethod
-    def _normalize_target_languages(target_languages: list[str]) -> list[str]:
-        clean_target_languages = [
-            str(item).strip().lower()
-            for item in target_languages
-            if str(item).strip()
-        ]
-        return list(dict.fromkeys(clean_target_languages))
-
     def prepare_request(self, translation_config: dict[str, Any]) -> PreparedTranslationRequest:
-        provider_name = str(translation_config.get("provider", "google_translate_v2"))
-        provider_settings_map = translation_config.get("provider_settings", {})
-        if not isinstance(provider_settings_map, dict):
-            provider_settings_map = {}
-        provider_settings = provider_settings_map.get(provider_name, {})
-        if not isinstance(provider_settings, dict):
-            provider_settings = {}
-        provider = self.providers.get(provider_name)
-        target_languages = self._normalize_target_languages(translation_config.get("target_languages", []))
-        provider_group = provider.info.group if provider is not None else PROVIDER_GROUP_EXPERIMENTAL
-        experimental = bool(provider.info.experimental) if provider is not None else True
-        local_provider = bool(provider.info.local_provider) if provider is not None else False
+        provider_settings_map = self._normalized_provider_settings_map(translation_config)
+        prepared_lines: list[PreparedTranslationLine] = []
+
+        for line in self._normalized_configured_lines(translation_config):
+            if not line.get("enabled", True):
+                continue
+            provider_name = self._supported_provider_name(line.get("provider", _DEFAULT_PROVIDER_NAME))
+            provider = self.providers.get(provider_name)
+            provider_settings = provider_settings_map.get(provider_name, {})
+            provider_group = provider.info.group if provider is not None else PROVIDER_GROUP_EXPERIMENTAL
+            experimental = bool(provider.info.experimental) if provider is not None else True
+            local_provider = bool(provider.info.local_provider) if provider is not None else False
+            prepared_lines.append(
+                PreparedTranslationLine(
+                    slot_id=str(line["slot_id"]),
+                    target_lang=str(line["target_lang"]),
+                    provider_name=provider_name,
+                    provider=provider,
+                    provider_settings={str(key): str(value) for key, value in provider_settings.items()},
+                    provider_group=provider_group,
+                    experimental=experimental,
+                    local_provider=local_provider,
+                    label=str(line.get("label") or "").strip() or str(line["target_lang"]).upper(),
+                )
+            )
+
+        provider_names = [line.provider_name for line in prepared_lines]
+        provider_groups = [line.provider_group for line in prepared_lines]
+        provider_name = provider_names[0] if provider_names and len(set(provider_names)) == 1 else ("mixed" if provider_names else self._supported_provider_name(translation_config.get("provider", _DEFAULT_PROVIDER_NAME)))
+        provider_group = provider_groups[0] if provider_groups and len(set(provider_groups)) == 1 else ("mixed" if provider_groups else PROVIDER_GROUP_EXPERIMENTAL)
+        first_line = prepared_lines[0] if prepared_lines else None
+
         return PreparedTranslationRequest(
             provider_name=provider_name,
-            provider=provider,
-            provider_settings={str(k): str(v) for k, v in provider_settings.items()},
-            target_languages=target_languages,
+            provider=first_line.provider if first_line is not None and provider_name != "mixed" else first_line.provider if first_line is not None else None,
+            provider_settings=dict(first_line.provider_settings) if first_line is not None and provider_name != "mixed" else {},
+            target_languages=[line.target_lang for line in prepared_lines],
             provider_group=provider_group,
-            experimental=experimental,
-            local_provider=local_provider,
+            experimental=any(line.experimental for line in prepared_lines),
+            local_provider=any(line.local_provider for line in prepared_lines),
+            lines=prepared_lines,
         )
 
     async def translate_target(
@@ -805,16 +476,21 @@ class TranslationEngine:
         provider_settings: dict[str, Any],
         target_lang: str,
         retries: int = 2,
+        slot_id: str | None = None,
+        label: str | None = None,
+        provider_group: str | None = None,
+        experimental: bool | None = None,
+        local_provider: bool | None = None,
     ) -> tuple[TranslationItem, dict[str, Any]]:
         provider = self.providers.get(provider_name)
         normalized_target_lang = str(target_lang).strip().lower()
-        normalized_settings = {str(k): str(v) for k, v in provider_settings.items()}
+        normalized_settings = {str(key): str(value) for key, value in provider_settings.items()}
         if provider is None:
             diagnostics = {
                 "provider": provider_name,
-                "provider_group": PROVIDER_GROUP_EXPERIMENTAL,
-                "experimental": True,
-                "local_provider": False,
+                "provider_group": provider_group or PROVIDER_GROUP_EXPERIMENTAL,
+                "experimental": experimental if experimental is not None else True,
+                "local_provider": local_provider if local_provider is not None else False,
                 "status_message": f"Unsupported translation provider: {provider_name}",
                 "used_default_prompt": False,
             }
@@ -823,24 +499,42 @@ class TranslationEngine:
                     target_lang=normalized_target_lang,
                     text="",
                     provider=provider_name,
+                    provider_group=diagnostics["provider_group"],
+                    experimental=bool(diagnostics["experimental"]),
+                    local_provider=bool(diagnostics["local_provider"]),
+                    slot_id=slot_id,
+                    label=label,
                     cached=False,
                     success=False,
                     error=diagnostics["status_message"],
                 ),
                 diagnostics,
             )
-        cached = self.cache_manager.get_translation(source_text, source_lang, normalized_target_lang)
+
+        cached = self.cache_manager.get_translation(
+            source_text,
+            source_lang,
+            normalized_target_lang,
+            provider_name=provider_name,
+        )
         if cached is not None:
+            cached_diagnostics = provider.diagnostics(normalized_settings)
             return (
                 TranslationItem(
                     target_lang=normalized_target_lang,
                     text=cached,
                     provider=provider_name,
+                    provider_group=cached_diagnostics.get("provider_group"),
+                    experimental=bool(cached_diagnostics.get("experimental", False)),
+                    local_provider=bool(cached_diagnostics.get("local_provider", False)),
+                    slot_id=slot_id,
+                    label=label,
                     cached=True,
                     success=True,
                 ),
-                provider.diagnostics(normalized_settings),
+                cached_diagnostics,
             )
+
         translated_item, diagnostics = await self._translate_with_retry(
             provider=provider,
             source_text=source_text,
@@ -848,9 +542,17 @@ class TranslationEngine:
             target_lang=normalized_target_lang,
             provider_settings=normalized_settings,
             retries=retries,
+            slot_id=slot_id,
+            label=label,
         )
         if translated_item.success and translated_item.text:
-            self.cache_manager.set_translation(source_text, source_lang, normalized_target_lang, translated_item.text)
+            self.cache_manager.set_translation(
+                source_text,
+                source_lang,
+                normalized_target_lang,
+                translated_item.text,
+                provider_name=provider_name,
+            )
         return translated_item, diagnostics
 
     async def translate_targets(
@@ -875,10 +577,10 @@ class TranslationEngine:
             )
 
         items: list[TranslationItem] = []
-        normalized_settings = {str(k): str(v) for k, v in provider_settings.items()}
+        normalized_settings = {str(key): str(value) for key, value in provider_settings.items()}
         batch_diagnostics = provider.diagnostics(normalized_settings)
-
         translated_by_lang: dict[str, tuple[TranslationItem, dict[str, Any]]] = {}
+
         if clean_target_languages:
             async def _translate_target(target_lang: str) -> tuple[str, TranslationItem, dict[str, Any]]:
                 translated_item, item_diagnostics = await self.translate_target(
@@ -926,6 +628,8 @@ class TranslationEngine:
         target_lang: str,
         provider_settings: dict[str, str],
         retries: int,
+        slot_id: str | None = None,
+        label: str | None = None,
     ) -> tuple[TranslationItem, dict[str, Any]]:
         attempt = 0
         last_error = "Translation failed."
@@ -943,6 +647,11 @@ class TranslationEngine:
                         target_lang=target_lang,
                         text=translated,
                         provider=provider.info.name,
+                        provider_group=diagnostics.get("provider_group"),
+                        experimental=bool(diagnostics.get("experimental", False)),
+                        local_provider=bool(diagnostics.get("local_provider", False)),
+                        slot_id=slot_id,
+                        label=label,
                         cached=False,
                         success=True,
                     ),
@@ -964,6 +673,11 @@ class TranslationEngine:
                 target_lang=target_lang,
                 text="",
                 provider=provider.info.name,
+                provider_group=last_diagnostics.get("provider_group"),
+                experimental=bool(last_diagnostics.get("experimental", False)),
+                local_provider=bool(last_diagnostics.get("local_provider", False)),
+                slot_id=slot_id,
+                label=label,
                 cached=False,
                 success=False,
                 error=last_error,
@@ -988,6 +702,9 @@ class TranslationEngine:
                     target_lang=target_lang,
                     text="",
                     provider=provider_name,
+                    provider_group=PROVIDER_GROUP_EXPERIMENTAL,
+                    experimental=True,
+                    local_provider=False,
                     cached=False,
                     success=False,
                     error=error,
@@ -1000,3 +717,24 @@ class TranslationEngine:
             used_default_prompt=False,
             status_message=error,
         )
+
+
+__all__ = [
+    "AzureTranslatorProvider",
+    "BaseTranslationProvider",
+    "DeepLProvider",
+    "FreeWebTranslateProvider",
+    "GoogleCloudTranslationV3Provider",
+    "GoogleGasUrlProvider",
+    "GoogleTranslateV2Provider",
+    "GoogleWebProvider",
+    "LibreTranslateProvider",
+    "OpenAICompatibleChatProvider",
+    "PreparedTranslationLine",
+    "PreparedTranslationRequest",
+    "PublicLibreTranslateMirrorProvider",
+    "TranslationBatch",
+    "TranslationEngine",
+    "TranslationProviderError",
+    "TranslationProviderInfo",
+]

@@ -187,15 +187,17 @@ flowchart LR
   - `providers/azure.py`
   - `providers/deepl.py`
   - `providers/libretranslate.py`
+  - `providers/public_mirrors.py`
+  - `providers/google_gas.py`
   - `providers/openai_compatible.py`
   - `providers/experimental_google_web.py`
 
-Physical extraction has started, but is not complete:
+Current translation package state:
 
-- `backend/asr/parakeet/model_installer.py` now contains the real Parakeet model installer/constants;
-- `backend/translation/base.py`, `providers/google_v2.py`, and `providers/google_v3.py` now contain real implementations;
-- `backend/core/parakeet_provider.py` and `backend/core/translation_engine.py` remain stable compatibility entrypoints;
-- several package modules still exist as compatibility shims while extraction continues.
+- all concrete translation providers now live under `backend/translation/providers/`;
+- `backend/translation/registry.py` builds the default provider registry directly from those provider modules;
+- `backend/core/translation_engine.py` remains the compatibility entrypoint and request-preparation layer, but no longer owns concrete provider implementations;
+- translation runtime preparation is now slot-aware: each visible translation slot carries its own `slot_id`, `target_lang`, and provider selection.
 
 ### 4.7 Schemas
 
@@ -261,6 +263,8 @@ Physical extraction has started, but is not complete:
 
 - provider rename to `official_eu_parakeet_low_latency`
 - cleanup path for removed backend ASR settings so old configs fall back to supported Parakeet defaults
+- translation config v6 adds `translation.lines` while preserving legacy `translation.provider` and `translation.target_languages`
+- legacy `subtitle_output.display_order` language entries are migrated to stable translation slot ids such as `translation_1`
 
 Это важно для:
 
@@ -505,6 +509,13 @@ Core responsibilities:
 - suppressing duplicate runtime noise;
 - reducing stale translation/source mismatch risk;
 - keeping overlay updates aligned with source segment lifecycle.
+
+Current translation-slot invariants:
+
+- translation identity is now `slot_id` first, not `target_lang`;
+- duplicate target languages are valid as long as slots differ;
+- overlay/display ordering uses stable slot ids such as `translation_1 .. translation_5`;
+- provider settings remain global per provider under `translation.provider_settings`, while each slot selects which provider uses those settings.
 
 ## 16. ASR Provider Surface
 

@@ -18,6 +18,107 @@ function removedLegacyProviderPreference() {
   return ["google", "legacy", "http", "experimental"].join("_");
 }
 
+const CANONICAL_TRANSLATION_SLOTS = ["translation_1", "translation_2", "translation_3", "translation_4", "translation_5"];
+
+function normalizeTranslationProvider(value, fallback = "google_translate_v2") {
+  const provider = String(value || fallback).trim();
+  return PROVIDERS[provider] ? provider : fallback;
+}
+
+function normalizeTranslationLines(lines, fallbackProvider, targetLanguages) {
+  const normalizedLines = [];
+  if (Array.isArray(lines) && lines.length) {
+    lines.forEach((rawLine, index) => {
+      if (!rawLine || typeof rawLine !== "object") {
+        return;
+      }
+      let slotId = String(rawLine.slot_id || "").trim().toLowerCase();
+      if (!CANONICAL_TRANSLATION_SLOTS.includes(slotId)) {
+        slotId = CANONICAL_TRANSLATION_SLOTS[index] || "";
+      }
+      const targetLang = String(rawLine.target_lang || "").trim().toLowerCase();
+      if (!slotId || !targetLang) {
+        return;
+      }
+      normalizedLines.push({
+        slot_id: slotId,
+        enabled: rawLine.enabled !== false,
+        target_lang: targetLang,
+        provider: normalizeTranslationProvider(rawLine.provider, fallbackProvider),
+        label: String(rawLine.label || "").trim() || targetLang.toUpperCase(),
+      });
+    });
+  }
+  if (!normalizedLines.length) {
+    const fallbackTargets = Array.isArray(targetLanguages) && targetLanguages.length ? targetLanguages : ["en"];
+    fallbackTargets.slice(0, CANONICAL_TRANSLATION_SLOTS.length).forEach((targetLang, index) => {
+      normalizedLines.push({
+        slot_id: CANONICAL_TRANSLATION_SLOTS[index],
+        enabled: true,
+        target_lang: String(targetLang || "").trim().toLowerCase() || "en",
+        provider: fallbackProvider,
+        label: String(targetLang || "en").trim().toUpperCase(),
+      });
+    });
+  }
+  return normalizedLines.slice(0, CANONICAL_TRANSLATION_SLOTS.length);
+}
+
+function buildCompatTargetLanguages(lines) {
+  const seen = new Set();
+  return (Array.isArray(lines) ? lines : [])
+    .filter((line) => line?.enabled !== false)
+    .map((line) => String(line?.target_lang || "").trim().toLowerCase())
+    .filter((targetLang) => {
+      if (!targetLang || seen.has(targetLang)) {
+        return false;
+      }
+      seen.add(targetLang);
+      return true;
+    });
+}
+
+function normalizeDisplayOrderFromLines(displayOrder, lines) {
+  const enabledLines = (Array.isArray(lines) ? lines : []).filter((line) => line?.enabled !== false);
+  const enabledSlots = enabledLines.map((line) => String(line.slot_id || "").trim().toLowerCase()).filter(Boolean);
+  const languageToSlot = {};
+  enabledLines.forEach((line) => {
+    const targetLang = String(line.target_lang || "").trim().toLowerCase();
+    if (targetLang && !languageToSlot[targetLang]) {
+      languageToSlot[targetLang] = String(line.slot_id || "").trim().toLowerCase();
+    }
+  });
+  const normalizedOrder = [];
+  (Array.isArray(displayOrder) ? displayOrder : []).forEach((item) => {
+    const value = String(item || "").trim().toLowerCase();
+    if (value === "source") {
+      if (!normalizedOrder.includes(value)) {
+        normalizedOrder.push(value);
+      }
+      return;
+    }
+    if (enabledSlots.includes(value)) {
+      if (!normalizedOrder.includes(value)) {
+        normalizedOrder.push(value);
+      }
+      return;
+    }
+    const mappedSlot = languageToSlot[value];
+    if (mappedSlot && !normalizedOrder.includes(mappedSlot)) {
+      normalizedOrder.push(mappedSlot);
+    }
+  });
+  if (!normalizedOrder.includes("source")) {
+    normalizedOrder.push("source");
+  }
+  enabledSlots.forEach((slotId) => {
+    if (!normalizedOrder.includes(slotId)) {
+      normalizedOrder.push(slotId);
+    }
+  });
+  return normalizedOrder;
+}
+
 function normalizeUiLanguage(value) {
   const current = String(value || "").trim().toLowerCase();
   return ["en", "ru"].includes(current) ? current : "en";
@@ -300,9 +401,7 @@ export function normalizeConfigShape(config) {
   normalized.asr.realtime.max_segment_ms = normalized.subtitle_lifecycle.hard_max_phrase_ms;
 
   const translation = normalized.translation;
-  if (!translation.provider || !PROVIDERS[translation.provider]) {
-    translation.provider = "google_translate_v2";
-  }
+  translation.provider = normalizeTranslationProvider(translation.provider, "google_translate_v2");
   translation.enabled = Boolean(translation.enabled);
   if (!Array.isArray(translation.target_languages)) {
     translation.target_languages = Array.isArray(normalized.targets) ? normalized.targets : ["en"];
@@ -378,6 +477,12 @@ export function normalizeConfigShape(config) {
       PROVIDERS.public_libretranslate_mirror.apiUrlPlaceholder
     );
   translation.provider_settings.free_web_translate = {};
+  translation.lines = normalizeTranslationLines(
+    translation.lines,
+    translation.provider,
+    translation.target_languages
+  );
+  translation.target_languages = buildCompatTargetLanguages(translation.lines);
 
   normalized.targets = [...translation.target_languages];
 
@@ -388,20 +493,10 @@ export function normalizeConfigShape(config) {
     0,
     Math.min(5, Number.parseInt(String(subtitleOutput.max_translation_languages ?? 2), 10) || 0)
   );
-  if (!Array.isArray(subtitleOutput.display_order)) {
-    subtitleOutput.display_order = ["source", ...translation.target_languages];
-  }
-  subtitleOutput.display_order = subtitleOutput.display_order
-    .map((item) => String(item || "").toLowerCase())
-    .filter((item, index, array) => (item === "source" || translation.target_languages.includes(item)) && array.indexOf(item) === index);
-  if (!subtitleOutput.display_order.includes("source")) {
-    subtitleOutput.display_order.push("source");
-  }
-  translation.target_languages.forEach((code) => {
-    if (!subtitleOutput.display_order.includes(code)) {
-      subtitleOutput.display_order.push(code);
-    }
-  });
+  subtitleOutput.display_order = normalizeDisplayOrderFromLines(
+    subtitleOutput.display_order,
+    translation.lines
+  );
 
   if (!normalized.subtitle_style || typeof normalized.subtitle_style !== "object") {
     normalized.subtitle_style = {};

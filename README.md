@@ -188,12 +188,15 @@ Visual layout was not redesigned in `0.3.0`; the major change is the internal mo
 ### Translation
 
 - Enable/disable translation.
-- Select provider.
+- Select a default provider for new lines and legacy fallback behavior.
 - Configure provider credentials/endpoints/model/prompt where applicable.
 - `Google Cloud Translation - Advanced (v3)` is available as a separate provider and uses `project_id` plus OAuth access token instead of a v2 API key.
-- Manage target language list and order.
+- Configure up to five translation lines with their own enabled state, target language, provider, and optional label.
+- Duplicate target languages are supported when they live in different translation slots.
+- Overlay and preview ordering now follow stable slot ids such as `translation_1 .. translation_5`, not target language alone.
 - Review latest translated output.
-- Translation now stays off the live source-final path: source finals are published first, translation fan-out runs asynchronously per target language, and stale jobs are dropped when no longer lifecycle-relevant.
+- Provider settings remain global per provider under `translation.provider_settings`; API keys are not duplicated into per-line config.
+- Translation now stays off the live source-final path: source finals are published first, translation fan-out runs asynchronously per configured line, and stale jobs are dropped when no longer lifecycle-relevant.
 
 ### Subtitles
 
@@ -345,6 +348,8 @@ Overlay remains a separate lightweight page for OBS Browser Source and auto-reco
 - config normalization now lives under `backend/config/` instead of one monolithic `backend/config.py`;
 - profiles use the same migration/normalization pipeline;
 - generated schema lives at `backend/data/config.schema.json`;
+- `translation.lines` is the new slot-aware translation config surface, while legacy `translation.provider` and `translation.target_languages` stay for compatibility;
+- legacy language-based `subtitle_output.display_order` values are migrated to slot ids like `translation_1`;
 - `/api/runtime/start` can apply an optional normalized `config_payload` snapshot for runtime-only changes without persisting `user-data/config.json`;
 - `backend/versioning.py` remains the single source of truth for the app version.
 

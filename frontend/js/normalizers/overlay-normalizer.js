@@ -13,6 +13,10 @@ export function normalizeOverlayPayload(payload) {
     visible_items: (Array.isArray(current.visible_items) ? current.visible_items : []).map((item) => ({
       kind: String(item?.kind || "source"),
       lang: String(item?.lang || ""),
+      slot_id: String(item?.slot_id || ""),
+      target_lang: String(item?.target_lang || ""),
+      label: String(item?.label || ""),
+      provider: String(item?.provider || ""),
       text: String(item?.text || ""),
       style_slot: String(item?.style_slot || ""),
     })),

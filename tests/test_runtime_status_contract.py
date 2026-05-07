@@ -11,11 +11,24 @@ from helpers import AppStateSandbox
 class RuntimeStatusContractTests(unittest.TestCase):
     def test_runtime_status_exposes_typed_runtime_sections(self) -> None:
         config = {
-            "config_version": 5,
+            "config_version": 6,
             "source_lang": "ru",
             "asr": {"mode": "local", "provider_preference": "official_eu_parakeet_low_latency"},
-            "translation": {"enabled": True, "provider": "google_translate_v2", "target_languages": ["en"]},
-            "subtitle_output": {"show_source": True, "show_translations": True, "display_order": ["source", "en"]},
+            "translation": {
+                "enabled": True,
+                "provider": "google_translate_v2",
+                "target_languages": ["en"],
+                "lines": [
+                    {
+                        "slot_id": "translation_1",
+                        "enabled": True,
+                        "target_lang": "en",
+                        "provider": "google_translate_v2",
+                        "label": "EN",
+                    }
+                ],
+            },
+            "subtitle_output": {"show_source": True, "show_translations": True, "display_order": ["source", "translation_1"]},
             "overlay": {"preset": "single", "compact": False},
             "remote": {"enabled": False, "role": "disabled"},
         }
@@ -38,6 +51,7 @@ class RuntimeStatusContractTests(unittest.TestCase):
         self.assertEqual(payload["phase"], "idle")
         self.assertEqual(payload["overlay"]["preset"], "single")
         self.assertEqual(payload["translation"]["target_languages"], ["en"])
+        self.assertEqual(payload["translation"]["lines"][0]["slot_id"], "translation_1")
         self.assertEqual(payload["active_config_source"], "disk")
         self.assertTrue(payload["active_config_persisted"])
         self.assertIsInstance(payload["active_config_hash"], str)

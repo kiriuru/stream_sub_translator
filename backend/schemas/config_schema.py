@@ -5,11 +5,28 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-CURRENT_CONFIG_VERSION = 5
+CURRENT_CONFIG_VERSION = 6
 
 
 class SchemaModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
+
+
+SupportedTranslationProvider = Literal[
+    "google_translate_v2",
+    "google_cloud_translation_v3",
+    "google_gas_url",
+    "google_web",
+    "azure_translator",
+    "deepl",
+    "libretranslate",
+    "openai",
+    "openrouter",
+    "lm_studio",
+    "ollama",
+    "public_libretranslate_mirror",
+    "free_web_translate",
+]
 
 
 class UiConfig(SchemaModel):
@@ -233,35 +250,38 @@ class TranslationProviderSettings(SchemaModel):
     free_web_translate: FreeWebTranslateProviderSettings = Field(default_factory=FreeWebTranslateProviderSettings)
 
 
+class TranslationLineConfig(SchemaModel):
+    slot_id: Literal["translation_1", "translation_2", "translation_3", "translation_4", "translation_5"]
+    enabled: bool = True
+    target_lang: str
+    provider: SupportedTranslationProvider = "google_translate_v2"
+    label: str = ""
+
+
 class TranslationConfig(SchemaModel):
     enabled: bool = False
-    provider: Literal[
-        "google_translate_v2",
-        "google_cloud_translation_v3",
-        "google_gas_url",
-        "google_web",
-        "azure_translator",
-        "deepl",
-        "libretranslate",
-        "openai",
-        "openrouter",
-        "lm_studio",
-        "ollama",
-        "public_libretranslate_mirror",
-        "free_web_translate",
-    ] = "google_translate_v2"
+    provider: SupportedTranslationProvider = "google_translate_v2"
     target_languages: list[str] = Field(default_factory=lambda: ["en"])
     timeout_ms: int = 10000
     queue_max_size: int = 8
     max_concurrent_jobs: int = 2
     provider_settings: TranslationProviderSettings = Field(default_factory=TranslationProviderSettings)
+    lines: list[TranslationLineConfig] = Field(default_factory=lambda: [
+        TranslationLineConfig(
+            slot_id="translation_1",
+            enabled=True,
+            target_lang="en",
+            provider="google_translate_v2",
+            label="EN",
+        )
+    ])
 
 
 class SubtitleOutputConfig(SchemaModel):
     show_source: bool = True
     show_translations: bool = True
     max_translation_languages: int = 2
-    display_order: list[str] = Field(default_factory=lambda: ["source", "en"])
+    display_order: list[str] = Field(default_factory=lambda: ["source", "translation_1"])
 
 
 class SubtitleLifecycleConfig(SchemaModel):

@@ -69,6 +69,9 @@ class SubtitleLineItem(SchemaModel):
     label: str
     text: str
     style_slot: str | None = None
+    slot_id: str | None = None
+    target_lang: str | None = None
+    provider: str | None = None
     visible: bool = True
     success: bool = True
     error: str | None = None

@@ -3,6 +3,8 @@ import { LANGUAGES, PROVIDERS } from "../dashboard/constants.js";
 import { escapeHtml, getCurrentLocale, getLanguageLabel, getProviderMeta, setElementVisibility, t } from "../dashboard/helpers.js";
 import { normalizeDisplayOrder } from "../normalizers/translation-normalizer.js";
 
+const CANONICAL_TRANSLATION_SLOTS = ["translation_1", "translation_2", "translation_3", "translation_4", "translation_5"];
+
 function getTranslationProviderSettingValue(providerName, providerSettings, fieldName) {
   if (providerName === "google_cloud_translation_v3") {
     if (fieldName === "api_key") {
@@ -34,6 +36,60 @@ function setTranslationProviderSettingValue(providerName, targetSettings, fieldN
     }
   }
   targetSettings[fieldName] = String(value || "");
+}
+
+function getLineMap(lines) {
+  const map = new Map();
+  (Array.isArray(lines) ? lines : []).forEach((line) => {
+    const slotId = String(line?.slot_id || "").toLowerCase();
+    if (slotId) {
+      map.set(slotId, line);
+    }
+  });
+  return map;
+}
+
+function getOrderedLines(config) {
+  const translation = config?.translation || {};
+  const lineMap = getLineMap(translation.lines);
+  const displayOrder = Array.isArray(config?.subtitle_output?.display_order) ? config.subtitle_output.display_order : [];
+  const ordered = [];
+  displayOrder.forEach((item) => {
+    const slotId = String(item || "").toLowerCase();
+    if (slotId === "source") {
+      return;
+    }
+    const line = lineMap.get(slotId);
+    if (line && !ordered.some((entry) => entry.slot_id === slotId)) {
+      ordered.push(line);
+    }
+  });
+  CANONICAL_TRANSLATION_SLOTS.forEach((slotId) => {
+    const line = lineMap.get(slotId);
+    if (line && !ordered.some((entry) => entry.slot_id === slotId)) {
+      ordered.push(line);
+    }
+  });
+  return ordered;
+}
+
+function getSelectedLine(config, selectedSlotId) {
+  return getLineMap(config?.translation?.lines).get(String(selectedSlotId || "").toLowerCase()) || null;
+}
+
+function buildProviderOptions() {
+  const groups = {};
+  Object.entries(PROVIDERS).forEach(([providerName]) => {
+    const meta = getProviderMeta(providerName);
+    groups[meta.group] = groups[meta.group] || [];
+    groups[meta.group].push({ providerName, meta });
+  });
+  return Object.entries(groups)
+    .map(([groupName, items]) => {
+      const options = items.map(({ providerName, meta }) => `<option value="${providerName}">${meta.label}</option>`).join("");
+      return `<optgroup label="${groupName}">${options}</optgroup>`;
+    })
+    .join("");
 }
 
 export function mountTranslationPanel(root, { store, actions, logger }) {
@@ -75,7 +131,7 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
     results: root.querySelector("#translation-results"),
   };
 
-  function syncConfigFromControls() {
+  function syncGlobalProviderConfig() {
     actions.mutateConfig((draft) => {
       draft.translation.enabled = Boolean(elements.enabled?.checked);
       const provider = elements.provider?.value && PROVIDERS[elements.provider.value]
@@ -108,14 +164,18 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
     const translationsHtml = entry.translations.length
       ? entry.translations
           .map((item) => {
-            const meta = `${getLanguageLabel(item.target_lang)}${item.cached ? " (cached)" : ""}`;
+            const providerMeta = item.provider ? getProviderMeta(item.provider) : null;
+            const languageLabel = item.label || getLanguageLabel(item.target_lang);
+            const slotLabel = item.slot_id ? ` | ${item.slot_id}` : "";
+            const providerLabel = providerMeta ? ` | ${providerMeta.label}` : "";
+            const meta = `${languageLabel}${slotLabel}${providerLabel}${item.cached ? " (cached)" : ""}`;
             const content = item.success
               ? escapeHtml(item.text)
               : `<span class="translation-error">${escapeHtml(item.error || (getCurrentLocale() === "ru" ? "Ошибка перевода." : "Translation failed."))}</span>`;
             return `<p class="label">${escapeHtml(meta)}</p><p>${content}</p>`;
           })
           .join("")
-      : `<p class="muted">${escapeHtml(getCurrentLocale() === "ru" ? "Перевод выключен или не настроены целевые языки." : "Translation disabled or no target languages configured.")}</p>`;
+      : `<p class="muted">${escapeHtml(getCurrentLocale() === "ru" ? "Перевод выключен или не настроены целевые линии." : "Translation disabled or no translation lines configured.")}</p>`;
     elements.results.innerHTML = `
       <div class="translation-card">
         <h3>${escapeHtml(getCurrentLocale() === "ru" ? `Сегмент ${entry.sequence}` : `Segment ${entry.sequence}`)}</h3>
@@ -128,20 +188,102 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
     `;
   }
 
+  function renderLineEditor(snapshot) {
+    if (!elements.languageOrder) {
+      return;
+    }
+    const config = snapshot.config;
+    const selectedSlotId = String(snapshot.ui.selectedTranslationLanguage || "");
+    const orderedLines = getOrderedLines(config);
+    const providerOptions = buildProviderOptions();
+
+    elements.languageOrder.innerHTML = "";
+    orderedLines.forEach((line) => {
+      const slotId = String(line.slot_id || "").toLowerCase();
+      const row = document.createElement("li");
+      row.dataset.code = slotId;
+      row.className = "translation-line-row";
+      row.classList.toggle("active", slotId === selectedSlotId);
+      row.innerHTML = `
+        <label class="checkbox-row">
+          <input type="checkbox" data-role="enabled" ${line.enabled !== false ? "checked" : ""} />
+          <span>${escapeHtml(slotId)}</span>
+        </label>
+        <select data-role="target_lang">${LANGUAGES.map((item) => `<option value="${item.code}" ${item.code === line.target_lang ? "selected" : ""}>${item.label}</option>`).join("")}</select>
+        <select data-role="provider">${providerOptions}</select>
+        <input type="text" data-role="label" value="${escapeHtml(line.label || "")}" placeholder="Label" />
+      `;
+      row.addEventListener("click", () => actions.updateTranslationSelection(slotId));
+
+      const enabledInput = row.querySelector('[data-role="enabled"]');
+      const targetLangInput = row.querySelector('[data-role="target_lang"]');
+      const providerInput = row.querySelector('[data-role="provider"]');
+      const labelInput = row.querySelector('[data-role="label"]');
+
+      if (providerInput) {
+        providerInput.value = line.provider || config.translation.provider;
+      }
+
+      enabledInput?.addEventListener("change", (event) => {
+        event.stopPropagation();
+        actions.mutateConfig((draft) => {
+          const currentLine = getLineMap(draft.translation.lines).get(slotId);
+          if (!currentLine) {
+            return;
+          }
+          currentLine.enabled = Boolean(enabledInput.checked);
+          if (currentLine.enabled) {
+            if (!draft.subtitle_output.display_order.includes(slotId)) {
+              draft.subtitle_output.display_order = normalizeDisplayOrder([
+                ...draft.subtitle_output.display_order,
+                slotId,
+              ]);
+            }
+          } else {
+            draft.subtitle_output.display_order = draft.subtitle_output.display_order.filter((item) => item !== slotId);
+          }
+        });
+      });
+      targetLangInput?.addEventListener("change", (event) => {
+        event.stopPropagation();
+        actions.mutateConfig((draft) => {
+          const currentLine = getLineMap(draft.translation.lines).get(slotId);
+          if (!currentLine) {
+            return;
+          }
+          const previousTarget = String(currentLine.target_lang || "").toUpperCase();
+          currentLine.target_lang = String(targetLangInput.value || "en").toLowerCase();
+          if (!String(currentLine.label || "").trim() || String(currentLine.label).trim().toUpperCase() === previousTarget) {
+            currentLine.label = currentLine.target_lang.toUpperCase();
+          }
+        });
+      });
+      providerInput?.addEventListener("change", (event) => {
+        event.stopPropagation();
+        actions.mutateConfig((draft) => {
+          const currentLine = getLineMap(draft.translation.lines).get(slotId);
+          if (currentLine) {
+            currentLine.provider = providerInput.value;
+          }
+        });
+      });
+      labelInput?.addEventListener("input", (event) => {
+        event.stopPropagation();
+        actions.mutateConfig((draft) => {
+          const currentLine = getLineMap(draft.translation.lines).get(slotId);
+          if (currentLine) {
+            currentLine.label = String(labelInput.value || "");
+          }
+        });
+      });
+
+      elements.languageOrder.appendChild(row);
+    });
+  }
+
   function render(snapshot) {
     if (elements.provider && !elements.provider.options.length) {
-      const groups = {};
-      Object.entries(PROVIDERS).forEach(([providerName]) => {
-        const meta = getProviderMeta(providerName);
-        groups[meta.group] = groups[meta.group] || [];
-        groups[meta.group].push({ providerName, meta });
-      });
-      elements.provider.innerHTML = Object.entries(groups)
-        .map(([groupName, items]) => {
-          const options = items.map(({ providerName, meta }) => `<option value="${providerName}">${meta.label}</option>`).join("");
-          return `<optgroup label="${groupName}">${options}</optgroup>`;
-        })
-        .join("");
+      elements.provider.innerHTML = buildProviderOptions();
     }
     if (elements.languageSelect && !elements.languageSelect.options.length) {
       elements.languageSelect.innerHTML = LANGUAGES.map((item) => `<option value="${item.code}">${item.label}</option>`).join("");
@@ -189,29 +331,22 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
       elements.providerHint.textContent = providerMeta.hint;
     }
     if (elements.providerStatus) {
-      elements.providerStatus.textContent = providerMeta.status;
+      const usedProviders = Array.from(new Set((translation.lines || []).filter((line) => line.enabled !== false).map((line) => line.provider)));
+      elements.providerStatus.textContent = usedProviders.length > 1
+        ? `${providerMeta.status} | ${getCurrentLocale() === "ru" ? "Используются провайдеры:" : "Providers in use:"} ${usedProviders.join(", ")}`
+        : providerMeta.status;
     }
-    if (elements.languageOrder) {
-      elements.languageOrder.innerHTML = "";
-      translation.target_languages.forEach((code) => {
-        const li = document.createElement("li");
-        li.dataset.code = code;
-        li.textContent = `${getLanguageLabel(code)} (${code})`;
-        li.classList.toggle("active", code === snapshot.ui.selectedTranslationLanguage);
-        li.addEventListener("click", () => actions.updateTranslationSelection(code));
-        elements.languageOrder.appendChild(li);
-      });
-    }
+    renderLineEditor(snapshot);
     renderResults(snapshot);
   }
 
   elements.enabled?.addEventListener("change", () => {
-    syncConfigFromControls();
+    syncGlobalProviderConfig();
     logger(`[translation] ${elements.enabled.checked ? "enabled" : "disabled"}`);
   });
   elements.provider?.addEventListener("change", () => {
-    syncConfigFromControls();
-    logger(`[translation] provider -> ${elements.provider.value}`);
+    syncGlobalProviderConfig();
+    logger(`[translation] default provider -> ${elements.provider.value}`);
   });
   [
     elements.apiKey,
@@ -224,7 +359,7 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
     elements.prompt,
   ]
     .filter(Boolean)
-    .forEach((element) => element.addEventListener("input", syncConfigFromControls));
+    .forEach((element) => element.addEventListener("input", syncGlobalProviderConfig));
   elements.apiKeyToggle?.addEventListener("click", () => {
     if (!elements.apiKey) {
       return;
@@ -233,67 +368,82 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
     elements.apiKeyToggle.textContent = elements.apiKey.type === "password" ? t("security.show") : t("security.hide");
   });
   elements.addBtn?.addEventListener("click", () => {
-    const code = elements.languageSelect?.value;
-    if (!code) {
-      return;
-    }
+    const code = elements.languageSelect?.value || "en";
+    let addedSlotId = null;
     actions.mutateConfig((draft) => {
-      if (!draft.translation.target_languages.includes(code)) {
-        draft.translation.target_languages.push(code);
+      const lineMap = getLineMap(draft.translation.lines);
+      const slotId = CANONICAL_TRANSLATION_SLOTS.find((candidate) => {
+        const line = lineMap.get(candidate);
+        return !line || line.enabled === false;
+      });
+      if (!slotId) {
+        return;
       }
-      draft.targets = [...draft.translation.target_languages];
+      const line = lineMap.get(slotId);
+      const nextLine = {
+        slot_id: slotId,
+        enabled: true,
+        target_lang: code,
+        provider: draft.translation.provider,
+        label: code.toUpperCase(),
+      };
+      if (line) {
+        Object.assign(line, nextLine);
+      } else {
+        draft.translation.lines.push(nextLine);
+      }
       draft.subtitle_output.display_order = normalizeDisplayOrder([
         ...draft.subtitle_output.display_order,
-        code,
+        slotId,
       ]);
-      if (!draft.subtitle_output.display_order.includes("source")) {
-        draft.subtitle_output.display_order.push("source");
-      }
+      addedSlotId = slotId;
     });
-    actions.updateTranslationSelection(code);
-    logger(`[translation] added target ${code}`);
+    if (addedSlotId) {
+      actions.updateTranslationSelection(addedSlotId);
+      logger(`[translation] added line ${addedSlotId} -> ${code}`);
+    }
   });
   elements.removeBtn?.addEventListener("click", () => {
-    const selected = store.getState().ui.selectedTranslationLanguage;
-    if (!selected) {
+    const selectedSlotId = String(store.getState().ui.selectedTranslationLanguage || "").toLowerCase();
+    if (!selectedSlotId) {
       return;
     }
     actions.mutateConfig((draft) => {
-      draft.translation.target_languages = draft.translation.target_languages.filter((item) => item !== selected);
-      draft.targets = [...draft.translation.target_languages];
-      draft.subtitle_output.display_order = draft.subtitle_output.display_order.filter((item) => item === "source" || draft.translation.target_languages.includes(item));
+      const line = getLineMap(draft.translation.lines).get(selectedSlotId);
+      if (line) {
+        line.enabled = false;
+      }
+      draft.subtitle_output.display_order = draft.subtitle_output.display_order.filter((item) => item !== selectedSlotId);
     });
-    logger("[translation] removed target language");
+    logger(`[translation] disabled line ${selectedSlotId}`);
   });
   elements.upBtn?.addEventListener("click", () => {
-    const snapshot = store.getState();
-    const selected = snapshot.ui.selectedTranslationLanguage;
-    if (!selected) {
+    const selectedSlotId = String(store.getState().ui.selectedTranslationLanguage || "").toLowerCase();
+    if (!selectedSlotId) {
       return;
     }
     actions.mutateConfig((draft) => {
-      const items = draft.translation.target_languages;
-      const index = items.indexOf(selected);
+      const order = Array.isArray(draft.subtitle_output.display_order) ? draft.subtitle_output.display_order : [];
+      const index = order.indexOf(selectedSlotId);
       if (index > 0) {
-        [items[index - 1], items[index]] = [items[index], items[index - 1]];
+        [order[index - 1], order[index]] = [order[index], order[index - 1]];
       }
     });
-    logger("[translation] moved target up");
+    logger(`[translation] moved line up ${selectedSlotId}`);
   });
   elements.downBtn?.addEventListener("click", () => {
-    const snapshot = store.getState();
-    const selected = snapshot.ui.selectedTranslationLanguage;
-    if (!selected) {
+    const selectedSlotId = String(store.getState().ui.selectedTranslationLanguage || "").toLowerCase();
+    if (!selectedSlotId) {
       return;
     }
     actions.mutateConfig((draft) => {
-      const items = draft.translation.target_languages;
-      const index = items.indexOf(selected);
-      if (index >= 0 && index < items.length - 1) {
-        [items[index + 1], items[index]] = [items[index], items[index + 1]];
+      const order = Array.isArray(draft.subtitle_output.display_order) ? draft.subtitle_output.display_order : [];
+      const index = order.indexOf(selectedSlotId);
+      if (index >= 0 && index < order.length - 1) {
+        [order[index + 1], order[index]] = [order[index], order[index + 1]];
       }
     });
-    logger("[translation] moved target down");
+    logger(`[translation] moved line down ${selectedSlotId}`);
   });
 
   render(store.getState());

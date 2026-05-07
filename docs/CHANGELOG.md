@@ -13,8 +13,17 @@ Post-`0.3.0` branch follow-up focused on internal modularization and runtime sta
 - monolithic `backend/config.py` has been replaced by the `backend/config/` package with explicit `defaults.py`, `secrets.py`, and domain normalizers under `backend/config/normalizers/`;
 - `RuntimeOrchestrator` now physically lives in `backend/core/runtime_orchestrator.py`, while `backend/core/subtitle_router.py` keeps subtitle lifecycle logic and a compatibility-only import shim;
 - runtime orchestration is now split further across `backend/core/runtime/` helpers, with `backend/core/runtime_orchestrator.py` used directly by bootstrap wiring;
-- physical extraction has started for `backend/asr/parakeet/` and `backend/translation/`, while stable compatibility entrypoints remain in `backend/core/parakeet_provider.py` and `backend/core/translation_engine.py`;
+- translation provider extraction is now completed for the current provider set under `backend/translation/providers/`, while `backend/core/translation_engine.py` remains the compatibility engine/shim entrypoint;
 - the docs now describe the real launcher profile surface: `Quick Start (Browser Speech)`, `NVIDIA GPU (CUDA)`, `CPU-only`, `Remote Controller`, and `Remote Worker`.
+
+### Translation follow-up
+
+- translation configuration now supports per-line provider selection through `translation.lines`;
+- each translation line keeps a stable `slot_id` such as `translation_1`, and that slot id is now the primary identity for overlay ordering and rendering;
+- duplicate target languages are now supported as long as the lines use different slots;
+- translation cache keys now include `provider_name`, preventing collisions when two providers translate the same source into the same language;
+- legacy `translation.provider` and `translation.target_languages` are preserved for compatibility and are regenerated from normalized slot configuration when needed;
+- legacy `subtitle_output.display_order` entries based on language codes are migrated to translation slot ids.
 
 ### Runtime start contract
 

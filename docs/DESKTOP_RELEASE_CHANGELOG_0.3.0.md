@@ -7,6 +7,10 @@ Delta changelog относительно `0.2.9.2`.
 
 Post-release follow-up for the current `main` branch now lives in [CHANGELOG.md](./CHANGELOG.md) under `Unreleased` so the shipped `0.3.0` notes stay release-specific.
 
+Current note:
+
+- per-translation-line provider selection, slot-based translation identity, and the backend translation provider extraction cleanup are post-`0.3.0` main-branch follow-up work and are documented in [CHANGELOG.md](./CHANGELOG.md) under `Unreleased`, not as part of the shipped `0.3.0` delta itself.
+
 ## Кратко
 
 `0.3.0` — это не patch-релиз, а крупный архитектурный релиз desktop-продукта.

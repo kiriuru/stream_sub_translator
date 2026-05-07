@@ -14,12 +14,21 @@ def _base_config() -> dict[str, Any]:
         "translation": {
             "enabled": True,
             "target_languages": ["en"],
+            "lines": [
+                {
+                    "slot_id": "translation_1",
+                    "enabled": True,
+                    "target_lang": "en",
+                    "provider": "google_translate_v2",
+                    "label": "EN",
+                }
+            ],
         },
         "subtitle_output": {
             "show_source": True,
             "show_translations": True,
             "max_translation_languages": 1,
-            "display_order": ["source", "en"],
+            "display_order": ["source", "translation_1"],
         },
         "overlay": {
             "preset": "stacked",
@@ -114,6 +123,8 @@ class SubtitleRouterTests(unittest.IsolatedAsyncioTestCase):
                 provider="google_translate_v2",
                 translations=[
                     TranslationItem(
+                        slot_id="translation_1",
+                        label="EN",
                         target_lang="en",
                         text="Hello",
                         provider="google_translate_v2",
@@ -132,6 +143,9 @@ class SubtitleRouterTests(unittest.IsolatedAsyncioTestCase):
             [item["text"] for item in payload_after_translation["visible_items"]],
             ["Привет", "Hello"],
         )
+        translation_item = payload_after_translation["visible_items"][1]
+        self.assertEqual(translation_item["slot_id"], "translation_1")
+        self.assertEqual(translation_item["style_slot"], "translation_1")
 
     async def test_new_partial_keeps_previous_completed_translation_block_visible_until_next_final(self) -> None:
         await self.router.handle_transcript(
@@ -157,6 +171,8 @@ class SubtitleRouterTests(unittest.IsolatedAsyncioTestCase):
                 provider="google_translate_v2",
                 translations=[
                     TranslationItem(
+                        slot_id="translation_1",
+                        label="EN",
                         target_lang="en",
                         text="First phrase",
                         provider="google_translate_v2",
@@ -215,6 +231,8 @@ class SubtitleRouterTests(unittest.IsolatedAsyncioTestCase):
                 provider="google_translate_v2",
                 translations=[
                     TranslationItem(
+                        slot_id="translation_1",
+                        label="EN",
                         target_lang="en",
                         text="First phrase",
                         provider="google_translate_v2",
@@ -232,7 +250,16 @@ class SubtitleRouterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_late_translation_after_source_ttl_reappears_as_translation_only(self) -> None:
         self._config["translation"]["target_languages"] = ["en"]
-        self._config["subtitle_output"]["display_order"] = ["source", "en"]
+        self._config["translation"]["lines"] = [
+            {
+                "slot_id": "translation_1",
+                "enabled": True,
+                "target_lang": "en",
+                "provider": "google_translate_v2",
+                "label": "EN",
+            }
+        ]
+        self._config["subtitle_output"]["display_order"] = ["source", "translation_1"]
         self._config["subtitle_output"]["max_translation_languages"] = 1
         self._config["subtitle_lifecycle"]["completed_source_ttl_ms"] = 500
         self._config["subtitle_lifecycle"]["completed_translation_ttl_ms"] = 1400
@@ -265,6 +292,8 @@ class SubtitleRouterTests(unittest.IsolatedAsyncioTestCase):
                 provider="google_translate_v2",
                 translations=[
                     TranslationItem(
+                        slot_id="translation_1",
+                        label="EN",
                         target_lang="en",
                         text="Late translation",
                         provider="google_translate_v2",
@@ -304,6 +333,8 @@ class SubtitleRouterTests(unittest.IsolatedAsyncioTestCase):
                 provider="google_translate_v2",
                 translations=[
                     TranslationItem(
+                        slot_id="translation_1",
+                        label="EN",
                         target_lang="en",
                         text="",
                         provider="google_translate_v2",
@@ -320,6 +351,79 @@ class SubtitleRouterTests(unittest.IsolatedAsyncioTestCase):
         payload = self._last_payload()
         self.assertEqual(payload["lifecycle_state"], "completed_only")
         self.assertEqual([item["text"] for item in payload["visible_items"]], ["Ошибка перевода"])
+
+    async def test_duplicate_target_languages_render_separate_translation_slots(self) -> None:
+        self._config["translation"]["target_languages"] = ["en"]
+        self._config["translation"]["lines"] = [
+            {
+                "slot_id": "translation_1",
+                "enabled": True,
+                "target_lang": "en",
+                "provider": "google_translate_v2",
+                "label": "EN-G",
+            },
+            {
+                "slot_id": "translation_2",
+                "enabled": True,
+                "target_lang": "en",
+                "provider": "openai",
+                "label": "EN-AI",
+            },
+        ]
+        self._config["subtitle_output"]["max_translation_languages"] = 2
+        self._config["subtitle_output"]["display_order"] = ["source", "translation_2", "translation_1"]
+
+        await self.router.handle_transcript(
+            TranscriptEvent(
+                event="final",
+                text="Два перевода",
+                sequence=4,
+                segment=TranscriptSegment(
+                    segment_id="seg-4",
+                    text="Два перевода",
+                    is_final=True,
+                    source_lang="ru",
+                    provider="local",
+                    sequence=4,
+                ),
+            )
+        )
+        await self.router.handle_translation(
+            TranslationEvent(
+                sequence=4,
+                source_text="Два перевода",
+                source_lang="ru",
+                provider="mixed",
+                translations=[
+                    TranslationItem(
+                        slot_id="translation_1",
+                        label="EN-G",
+                        target_lang="en",
+                        text="Google hello",
+                        provider="google_translate_v2",
+                        success=True,
+                    ),
+                    TranslationItem(
+                        slot_id="translation_2",
+                        label="EN-AI",
+                        target_lang="en",
+                        text="OpenAI hello",
+                        provider="openai",
+                        success=True,
+                    ),
+                ],
+                is_complete=True,
+            )
+        )
+
+        payload = self._last_payload()
+        self.assertEqual(payload["display_order"], ["source", "translation_2", "translation_1"])
+        self.assertEqual(
+            [item["text"] for item in payload["visible_items"]],
+            ["Два перевода", "OpenAI hello", "Google hello"],
+        )
+        translation_slots = [item["slot_id"] for item in payload["visible_items"] if item["kind"] == "translation"]
+        self.assertEqual(translation_slots, ["translation_2", "translation_1"])
 
 
 if __name__ == "__main__":

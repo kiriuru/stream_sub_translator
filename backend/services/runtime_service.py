@@ -195,6 +195,9 @@ class RuntimeService:
                 "target_languages": list(translation_config.get("target_languages", state.translation.target_languages))
                 if isinstance(translation_config, dict)
                 else state.translation.target_languages,
+                "lines": list(translation_config.get("lines", getattr(state.translation, "lines", [])))
+                if isinstance(translation_config, dict)
+                else getattr(state.translation, "lines", []),
                 "diagnostics": state.translation.diagnostics or state.translation_diagnostics,
             }
         )

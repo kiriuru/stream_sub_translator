@@ -11,6 +11,22 @@ PROVIDER_GROUP_LLM = "llm"
 PROVIDER_GROUP_LOCAL_LLM = "local_llm"
 PROVIDER_GROUP_EXPERIMENTAL = "experimental"
 
+SUPPORTED_TRANSLATION_PROVIDERS = (
+    "google_translate_v2",
+    "google_cloud_translation_v3",
+    "google_gas_url",
+    "google_web",
+    "azure_translator",
+    "deepl",
+    "libretranslate",
+    "openai",
+    "openrouter",
+    "lm_studio",
+    "ollama",
+    "public_libretranslate_mirror",
+    "free_web_translate",
+)
+
 
 class TranslationProviderError(Exception):
     def __init__(self, message: str, *, retryable: bool = False) -> None:

@@ -101,6 +101,9 @@ function buildPreviewPayload(state) {
   const visibleItems = [];
   const displayOrder = Array.isArray(config.subtitle_output?.display_order) ? config.subtitle_output.display_order : [];
   const maxTranslations = Math.max(0, Math.min(5, Number(config.subtitle_output?.max_translation_languages || 0)));
+  const lineMap = new Map((Array.isArray(config.translation?.lines) ? config.translation.lines : [])
+    .filter((line) => line?.enabled !== false)
+    .map((line) => [String(line.slot_id || "").toLowerCase(), line]));
   let translationsUsed = 0;
   displayOrder.forEach((code) => {
     if (code === "source") {
@@ -117,11 +120,18 @@ function buildPreviewPayload(state) {
     if (config.subtitle_output?.show_translations === false || translationsUsed >= maxTranslations) {
       return;
     }
+    const line = lineMap.get(String(code || "").toLowerCase());
+    if (!line) {
+      return;
+    }
     visibleItems.push({
       kind: "translation",
-      lang: code,
-      style_slot: `translation_${translationsUsed + 1}`,
-      text: code,
+      lang: String(line.target_lang || code),
+      slot_id: String(line.slot_id || code),
+      target_lang: String(line.target_lang || code),
+      label: String(line.label || String(line.target_lang || code).toUpperCase()),
+      style_slot: String(line.slot_id || code),
+      text: String(line.label || line.target_lang || code),
     });
     translationsUsed += 1;
   });
@@ -181,9 +191,13 @@ export function createDashboardActions({ store, api, logger }) {
       window.I18n.setLocale(locale);
     }
     const nextState = store.getState();
-    const translationSelection = normalized.translation.target_languages.includes(nextState.ui.selectedTranslationLanguage)
+    const enabledTranslationSlots = (Array.isArray(normalized.translation.lines) ? normalized.translation.lines : [])
+      .filter((line) => line?.enabled !== false)
+      .map((line) => String(line.slot_id || "").toLowerCase())
+      .filter(Boolean);
+    const translationSelection = enabledTranslationSlots.includes(nextState.ui.selectedTranslationLanguage)
       ? nextState.ui.selectedTranslationLanguage
-      : normalized.translation.target_languages[0] || null;
+      : enabledTranslationSlots[0] || null;
     const subtitleSelection = normalized.subtitle_output.display_order.includes(nextState.ui.selectedSubtitleOrderItem)
       ? nextState.ui.selectedSubtitleOrderItem
       : normalized.subtitle_output.display_order[0] || null;
@@ -490,13 +504,15 @@ export function createDashboardActions({ store, api, logger }) {
     if (normalized.translations.length) {
       const merged = new Map();
       entry.translations.forEach((item) => {
-        if (item?.target_lang) {
-          merged.set(item.target_lang, item);
+        const identity = String(item?.slot_id || item?.target_lang || "").toLowerCase();
+        if (identity) {
+          merged.set(identity, item);
         }
       });
       normalized.translations.forEach((item) => {
-        if (item?.target_lang) {
-          merged.set(item.target_lang, item);
+        const identity = String(item?.slot_id || item?.target_lang || "").toLowerCase();
+        if (identity) {
+          merged.set(identity, item);
         }
       });
       entry.translations = Array.from(merged.values());

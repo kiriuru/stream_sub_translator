@@ -7,23 +7,11 @@ from backend.config.secrets import (
     normalize_provider_secret,
     normalize_provider_text_value,
 )
+from backend.translation.base import SUPPORTED_TRANSLATION_PROVIDERS
 
 
-_SUPPORTED_PROVIDERS = {
-    "google_translate_v2",
-    "google_cloud_translation_v3",
-    "google_gas_url",
-    "google_web",
-    "azure_translator",
-    "deepl",
-    "libretranslate",
-    "openai",
-    "openrouter",
-    "lm_studio",
-    "ollama",
-    "public_libretranslate_mirror",
-    "free_web_translate",
-}
+_SUPPORTED_PROVIDERS = set(SUPPORTED_TRANSLATION_PROVIDERS)
+_CANONICAL_SLOT_IDS = tuple(f"translation_{index}" for index in range(1, 6))
 
 
 def normalize_provider_settings(payload: Any, *, defaults: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
@@ -69,6 +57,81 @@ def normalize_provider_settings(payload: Any, *, defaults: dict[str, dict[str, s
     return normalized
 
 
+def _normalize_provider(raw_provider: Any, *, fallback: str) -> str:
+    provider = str(raw_provider or fallback).strip()
+    if provider not in _SUPPORTED_PROVIDERS:
+        return fallback
+    return provider
+
+
+def _normalize_target_languages(raw_target_languages: Any, fallback_targets: Any) -> list[str]:
+    target_languages = raw_target_languages if isinstance(raw_target_languages, list) else fallback_targets
+    if not isinstance(target_languages, list):
+        target_languages = ["en"]
+    return [
+        str(item).strip().lower()
+        for item in target_languages
+        if str(item).strip()
+    ]
+
+
+def _normalize_translation_lines(
+    *,
+    translation: dict[str, Any],
+    fallback_provider: str,
+    target_languages: list[str],
+) -> list[dict[str, Any]]:
+    raw_lines = translation.get("lines", [])
+    normalized_lines: list[dict[str, Any]] = []
+
+    if isinstance(raw_lines, list) and raw_lines:
+        for index, raw_line in enumerate(raw_lines):
+            if not isinstance(raw_line, dict):
+                continue
+            slot_id = str(raw_line.get("slot_id") or "").strip().lower()
+            if slot_id not in _CANONICAL_SLOT_IDS:
+                slot_id = _CANONICAL_SLOT_IDS[index] if index < len(_CANONICAL_SLOT_IDS) else ""
+            target_lang = str(raw_line.get("target_lang") or "").strip().lower()
+            if not slot_id or not target_lang:
+                continue
+            provider = _normalize_provider(raw_line.get("provider"), fallback=fallback_provider)
+            normalized_lines.append(
+                {
+                    "slot_id": slot_id,
+                    "enabled": bool(raw_line.get("enabled", True)),
+                    "target_lang": target_lang,
+                    "provider": provider,
+                    "label": str(raw_line.get("label") or "").strip() or target_lang.upper(),
+                }
+            )
+
+    if not normalized_lines:
+        fallback_targets = target_languages or ["en"]
+        normalized_lines = [
+            {
+                "slot_id": _CANONICAL_SLOT_IDS[index],
+                "enabled": True,
+                "target_lang": target_lang,
+                "provider": fallback_provider,
+                "label": target_lang.upper(),
+            }
+            for index, target_lang in enumerate(fallback_targets[: len(_CANONICAL_SLOT_IDS)])
+        ]
+
+    return normalized_lines[: len(_CANONICAL_SLOT_IDS)]
+
+
+def _build_compat_target_languages(lines: list[dict[str, Any]]) -> list[str]:
+    compat_targets: list[str] = []
+    for line in lines:
+        if not line.get("enabled", True):
+            continue
+        target_lang = str(line.get("target_lang") or "").strip().lower()
+        if target_lang and target_lang not in compat_targets:
+            compat_targets.append(target_lang)
+    return compat_targets
+
+
 def normalize_translation_config(
     payload: Any,
     *,
@@ -76,13 +139,8 @@ def normalize_translation_config(
     fallback_targets: Any,
 ) -> dict[str, Any]:
     translation = payload if isinstance(payload, dict) else {}
-    provider = translation.get("provider", defaults["provider"])
-    if provider not in _SUPPORTED_PROVIDERS:
-        provider = defaults["provider"]
-
-    target_languages = translation.get("target_languages", fallback_targets)
-    if not isinstance(target_languages, list):
-        target_languages = ["en"]
+    provider = _normalize_provider(translation.get("provider", defaults["provider"]), fallback=defaults["provider"])
+    target_languages = _normalize_target_languages(translation.get("target_languages", fallback_targets), fallback_targets)
 
     try:
         translation_timeout_ms = int(translation.get("timeout_ms", defaults["timeout_ms"]) or defaults["timeout_ms"])
@@ -101,10 +159,18 @@ def normalize_translation_config(
     except (TypeError, ValueError):
         translation_max_concurrent_jobs = int(defaults["max_concurrent_jobs"])
 
+    normalized_lines = _normalize_translation_lines(
+        translation=translation,
+        fallback_provider=provider,
+        target_languages=target_languages,
+    )
+    compat_target_languages = _build_compat_target_languages(normalized_lines)
+
     return {
         "enabled": bool(translation.get("enabled", False)),
         "provider": provider,
-        "target_languages": [str(item).lower() for item in target_languages if str(item).strip()],
+        "target_languages": compat_target_languages or ["en"],
+        "lines": normalized_lines,
         "timeout_ms": max(1000, min(60000, translation_timeout_ms)),
         "queue_max_size": max(1, min(64, translation_queue_max_size)),
         "max_concurrent_jobs": max(1, min(8, translation_max_concurrent_jobs)),

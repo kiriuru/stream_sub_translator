@@ -5,18 +5,15 @@ from backend.translation.base import (
     PROVIDER_GROUP_LOCAL_LLM,
     BaseTranslationProvider,
 )
+from backend.translation.providers.azure import AzureTranslatorProvider
+from backend.translation.providers.deepl import DeepLProvider
+from backend.translation.providers.experimental_google_web import FreeWebTranslateProvider, GoogleWebProvider
+from backend.translation.providers.google_gas import GoogleGasUrlProvider
 from backend.translation.providers.google_v2 import GoogleTranslateV2Provider
 from backend.translation.providers.google_v3 import GoogleCloudTranslationV3Provider
-from backend.core.translation_engine import (
-    AzureTranslatorProvider,
-    DeepLProvider,
-    FreeWebTranslateProvider,
-    GoogleGasUrlProvider,
-    GoogleWebProvider,
-    LibreTranslateProvider,
-    OpenAICompatibleChatProvider,
-    PublicLibreTranslateMirrorProvider,
-)
+from backend.translation.providers.libretranslate import LibreTranslateProvider
+from backend.translation.providers.openai_compatible import OpenAICompatibleChatProvider
+from backend.translation.providers.public_mirrors import PublicLibreTranslateMirrorProvider
 
 
 def build_default_provider_registry() -> dict[str, BaseTranslationProvider]:

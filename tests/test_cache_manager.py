@@ -27,6 +27,20 @@ class CacheManagerTests(unittest.TestCase):
         stored = json.loads((self.cache_dir / "translation_cache.json").read_text(encoding="utf-8"))
         self.assertEqual(stored["en::fr::hello"], "bonjour")
 
+    def test_provider_name_partitions_translation_cache_entries(self) -> None:
+        self.cache.set_translation("hello", "en", "fr", "bonjour-google", provider_name="google_translate_v2")
+        self.cache.set_translation("hello", "en", "fr", "bonjour-openai", provider_name="openai")
+
+        self.assertEqual(
+            self.cache.get_translation("hello", "en", "fr", provider_name="google_translate_v2"),
+            "bonjour-google",
+        )
+        self.assertEqual(
+            self.cache.get_translation("hello", "en", "fr", provider_name="openai"),
+            "bonjour-openai",
+        )
+        self.assertIsNone(self.cache.get_translation("hello", "en", "fr"))
+
     def test_corrupted_cache_is_quarantined_and_recovers_as_empty(self) -> None:
         cache_path = self.cache_dir / "translation_cache.json"
         cache_path.write_text("{broken json", encoding="utf-8")
