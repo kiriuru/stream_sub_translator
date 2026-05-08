@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from backend.core.exporter import Exporter
+from backend.core.runtime.runtime_session_controller import RuntimeSessionController
 from backend.core.subtitle_router import RuntimeOrchestrator
 
 
@@ -36,10 +37,19 @@ class ExporterRuntimeTests(unittest.TestCase):
 
     def test_runtime_export_session_replaces_existing_sequence_and_writes_jsonl_and_srt(self) -> None:
         orchestrator = RuntimeOrchestrator.__new__(RuntimeOrchestrator)
-        orchestrator._session_id = "session-1"
-        orchestrator._session_started_at_utc = "2026-01-01T00:00:00+00:00"
-        orchestrator._session_started_at_monotonic = time.perf_counter() - 5.0
-        orchestrator._session_export_records = []
+        started_at_monotonic = time.perf_counter() - 5.0
+        session = RuntimeSessionController(
+            bump_asr_runtime_generation=lambda: None,
+            set_sequence_zero=lambda: None,
+            new_session_id=lambda: "session-1",
+            now_utc_iso=lambda: "2026-01-01T00:00:00+00:00",
+            now_monotonic=lambda: started_at_monotonic,
+            reset_metrics=lambda: None,
+            reset_in_flight_transcribe_count=lambda: None,
+            clear_runtime_loop=lambda: None,
+        )
+        session.start_new_session()
+        orchestrator._session = session  # noqa: SLF001
         orchestrator._exporter = Exporter(self.export_dir)
         orchestrator.config_getter = lambda: {
             "profile": "default",
@@ -55,7 +65,7 @@ class ExporterRuntimeTests(unittest.TestCase):
                 "source_text": "Привет",
                 "source_lang": "ru",
                 "duration_ms": 1200,
-                "finalized_at_monotonic": orchestrator._session_started_at_monotonic + 2.0,
+                "finalized_at_monotonic": started_at_monotonic + 2.0,
                 "srt_text": "Привет",
             },
         )
@@ -66,13 +76,13 @@ class ExporterRuntimeTests(unittest.TestCase):
                 "source_text": "Привет",
                 "source_lang": "ru",
                 "duration_ms": 1200,
-                "finalized_at_monotonic": orchestrator._session_started_at_monotonic + 2.4,
+                "finalized_at_monotonic": started_at_monotonic + 2.4,
                 "srt_text": "Привет\nHello",
             },
         )
 
-        self.assertEqual(len(orchestrator._session_export_records), 1)
-        self.assertEqual(orchestrator._session_export_records[0]["srt_text"], "Привет\nHello")
+        self.assertEqual(len(session.session_export_records), 1)
+        self.assertEqual(session.session_export_records[0]["srt_text"], "Привет\nHello")
 
         files = RuntimeOrchestrator._export_session_files(
             orchestrator,

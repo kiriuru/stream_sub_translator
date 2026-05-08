@@ -173,10 +173,6 @@ class RuntimeOrchestrator:
             "sync_source_and_translation_expiry": True,
             "hard_max_phrase_ms": self._LEGACY_VAD_SETTINGS["max_segment_ms"],
         }
-        self._session_id: str | None = None
-        self._session_started_at_utc: str | None = None
-        self._session_started_at_monotonic: float | None = None
-        self._session_export_records: list[dict[str, object]] = []
         self._rnnoise_processor = RNNoiseRecognitionProcessor(sample_rate=self._asr_engine.sample_rate, channels=1)
         self._last_partial_text_by_segment: dict[str, str] = {}
         self._last_partial_emit_monotonic_by_segment: dict[str, float] = {}
@@ -226,12 +222,6 @@ class RuntimeOrchestrator:
             new_session_id=lambda: datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f"),
             now_utc_iso=lambda: datetime.now(timezone.utc).isoformat(),
             now_monotonic=time.perf_counter,
-            set_session_started=lambda session_id, started_at_utc, started_at_monotonic: (
-                setattr(self, "_session_id", session_id),
-                setattr(self, "_session_started_at_utc", started_at_utc),
-                setattr(self, "_session_started_at_monotonic", started_at_monotonic),
-            ),
-            reset_export_session=self._reset_export_session,
             reset_metrics=self._metrics_controller.reset,
             reset_in_flight_transcribe_count=lambda: setattr(self, "_in_flight_transcribe_count", 0),
             clear_runtime_loop=lambda: setattr(self, "_runtime_loop", None),
@@ -487,66 +477,27 @@ class RuntimeOrchestrator:
     async def _handle_obs_caption_payload(self, payload: SubtitlePayloadEvent) -> None:
         await self._output.publish_subtitle_payload(payload)
 
-    def _reset_export_session(self) -> None:
-        self._session_id = None
-        self._session_started_at_utc = None
-        self._session_started_at_monotonic = None
-        self._session_export_records.clear()
-
     def _handle_completed_export_record(self, record: dict) -> None:
-        finalized_at_monotonic = record.get("finalized_at_monotonic")
-        if self._session_started_at_monotonic is None or not isinstance(finalized_at_monotonic, (int, float)):
-            return
-
-        end_offset_ms = max(0, int(round((float(finalized_at_monotonic) - self._session_started_at_monotonic) * 1000.0)))
-        duration_ms_raw = record.get("duration_ms")
-        duration_ms = int(duration_ms_raw) if isinstance(duration_ms_raw, (int, float)) and int(duration_ms_raw) > 0 else None
-        start_offset_ms = max(0, end_offset_ms - duration_ms) if duration_ms is not None else max(0, end_offset_ms - 1200)
-
-        export_record = dict(record)
-        export_record["session_id"] = self._session_id
-        export_record["start_offset_ms"] = start_offset_ms
-        export_record["end_offset_ms"] = end_offset_ms
-        export_record["duration_ms"] = duration_ms
-        sequence = export_record.get("sequence")
-        if isinstance(sequence, int):
-            for index, existing in enumerate(self._session_export_records):
-                if int(existing.get("sequence", -1)) == sequence:
-                    self._session_export_records[index] = export_record
-                    break
-            else:
-                self._session_export_records.append(export_record)
-            return
-        self._session_export_records.append(export_record)
+        self._session.add_completed_export_record(record)
 
     def _export_session_files(self, *, stopped_at_utc: str) -> list[Path]:
-        if not self._session_id or not self._session_started_at_utc or not self._session_export_records:
+        payload = self._session.build_session_export_payload(
+            self.config_getter(),
+            stopped_at_utc=stopped_at_utc,
+        )
+        if payload is None:
             return []
 
-        config = self.config_getter()
-        translation_config = config.get("translation", {}) if isinstance(config, dict) else {}
-        subtitle_output = config.get("subtitle_output", {}) if isinstance(config, dict) else {}
-        session_row = {
-            "type": "session",
-            "session_id": self._session_id,
-            "started_at_utc": self._session_started_at_utc,
-            "stopped_at_utc": stopped_at_utc,
-            "profile": str(config.get("profile", "default")) if isinstance(config, dict) else "default",
-            "source_lang": str(config.get("source_lang", "auto")) if isinstance(config, dict) else "auto",
-            "translation_enabled": bool(translation_config.get("enabled", False)) if isinstance(translation_config, dict) else False,
-            "target_languages": list(translation_config.get("target_languages", [])) if isinstance(translation_config, dict) else [],
-            "subtitle_output": dict(subtitle_output) if isinstance(subtitle_output, dict) else {},
-            "record_count": len(self._session_export_records),
-        }
+        session_row, records = payload
         base_filename = self._exporter.build_session_basename(
-            session_started_at_utc=self._session_started_at_utc,
-            session_id=self._session_id,
+            session_started_at_utc=self._session.session_started_at_utc,
+            session_id=str(self._session.session_id),
             profile=session_row["profile"],
         )
         return self._exporter.export_session(
             base_filename=base_filename,
             session_row=session_row,
-            records=self._session_export_records,
+            records=records,
         )
 
     async def apply_live_settings(self, config: dict) -> None:

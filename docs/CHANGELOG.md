@@ -12,6 +12,8 @@ Post-`0.3.0` branch follow-up focused on internal modularization and runtime sta
 - Browser worker connection/session/generation/signature state is now owned by `BrowserWorkerStateController` (`backend/core/runtime/browser_worker_state_controller.py`).
 - `RuntimeOrchestrator` delegates those low-risk state mutations to the controllers without changing runtime status payload shape or WebSocket behavior.
 - Added unit tests for metrics and browser worker state ownership (`tests/test_runtime_metrics_controller.py`, `tests/test_browser_worker_state_controller.py`).
+- Runtime session identity/timestamps/export records moved into `RuntimeSessionController` (`backend/core/runtime/runtime_session_controller.py`), with `RuntimeOrchestrator` delegating completed export record handling and export payload prep.
+- Added unit tests covering session/export state ownership (`tests/test_runtime_session_controller.py`) and updated exporter runtime regression coverage.
 
 ### P1 runtime stabilization (facade + controllers)
 
@@ -107,7 +109,7 @@ Post-`0.3.0` branch follow-up focused on internal modularization and runtime sta
   - `python -m compileall backend desktop tests`
   - `.\.venv\Scripts\python.exe -m unittest discover -s tests`
 - verification result:
-  - `204 tests`
+  - `215 tests`
   - `OK`
  - recorded non-remote smoke verification output in `docs/MANUAL_SMOKE_RESULTS_NON_REMOTE.md` (manual-only items remain NOT TESTED unless executed with microphone/OBS/browser windows).
 
