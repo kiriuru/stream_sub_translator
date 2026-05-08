@@ -147,6 +147,141 @@ class SubtitleRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(translation_item["slot_id"], "translation_1")
         self.assertEqual(translation_item["style_slot"], "translation_1")
 
+    async def test_partial_event_publishes_active_partial(self) -> None:
+        await self.router.handle_transcript(
+            TranscriptEvent(
+                event="partial",
+                text="Частично",
+                sequence=10,
+                segment=TranscriptSegment(
+                    segment_id="seg-partial",
+                    text="Частично",
+                    is_partial=True,
+                    source_lang="ru",
+                    provider="local",
+                    sequence=10,
+                ),
+            )
+        )
+        payload = self._last_payload()
+        self.assertEqual(payload["lifecycle_state"], "partial_only")
+        self.assertEqual(payload["active_partial_text"], "Частично")
+        self.assertEqual([item["text"] for item in payload["visible_items"]], ["Частично"])
+
+    async def test_reset_clears_records_and_cancels_expiry(self) -> None:
+        await self.router.handle_transcript(
+            TranscriptEvent(
+                event="final",
+                text="Текст",
+                sequence=1,
+                segment=TranscriptSegment(
+                    segment_id="seg-1",
+                    text="Текст",
+                    is_final=True,
+                    source_lang="ru",
+                    provider="local",
+                    sequence=1,
+                ),
+            )
+        )
+        # Internal expiry task is owned by core; ensure reset clears state.
+        self.assertTrue(bool(getattr(self.router._core, "_records", {})))
+        await self.router.reset()
+        self.assertEqual(getattr(self.router._core, "_records", {}), {})
+        self.assertIsNone(getattr(self.router._core, "_expiry_task", None))
+        payload = self._last_payload()
+        self.assertEqual(payload["lifecycle_state"], "idle")
+
+    async def test_stale_translation_for_old_sequence_is_not_presentation_relevant(self) -> None:
+        await self.router.handle_transcript(
+            TranscriptEvent(
+                event="final",
+                text="Новый",
+                sequence=2,
+                segment=TranscriptSegment(
+                    segment_id="seg-new",
+                    text="Новый",
+                    is_final=True,
+                    source_lang="ru",
+                    provider="local",
+                    sequence=2,
+                ),
+            )
+        )
+        # Translation arrives for old sequence with no corresponding finalized record.
+        await self.router.handle_translation(
+            TranslationEvent(
+                sequence=1,
+                source_text="Старый",
+                source_lang="ru",
+                provider="google_translate_v2",
+                translations=[
+                    TranslationItem(
+                        slot_id="translation_1",
+                        label="EN",
+                        target_lang="en",
+                        text="Old translation",
+                        provider="google_translate_v2",
+                        success=True,
+                    )
+                ],
+                is_complete=False,
+            )
+        )
+        self.assertFalse(self.router.is_sequence_relevant_for_presentation(1))
+        payload = self._last_payload()
+        self.assertEqual([item["text"] for item in payload["visible_items"]], ["Новый"])
+
+    async def test_legacy_language_display_order_maps_to_slot_ids(self) -> None:
+        self._config["translation"]["lines"] = [
+            {
+                "slot_id": "translation_1",
+                "enabled": True,
+                "target_lang": "en",
+                "provider": "google_translate_v2",
+                "label": "EN",
+            }
+        ]
+        # Legacy display order entries used to be language codes.
+        self._config["subtitle_output"]["display_order"] = ["source", "en"]
+        await self.router.handle_transcript(
+            TranscriptEvent(
+                event="final",
+                text="Привет",
+                sequence=1,
+                segment=TranscriptSegment(
+                    segment_id="seg-legacy",
+                    text="Привет",
+                    is_final=True,
+                    source_lang="ru",
+                    provider="local",
+                    sequence=1,
+                ),
+            )
+        )
+        await self.router.handle_translation(
+            TranslationEvent(
+                sequence=1,
+                source_text="Привет",
+                source_lang="ru",
+                provider="google_translate_v2",
+                translations=[
+                    TranslationItem(
+                        slot_id="translation_1",
+                        label="EN",
+                        target_lang="en",
+                        text="Hello",
+                        provider="google_translate_v2",
+                        success=True,
+                    )
+                ],
+                is_complete=True,
+            )
+        )
+        payload = self._last_payload()
+        self.assertEqual(payload["display_order"], ["source", "translation_1"])
+        self.assertEqual([item["text"] for item in payload["visible_items"]], ["Привет", "Hello"])
+
     async def test_translation_without_slot_id_is_mapped_using_target_language(self) -> None:
         await self.router.handle_transcript(
             TranscriptEvent(

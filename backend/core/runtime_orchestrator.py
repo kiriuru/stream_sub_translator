@@ -1633,10 +1633,6 @@ class RuntimeOrchestrator:
             return
         await self._audio_capture_ctl.stop_if_running()  # type: ignore[attr-defined]
 
-    async def stop(self) -> RuntimeState:
-        await self._lifecycle.stop()
-        return self._state
-
     async def _start_processing_tasks_impl(self) -> None:
         if not hasattr(self, "_processing_tasks") or self._processing_tasks is None:  # type: ignore[attr-defined]
             if self._capture_task is None or self._capture_task.done():

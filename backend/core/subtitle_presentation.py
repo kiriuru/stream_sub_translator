@@ -207,6 +207,22 @@ class SubtitlePresentation:
         ) if isinstance(subtitle_output, dict) else []
 
         if active_partial_text and completed_payload is None:
+            show_source = bool(subtitle_output.get("show_source", True)) if isinstance(subtitle_output, dict) else True
+            source_item = SubtitleLineItem(
+                kind="source",
+                lang=str(
+                    active_partial_source_lang
+                    or (str(config.get("source_lang", "auto")) if isinstance(config, dict) else "auto")
+                ),
+                label=str(
+                    active_partial_source_lang
+                    or (str(config.get("source_lang", "auto")) if isinstance(config, dict) else "auto")
+                ).upper(),
+                text=active_partial_text,
+                style_slot="source" if show_source and bool(active_partial_text) else None,
+                visible=show_source and bool(active_partial_text),
+            )
+            visible_items = [source_item] if source_item.visible and source_item.text else []
             return SubtitlePayloadEvent(
                 sequence=active_partial_sequence or 0,
                 source_lang=active_partial_source_lang or str(config.get("source_lang", "auto")) if isinstance(config, dict) else "auto",
@@ -225,6 +241,10 @@ class SubtitlePresentation:
                 active_partial_text=visible_partial_text,
                 active_partial_sequence=active_partial_sequence,
                 active_partial_source_lang=active_partial_source_lang,
+                items=[source_item],
+                visible_items=visible_items,
+                line1=visible_items[0].text if visible_items else "",
+                line2="",
             )
 
         payload = completed_translation_payload or SubtitlePayloadEvent(

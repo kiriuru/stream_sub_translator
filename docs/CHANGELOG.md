@@ -102,8 +102,17 @@ Post-`0.3.0` branch follow-up focused on internal modularization and runtime sta
   - `python -m compileall backend desktop tests`
   - `.\.venv\Scripts\python.exe -m unittest discover -s tests`
 - verification result:
-  - `176 tests`
+  - `178 tests`
   - `OK`
+
+### Non-remote runtime stabilization pass
+
+- `RuntimeOrchestrator` lifecycle sanity: single `stop()` implementation and explicit idempotency checks covered by unit tests.
+- Added focused unit/contract tests for:
+  - `RuntimeLifecycleCoordinator` start/stop canonical ordering;
+  - non-remote SpeechSource/controller lifecycles (`BrowserSpeechSource`, `LocalParakeetSpeechSource`, `AudioCaptureController`, `ProcessingTasksController`);
+  - `SubtitleRouter` split regressions (partial/final/translation relevance, reset behavior, legacy display_order mapping).
+- Added `docs/MANUAL_SMOKE_CHECKLIST_NON_REMOTE.md` to keep the main local/browser runtime smoke flow reproducible without touching remote.
 
 ## 0.3.0
 
