@@ -112,7 +112,7 @@ Post-`0.3.0` branch follow-up focused on internal modularization and runtime sta
   - `python -m compileall backend desktop tests`
   - `.\.venv\Scripts\python.exe -m unittest discover -s tests`
 - verification result:
-  - `223 tests`
+  - `225 tests`
   - `OK`
  - recorded non-remote smoke verification output in `docs/MANUAL_SMOKE_RESULTS_NON_REMOTE.md` (manual-only items remain NOT TESTED unless executed with microphone/OBS/browser windows).
 

@@ -206,7 +206,9 @@ class SubtitlePresentation:
             subtitle_output if isinstance(subtitle_output, dict) else {},
         ) if isinstance(subtitle_output, dict) else []
 
-        if active_partial_text and completed_payload is None:
+        # When active partial exists but the completed block cannot render any visible items (e.g. hide_source=True
+        # collapses a source-only completed payload into None), we still need to build a consistent partial-only payload.
+        if active_partial_text and completed_translation_payload is None:
             show_source = bool(subtitle_output.get("show_source", True)) if isinstance(subtitle_output, dict) else True
             source_item = SubtitleLineItem(
                 kind="source",

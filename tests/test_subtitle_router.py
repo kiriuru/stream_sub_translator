@@ -168,6 +168,97 @@ class SubtitleRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["active_partial_text"], "Частично")
         self.assertEqual([item["text"] for item in payload["visible_items"]], ["Частично"])
 
+    async def test_partial_only_payload_includes_source_item_when_completed_block_is_source_only(self) -> None:
+        # Force completed payload to be source-only: translations are configured but hidden.
+        self._config["subtitle_output"]["show_source"] = True
+        self._config["subtitle_output"]["show_translations"] = False
+        self._config["subtitle_output"]["max_translation_languages"] = 1
+
+        await self.router.handle_transcript(
+            TranscriptEvent(
+                event="final",
+                text="Привет",
+                sequence=1,
+                segment=TranscriptSegment(
+                    segment_id="seg-1",
+                    text="Привет",
+                    is_final=True,
+                    source_lang="ru",
+                    provider="local",
+                    sequence=1,
+                ),
+            )
+        )
+
+        await self.router.handle_transcript(
+            TranscriptEvent(
+                event="partial",
+                text="yes",
+                sequence=2,
+                segment=TranscriptSegment(
+                    segment_id="seg-2",
+                    text="yes",
+                    is_partial=True,
+                    source_lang="ru",
+                    provider="local",
+                    sequence=2,
+                ),
+            )
+        )
+
+        payload = self._last_payload()
+        self.assertEqual(payload["lifecycle_state"], "partial_only")
+        self.assertEqual(payload["active_partial_text"], "yes")
+        self.assertEqual(payload["line1"], "yes")
+        self.assertEqual(payload["line2"], "")
+        self.assertEqual(len(payload["items"]), 1)
+        self.assertEqual(len(payload["visible_items"]), 1)
+        self.assertEqual(payload["visible_items"][0]["kind"], "source")
+        self.assertEqual(payload["visible_items"][0]["text"], "yes")
+
+    async def test_partial_only_payload_hides_source_item_when_show_source_false(self) -> None:
+        self._config["subtitle_output"]["show_source"] = False
+        self._config["subtitle_output"]["show_translations"] = False
+        self._config["subtitle_output"]["max_translation_languages"] = 1
+
+        await self.router.handle_transcript(
+            TranscriptEvent(
+                event="final",
+                text="Привет",
+                sequence=1,
+                segment=TranscriptSegment(
+                    segment_id="seg-1",
+                    text="Привет",
+                    is_final=True,
+                    source_lang="ru",
+                    provider="local",
+                    sequence=1,
+                ),
+            )
+        )
+
+        await self.router.handle_transcript(
+            TranscriptEvent(
+                event="partial",
+                text="yes",
+                sequence=2,
+                segment=TranscriptSegment(
+                    segment_id="seg-2",
+                    text="yes",
+                    is_partial=True,
+                    source_lang="ru",
+                    provider="local",
+                    sequence=2,
+                ),
+            )
+        )
+
+        payload = self._last_payload()
+        self.assertEqual(payload["lifecycle_state"], "partial_only")
+        self.assertEqual(payload["active_partial_text"], "")
+        self.assertEqual(payload["line1"], "")
+        self.assertEqual(payload["visible_items"], [])
+
     async def test_reset_clears_records_and_cancels_expiry(self) -> None:
         await self.router.handle_transcript(
             TranscriptEvent(
