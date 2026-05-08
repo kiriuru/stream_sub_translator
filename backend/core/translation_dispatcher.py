@@ -82,6 +82,9 @@ class TranslationDispatcher:
             "translation_last_timeout_ms": None,
         }
         self._last_logged_queue_depth: int | None = None
+        self._provider_semaphores: dict[str, asyncio.Semaphore] = {}
+        self._provider_rate_lock = asyncio.Lock()
+        self._provider_next_allowed_at: dict[str, float] = {}
 
     async def submit_final(
         self,
@@ -103,6 +106,19 @@ class TranslationDispatcher:
                 submitted_at_monotonic=time.perf_counter(),
             )
         )
+
+    def start(self) -> None:
+        """
+        Re-enable the dispatcher after a previous stop().
+
+        Runtime normally recreates the dispatcher on restart, but this explicit
+        lifecycle hook keeps the component safe to reuse in future refactors.
+        """
+        if not self._stopped:
+            return
+        self._stopped = False
+        self._queue_event.clear()
+        self._ensure_worker_started()
 
     async def cancel_older_than(self, sequence: int) -> None:
         tasks_to_cancel: list[asyncio.Task] = []
@@ -187,6 +203,60 @@ class TranslationDispatcher:
         config = self._config_getter()
         translation = config.get("translation", {}) if isinstance(config, dict) else {}
         return translation if isinstance(translation, dict) else {}
+
+    def _provider_limits_config(self) -> dict[str, Any]:
+        translation = self._translation_config()
+        limits = translation.get("provider_limits", {}) if isinstance(translation, dict) else {}
+        return limits if isinstance(limits, dict) else {}
+
+    def _provider_limit_for(self, provider_name: str) -> tuple[int | None, int]:
+        """
+        Returns (max_concurrent_targets, min_interval_ms) for provider.
+        """
+        limits = self._provider_limits_config()
+        provider_cfg = limits.get(str(provider_name), {}) if isinstance(limits, dict) else {}
+        if not isinstance(provider_cfg, dict):
+            provider_cfg = {}
+        raw_conc = provider_cfg.get("max_concurrent_targets")
+        max_concurrent: int | None
+        if raw_conc is None or raw_conc == "":
+            max_concurrent = None
+        else:
+            try:
+                max_concurrent = max(1, min(16, int(raw_conc)))
+            except (TypeError, ValueError):
+                max_concurrent = None
+        try:
+            min_interval_ms = int(provider_cfg.get("min_interval_ms", 0) or 0)
+        except (TypeError, ValueError):
+            min_interval_ms = 0
+        return max_concurrent, max(0, min(60_000, min_interval_ms))
+
+    def _provider_semaphore(self, provider_name: str) -> asyncio.Semaphore | None:
+        max_concurrent, _min_interval_ms = self._provider_limit_for(provider_name)
+        if max_concurrent is None:
+            return None
+        existing = self._provider_semaphores.get(provider_name)
+        if existing is not None:
+            return existing
+        sem = asyncio.Semaphore(max_concurrent)
+        self._provider_semaphores[provider_name] = sem
+        return sem
+
+    async def _provider_rate_wait(self, provider_name: str) -> None:
+        _max_concurrent, min_interval_ms = self._provider_limit_for(provider_name)
+        if min_interval_ms <= 0:
+            return
+        async with self._provider_rate_lock:
+            now = time.perf_counter()
+            allowed_at = float(self._provider_next_allowed_at.get(provider_name, 0.0) or 0.0)
+            if allowed_at > now:
+                delay = allowed_at - now
+            else:
+                delay = 0.0
+            self._provider_next_allowed_at[provider_name] = max(allowed_at, now) + (min_interval_ms / 1000.0)
+        if delay > 0:
+            await asyncio.sleep(delay)
 
     def _queue_max_size(self) -> int:
         translation = self._translation_config()
@@ -586,21 +656,42 @@ class TranslationDispatcher:
     ) -> _TargetResult:
         started_at = time.perf_counter()
         try:
-            item, diagnostics = await asyncio.wait_for(
-                self._translation_engine.translate_target(
-                    source_text=job.source_text,
-                    source_lang=job.source_lang,
-                    provider_name=line.provider_name,
-                    provider_settings=line.provider_settings,
-                    target_lang=line.target_lang,
-                    slot_id=line.slot_id,
-                    label=line.label,
-                    provider_group=line.provider_group,
-                    experimental=line.experimental,
-                    local_provider=line.local_provider,
-                ),
-                timeout=timeout_seconds,
-            )
+            semaphore = self._provider_semaphore(line.provider_name)
+            if semaphore is None:
+                await self._provider_rate_wait(line.provider_name)
+                item, diagnostics = await asyncio.wait_for(
+                    self._translation_engine.translate_target(
+                        source_text=job.source_text,
+                        source_lang=job.source_lang,
+                        provider_name=line.provider_name,
+                        provider_settings=line.provider_settings,
+                        target_lang=line.target_lang,
+                        slot_id=line.slot_id,
+                        label=line.label,
+                        provider_group=line.provider_group,
+                        experimental=line.experimental,
+                        local_provider=line.local_provider,
+                    ),
+                    timeout=timeout_seconds,
+                )
+            else:
+                async with semaphore:
+                    await self._provider_rate_wait(line.provider_name)
+                    item, diagnostics = await asyncio.wait_for(
+                        self._translation_engine.translate_target(
+                            source_text=job.source_text,
+                            source_lang=job.source_lang,
+                            provider_name=line.provider_name,
+                            provider_settings=line.provider_settings,
+                            target_lang=line.target_lang,
+                            slot_id=line.slot_id,
+                            label=line.label,
+                            provider_group=line.provider_group,
+                            experimental=line.experimental,
+                            local_provider=line.local_provider,
+                        ),
+                        timeout=timeout_seconds,
+                    )
             status_message = diagnostics.get("status_message")
             return _TargetResult(
                 item=item,

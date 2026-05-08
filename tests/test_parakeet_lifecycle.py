@@ -101,7 +101,7 @@ class ParakeetLifecycleTests(unittest.IsolatedAsyncioTestCase):
             structured_logger=None,
         )
         self.runtime._obs_caption_output = _FakeObsCaptionOutput()  # noqa: SLF001
-        self.runtime._translation_dispatcher = _FakeTranslationDispatcher()  # noqa: SLF001
+        self.runtime._translation = mock.Mock(submit_final=self._noop_async)  # noqa: SLF001
         self.runtime.subtitle_router = _FakeSubtitleRouter()  # type: ignore[assignment]
         self.runtime._state = RuntimeState(  # noqa: SLF001
             is_running=True,

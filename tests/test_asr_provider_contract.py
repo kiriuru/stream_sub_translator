@@ -113,8 +113,8 @@ class AsrProviderContractTests(unittest.IsolatedAsyncioTestCase):
             runtime._obs_caption_output = _FakeObsCaptionOutput()  # noqa: SLF001
             runtime._audio_capture = _FakeAudioCapture()  # noqa: SLF001
             runtime._state = runtime._state.model_copy(update={"is_running": True, "running": True, "status": "listening"})  # noqa: SLF001
-            runtime._active_runtime_mode = "local"  # noqa: SLF001
-            runtime._active_local_provider_preference = "official_eu_parakeet_low_latency"  # noqa: SLF001
+            runtime._asr_mode._active_runtime_mode = "local"  # noqa: SLF001
+            runtime._asr_mode._active_local_provider_preference = "official_eu_parakeet_low_latency"  # noqa: SLF001
 
             status = runtime._build_runtime_state(  # noqa: SLF001
                 is_running=True,

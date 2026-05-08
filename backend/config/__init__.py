@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +28,10 @@ from backend.core.config_migrations import migrate_config
 from backend.core.font_catalog import build_font_catalog
 from backend.core.paths import APP_PATHS, ensure_app_layout
 from backend.core.subtitle_style import merge_style_presets, normalize_subtitle_style_config
+from backend.core.atomic_io import atomic_write_json
 from backend.schemas.config_schema import ConfigSchema, CURRENT_CONFIG_VERSION
+
+logger = logging.getLogger(__name__)
 
 
 def configure_project_local_environment() -> None:
@@ -277,7 +283,23 @@ class LocalConfigManager:
         path = self.app_settings.config_path
         if not path.exists():
             return self.save(self.default_config())
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, JSONDecodeError) as exc:
+            corrupt_suffix = f".corrupt-{int(time.time())}"
+            corrupt_path = path.with_name(f"{path.name}{corrupt_suffix}")
+            try:
+                path.replace(corrupt_path)
+            except OSError:
+                corrupt_path = None
+            normalized = self.save(self.default_config())
+            logger.warning(
+                "Config file was unreadable; restored defaults. path=%s corrupt_copy=%s error=%s",
+                str(path),
+                str(corrupt_path) if corrupt_path else None,
+                str(exc),
+            )
+            return normalized
         normalized = self._normalize(payload)
         if normalized != payload:
             self.save(normalized)
@@ -287,7 +309,7 @@ class LocalConfigManager:
         path = self.app_settings.config_path
         path.parent.mkdir(parents=True, exist_ok=True)
         normalized = self._normalize(payload)
-        path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(path, normalized, indent=2, encoding="utf-8")
         return normalized
 
     def normalize_profile_payload(self, payload: dict[str, Any], *, profile_name: str | None = None) -> dict[str, Any]:

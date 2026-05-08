@@ -109,14 +109,33 @@ flowchart LR
 
 - bootstrap:
   - `app_bootstrap.py`
-- runtime entrypoint and extracted controllers:
+- runtime entrypoint:
   - `runtime_orchestrator.py`
-  - `runtime/asr_runtime_controller.py`
-  - `runtime/audio_runtime_controller.py`
-  - `runtime/output_fanout_coordinator.py`
-  - `runtime/runtime_metrics_collector.py`
-  - `runtime/runtime_status_builder.py`
-  - `runtime/translation_runtime_coordinator.py`
+- runtime controllers and coordination (`backend/core/runtime/`):
+  - `runtime_state_controller.py` (runtime status broadcast coalescing + sequencing)
+  - `asr_mode_controller.py` (ASR mode/provider resolution and pinning per session)
+  - `translation_runtime_controller.py` (TranslationEngine + TranslationDispatcher lifecycle)
+  - `subtitle_presentation_controller.py` (thin wrapper over SubtitleRouter)
+  - `output_fanout_controller.py` (WS/OBS publish fanout)
+  - `transcript_controller.py` (partial/final transcript pipeline orchestration)
+  - `runtime_lifecycle_coordinator.py` (ordered start/stop of core runtime components)
+  - speech source abstraction:
+    - `speech_source.py`, `speech_source_factory.py`
+    - `browser_speech_source.py`
+    - `local_parakeet_speech_source.py`
+    - `remote_controller_speech_source.py`
+    - `remote_worker_speech_source.py`
+  - extracted “bookkeeping” helpers:
+    - `runtime_reset_controller.py` (reset groups that must stay consistent)
+    - `runtime_session_controller.py` (session ids/timestamps/sequence/generation)
+    - `runtime_start_state_controller.py` / `runtime_stop_state_controller.py`
+    - `runtime_export_controller.py` (stop-time export attempt + error capture)
+    - `segment_state_controller.py` (active segment cleanup helpers)
+    - `browser_worker_state_controller.py` (browser worker session bookkeeping)
+    - `remote_audio_state_controller.py` (remote audio ingest + queue lifecycle)
+    - `speech_source_state_controller.py` (active speech source selection/cleanup)
+    - `processing_tasks_controller.py` (capture/asr task lifecycle)
+    - `audio_capture_controller.py` (AudioCapture lifecycle)
 - paths / logging / errors:
   - `paths.py`
   - `logging_setup.py`

@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
 import json
+import threading
 from typing import Any, Literal
 
 from fastapi import FastAPI
@@ -23,18 +24,21 @@ class ActiveConfigState:
 class ConfigStateService:
     def __init__(self, app: FastAPI) -> None:
         self._app = app
+        self._lock = threading.RLock()
 
     def current_payload(self) -> dict[str, Any]:
-        payload = getattr(self._app.state, "config", {})
-        return payload if isinstance(payload, dict) else {}
+        with self._lock:
+            payload = getattr(self._app.state, "config", {})
+            return payload if isinstance(payload, dict) else {}
 
     def current_state(self) -> ActiveConfigState:
-        state = getattr(self._app.state, "active_config_state", None)
-        if isinstance(state, ActiveConfigState):
-            return state
-        fallback = self._build_state(self.current_payload(), source="disk", persisted=True)
-        self._store_state(fallback)
-        return fallback
+        with self._lock:
+            state = getattr(self._app.state, "active_config_state", None)
+            if isinstance(state, ActiveConfigState):
+                return state
+            fallback = self._build_state(self.current_payload(), source="disk", persisted=True)
+            self._store_state(fallback)
+            return fallback
 
     def set_loaded_from_disk(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._apply_payload(payload, source="disk", persisted=True, normalize=False)
@@ -53,11 +57,12 @@ class ConfigStateService:
         persisted: bool,
         normalize: bool,
     ) -> dict[str, Any]:
-        normalized = self._normalize_payload(payload) if normalize else self._copy_payload(payload)
-        state = self._build_state(normalized, source=source, persisted=persisted)
-        self._store_state(state)
-        self._sync_remote_pairing_session(state.payload)
-        return state.payload
+        with self._lock:
+            normalized = self._normalize_payload(payload) if normalize else self._copy_payload(payload)
+            state = self._build_state(normalized, source=source, persisted=persisted)
+            self._store_state(state)
+            self._sync_remote_pairing_session(state.payload)
+            return state.payload
 
     @staticmethod
     def _copy_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -86,6 +91,7 @@ class ConfigStateService:
         )
 
     def _store_state(self, state: ActiveConfigState) -> None:
+        # Caller holds self._lock.
         self._app.state.config = state.payload
         self._app.state.active_config_state = state
 

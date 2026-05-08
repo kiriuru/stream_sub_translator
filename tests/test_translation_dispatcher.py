@@ -437,6 +437,66 @@ class TranslationDispatcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(job_error_records[0]["payload"]["reason"], "prepare_request exploded")
         self.assertEqual(self.metrics[-1]["translation_last_runtime_reason"], "job_error:prepare_request exploded")
 
+    async def test_can_restart_after_stop(self) -> None:
+        engine = _StubTranslationEngine()
+        self.relevant_sequences.add(1)
+        dispatcher = TranslationDispatcher(
+            engine,
+            lambda: self.config,
+            self._publish,
+            lambda sequence: sequence in self.relevant_sequences,
+            self._metrics_callback,
+            structured_logger=self.structured_logger,
+        )
+        await dispatcher.submit_final(sequence=1, source_text="hello", source_lang="en")
+        await asyncio.sleep(0.08)
+        await dispatcher.stop()
+
+        # Previously, stop() permanently disabled submit_final(). start() should re-enable it.
+        self.published_events.clear()
+        self.relevant_sequences.clear()
+        self.relevant_sequences.add(2)
+        dispatcher.start()
+        await dispatcher.submit_final(sequence=2, source_text="again", source_lang="en")
+        await asyncio.sleep(0.08)
+        await dispatcher.stop()
+
+        translation_events = [event for event in self.published_events if event.sequence == 2 and event.translations]
+        self.assertTrue(translation_events)
+
+    async def test_provider_concurrency_limit_serializes_same_provider_targets(self) -> None:
+        self.config["translation"]["provider_limits"] = {"stub": {"max_concurrent_targets": 1}}
+        self.config["translation"]["lines"] = [
+            {"slot_id": "translation_1", "enabled": True, "target_lang": "en", "provider": "stub", "label": "EN"},
+            {"slot_id": "translation_2", "enabled": True, "target_lang": "de", "provider": "stub", "label": "DE"},
+        ]
+
+        started: list[tuple[str, float]] = []
+
+        class _TimedEngine(_StubTranslationEngine):
+            async def translate_target(self, **kwargs):  # type: ignore[override]
+                slot_id = kwargs.get("slot_id") or kwargs.get("target_lang")
+                started.append((str(slot_id), asyncio.get_running_loop().time()))
+                return await super().translate_target(**kwargs)
+
+        engine = _TimedEngine(delays={"translation_1": 0.08, "translation_2": 0.08})
+        self.relevant_sequences.add(30)
+        dispatcher = TranslationDispatcher(
+            engine,
+            lambda: self.config,
+            self._publish,
+            lambda sequence: sequence in self.relevant_sequences,
+            self._metrics_callback,
+            structured_logger=self.structured_logger,
+        )
+        await dispatcher.submit_final(sequence=30, source_text="hello", source_lang="en")
+        await asyncio.sleep(0.25)
+        await dispatcher.stop()
+
+        # With max_concurrent_targets=1 for provider 'stub', the second target should start noticeably later.
+        self.assertEqual([slot for slot, _ in started], ["translation_1", "translation_2"])
+        self.assertGreaterEqual(started[1][1] - started[0][1], 0.05)
+
 
 if __name__ == "__main__":
     unittest.main()

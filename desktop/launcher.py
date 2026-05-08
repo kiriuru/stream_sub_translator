@@ -889,7 +889,8 @@ class DesktopLauncher:
 
     def _is_browser_worker_url(self, normalized_url: str) -> bool:
         try:
-            return urlparse(normalized_url).path.rstrip("/").lower() == "/google-asr"
+            path = urlparse(normalized_url).path.rstrip("/").lower()
+            return path in {"/google-asr", "/google-asr-experimental"}
         except Exception:
             return False
 

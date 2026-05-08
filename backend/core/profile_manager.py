@@ -9,6 +9,7 @@ from backend.config import (
     normalize_provider_secret,
     normalize_provider_text_value,
 )
+from backend.core.atomic_io import atomic_write_json
 
 
 class ProfileManager:
@@ -38,7 +39,7 @@ class ProfileManager:
         if callable(self._payload_normalizer):
             normalized = self._payload_normalizer(normalized, profile_name=name)
         if normalized != payload:
-            path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+            atomic_write_json(path, normalized, indent=2, encoding="utf-8")
         return normalized
 
     def _normalize_translation_secrets(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -80,7 +81,7 @@ class ProfileManager:
         stored_payload = self._normalize_translation_secrets(sanitized_payload)
         if callable(self._payload_normalizer):
             stored_payload = self._payload_normalizer(stored_payload, profile_name=name)
-        path.write_text(json.dumps(stored_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(path, stored_payload, indent=2, encoding="utf-8")
         return path, stored_payload
 
     def delete_profile(self, name: str) -> bool:

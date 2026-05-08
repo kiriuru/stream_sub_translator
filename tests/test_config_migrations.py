@@ -70,6 +70,17 @@ class ConfigMigrationTests(unittest.TestCase):
         )
         self.assertIn("custom_presets", migrated["subtitle_style"])
 
+    def test_load_recovers_from_corrupt_json(self) -> None:
+        config_path = self.manager.app_settings.config_path
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("{not: json", encoding="utf-8")
+
+        recovered = self.manager.load()
+
+        self.assertIsInstance(recovered, dict)
+        self.assertEqual(recovered["config_version"], CURRENT_CONFIG_VERSION)
+        self.assertTrue(config_path.exists())
+
     def test_migrate_config_renames_legacy_parakeet_provider(self) -> None:
         migrated = migrate_config(
             {

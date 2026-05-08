@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass, field
 import logging
 import socket
+import threading
 from typing import Any
 from urllib.parse import urlparse
 
@@ -78,6 +79,9 @@ class TranslationEngine:
         self.cache_manager = cache_manager
         self.providers: dict[str, BaseTranslationProvider] = build_default_provider_registry()
         self._last_settings_signature: tuple[tuple[str, str], ...] | None = None
+        self._endpoint_reachability_cache: dict[str, tuple[float, bool, str | None]] = {}
+        self._endpoint_cache_lock = threading.Lock()
+        self._endpoint_cache_ttl_seconds = 5.0
 
     def _supported_provider_name(self, raw_provider_name: Any) -> str:
         provider_name = str(raw_provider_name or _DEFAULT_PROVIDER_NAME).strip()
@@ -197,6 +201,46 @@ class TranslationEngine:
         except Exception as exc:
             return False, f"Local provider endpoint is not reachable: {exc}"
 
+    def _check_local_endpoint_cached(self, endpoint: str | None) -> tuple[bool, str | None]:
+        if not endpoint:
+            return self._check_local_endpoint(endpoint)
+
+        try:
+            now = float(asyncio.get_running_loop().time())
+        except RuntimeError:
+            import time as _time
+
+            now = float(_time.monotonic())
+        with self._endpoint_cache_lock:
+            cached = self._endpoint_reachability_cache.get(endpoint)
+            if cached is not None:
+                checked_at, reachable, reason = cached
+                age = (now - checked_at) if now and checked_at else None
+                if age is not None and age <= self._endpoint_cache_ttl_seconds:
+                    return reachable, reason
+
+        # Best-effort refresh in background; return stale cache if available.
+        def _refresh() -> None:
+            reachable, reason = self._check_local_endpoint(endpoint)
+            import time as _time
+
+            refreshed_at = float(_time.monotonic())
+            with self._endpoint_cache_lock:
+                self._endpoint_reachability_cache[endpoint] = (refreshed_at, reachable, reason)
+
+        with self._endpoint_cache_lock:
+            if cached is not None:
+                age = (now - cached[0]) if cached[0] else None
+                if age is None or age > self._endpoint_cache_ttl_seconds:
+                    threading.Thread(target=_refresh, name="sst-endpoint-readiness", daemon=True).start()
+                _checked_at, reachable, reason = cached
+                return reachable, reason
+
+        reachable, reason = self._check_local_endpoint(endpoint)
+        with self._endpoint_cache_lock:
+            self._endpoint_reachability_cache[endpoint] = (now, reachable, reason)
+        return reachable, reason
+
     def summarize_readiness(self, translation_config: dict[str, Any]) -> TranslationDiagnostics:
         if not isinstance(translation_config, dict) or not translation_config.get("enabled", False):
             return TranslationDiagnostics(
@@ -275,7 +319,7 @@ class TranslationEngine:
 
             if provider.info.local_provider:
                 endpoint = self._provider_endpoint_for_summary(provider_name, normalized_settings)
-                reachable, reason = self._check_local_endpoint(endpoint)
+                reachable, reason = self._check_local_endpoint_cached(endpoint)
                 if not reachable and reason:
                     unreachable_local_providers[line["slot_id"]] = reason
                     all_ready = False

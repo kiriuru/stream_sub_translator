@@ -16,6 +16,18 @@ Post-release изменения для текущей ветки `main` тепе
 
 Ниже, в дополнение к shipped `0.3.0` delta, перечислены небольшие post-release UX hotfix-правки, которые уже лежат в `main` и воспринимаются пользователями как часть “текущего 0.3.0 поведения” (без смены `PROJECT_VERSION`).
 
+### Post-0.3.0 follow-up: P1 runtime stabilization (в текущем `main`)
+
+Кроме UX-правок, в `main` добавлен большой набор стабилизационных изменений уровня runtime/потоков, которые **не меняют продуктовый local-first baseline**, но существенно снижают риск “залипаний” и поломок после restart runtime:
+
+- `TranslationDispatcher` стал restart-safe (`stop() -> start()`), чтобы переводы не “умирали” после остановки/запуска runtime.
+- добавлены atomic write для `user-data/config.json` и профилей (Windows-safe `os.replace()`), чтобы избежать частичных записей.
+- добавлен recovery для битого `user-data/config.json`: файл уезжает в backup с timestamp, а app поднимается на defaults.
+- `RuntimeOrchestrator` ещё сильнее “разрезан” на независимые controllers под `backend/core/runtime/` и стал ближе к фасаду (явные lifecycle + reset/session/export/task/audio helpers).
+- введён explicit lock для active in-memory config state (`ConfigStateService`), чтобы runtime + settings операции не гонялись.
+- translation dispatch получил per-provider concurrency/rate-limits.
+- readiness checks для локальных endpoint-ов переведены на cached/background path.
+
 ## Кратко
 
 `0.3.0` — это не patch-релиз, а крупный архитектурный релиз desktop-продукта.

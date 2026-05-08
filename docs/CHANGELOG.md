@@ -8,6 +8,28 @@
 
 Post-`0.3.0` branch follow-up focused on internal modularization and runtime start behavior, without changing the local-first product default or the public version source of truth.
 
+### P1 runtime stabilization (facade + controllers)
+
+- `TranslationDispatcher` is now restart-safe: `stop()` no longer permanently bricks the dispatcher for subsequent runtime sessions; `start()` resets internal stopped state and tests cover `stop() -> start()` reuse.
+- config and profiles are now written atomically (Windows-safe same-directory temp + `os.replace()`), reducing the chance of partial writes/corruption on power loss or crash.
+- corrupted `user-data/config.json` is recovered automatically:
+  - invalid JSON is moved aside to a timestamped backup;
+  - defaults are restored so the app can still boot;
+  - migrations/normalizers still run on the recovered payload.
+- `RuntimeOrchestrator` is now a thinner facade over explicit controllers under `backend/core/runtime/`, with ordered lifecycle coordination:
+  - runtime state broadcast coalescing (`RuntimeStateController`);
+  - ASR mode resolution and pinning (`AsrModeController`);
+  - translation lifecycle and dispatcher recreation (`TranslationRuntimeController`);
+  - subtitle presentation wrapper (`SubtitlePresentationController`);
+  - unified outbound fanout for WS/OBS (`OutputFanoutController`);
+  - transcript pipeline orchestration (`TranscriptController`);
+  - explicit speech source abstraction + factory (`SpeechSource*`);
+  - deterministic start/stop ordering (`RuntimeLifecycleCoordinator`);
+  - extracted reset/session/task/audio/worker/export helpers (see technical doc).
+- `ConfigStateService` now uses an explicit lock so the active in-memory config snapshot is safe under concurrent runtime + settings operations.
+- translation dispatch now has per-provider concurrency and basic rate limiting (guarding bursty providers while keeping target-parallel behavior).
+- local endpoint readiness checks are now cached with background refresh to avoid blocking hot paths on repeated connectivity probes.
+
 ### Architecture follow-up
 
 - monolithic `backend/config.py` has been replaced by the `backend/config/` package with explicit `defaults.py`, `secrets.py`, and domain normalizers under `backend/config/normalizers/`;
@@ -72,19 +94,11 @@ Post-`0.3.0` branch follow-up focused on internal modularization and runtime sta
 - added architecture coverage asserting that the new `backend/config/`, `backend/core/runtime/`, `backend/asr/parakeet/`, and `backend/translation/` entrypoints exist and import cleanly;
 - added desktop path regression coverage for root `logs/` placement and legacy `user-data/logs/` migration in the launcher/runtime flow;
 - verified the current branch with:
-  - `python -m compileall backend tests desktop`
-  - `.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`
-  - `cmd /c build-desktop.bat`
-  - `cmd /c build-bootstrap-launcher.bat`
-  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\publish-desktop-releases.ps1`
+  - `python -m compileall backend desktop tests`
+  - `.\.venv\Scripts\python.exe -m unittest discover -s tests`
 - verification result:
-  - `155 tests`
+  - `176 tests`
   - `OK`
-  - refreshed artifacts:
-    - `dist\Stream Subtitle Translator\Stream Subtitle Translator.exe`
-    - `dist\bootstrap-launcher\Stream Subtitle Translator.exe`
-    - `F:\AI\stream-sub-translator-desktop-release\Stream Subtitle Translator.exe`
-    - `F:\AI\stream-sub-translator-desktop-release-clean\Stream Subtitle Translator.exe`
 
 ## 0.3.0
 

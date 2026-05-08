@@ -25,43 +25,52 @@ from backend.core.obs_caption_output import ObsCaptionOutput
 from backend.core.parakeet_provider import AsrProviderStatus, OFFICIAL_EU_PARAKEET_REPO
 from backend.core.remote_mode import REMOTE_ROLE_WORKER
 from backend.core.runtime.asr_runtime_controller import (
-    browser_asr_config,
-    browser_asr_source_lang,
-    browser_worker_provider_name,
-    current_asr_mode,
-    current_local_provider_preference,
-    current_remote_role,
     is_browser_asr_mode,
-    is_remote_enabled,
-    resolved_asr_provider,
-    uses_remote_audio_source,
-    uses_remote_event_source,
 )
+from backend.core.runtime.asr_mode_controller import AsrModeController
 from backend.core.runtime.audio_runtime_controller import (
     clear_async_queue,
     pcm16_rms_level,
     prepare_recognition_audio,
 )
-from backend.core.runtime.output_fanout_coordinator import broadcast_event, publish_subtitle_payload
 from backend.core.runtime.runtime_metrics_collector import (
     apply_translation_dispatcher_metrics,
-    enrich_event_payload,
     increment_counter_metric,
     increment_metric,
-    next_event_sequence,
     record_metrics,
     runtime_material_status_snapshot,
 )
 from backend.core.runtime.runtime_status_builder import build_overlay_runtime_status, build_runtime_state
+from backend.core.runtime.runtime_state_controller import RuntimeStateController
+from backend.core.runtime.runtime_lifecycle_coordinator import RuntimeLifecycleCoordinator
+from backend.core.runtime.runtime_reset_controller import RuntimeResetController
+from backend.core.runtime.runtime_session_controller import RuntimeSessionController
+from backend.core.runtime.browser_worker_state_controller import BrowserWorkerStateController
+from backend.core.runtime.processing_tasks_controller import ProcessingTasksController
+from backend.core.runtime.audio_capture_controller import AudioCaptureController
+from backend.core.runtime.remote_audio_state_controller import RemoteAudioStateController
+from backend.core.runtime.speech_source_state_controller import SpeechSourceStateController
+from backend.core.runtime.runtime_stop_state_controller import RuntimeStopStateController
+from backend.core.runtime.runtime_export_controller import RuntimeExportController
+from backend.core.runtime.segment_state_controller import SegmentStateController
+from backend.core.runtime.runtime_start_state_controller import RuntimeStartStateController
 from backend.core.runtime.translation_runtime_coordinator import summarize_translation_diagnostics
+from backend.core.runtime.translation_runtime_controller import TranslationRuntimeController
+from backend.core.runtime.output_fanout_controller import OutputFanoutController
+from backend.core.runtime.transcript_controller import TranscriptController
+from backend.core.runtime.speech_source_factory import SpeechSourceFactory, _Hooks
+from backend.core.runtime.browser_speech_source import BrowserSpeechSource, _BrowserHooks
+from backend.core.runtime.remote_controller_speech_source import RemoteControllerSpeechSource, _RemoteControllerHooks
+from backend.core.runtime.remote_worker_speech_source import RemoteWorkerSpeechSource, _RemoteWorkerHooks
+from backend.core.runtime.local_parakeet_speech_source import LocalParakeetSpeechSource, _LocalParakeetHooks
 from backend.core.segment_queue import AsrWorkItem, SegmentQueue
 from backend.core.structured_runtime_logger import StructuredRuntimeLogger
+from backend.core.runtime.subtitle_presentation_controller import SubtitlePresentationController
 from backend.core.subtitle_router import (
     BROWSER_ASR_MODE,
     BROWSER_ASR_MODES,
     EXPERIMENTAL_BROWSER_ASR_MODE,
     LOCAL_ASR_MODE,
-    SubtitleRouter,
 )
 from backend.core.translation_dispatcher import TranslationDispatcher
 from backend.core.translation_engine import TranslationEngine
@@ -135,7 +144,7 @@ class RuntimeOrchestrator:
         self.ws_manager = ws_manager
         self.config_getter = config_getter
         self._obs_caption_output = ObsCaptionOutput(config_getter)
-        self.subtitle_router = SubtitleRouter(
+        self.subtitle_router = SubtitlePresentationController(
             ws_manager,
             config_getter,
             completed_callback=self._handle_completed_export_record,
@@ -160,6 +169,7 @@ class RuntimeOrchestrator:
         self._asr_task: asyncio.Task | None = None
         self._remote_audio_queue: asyncio.Queue[bytes] | None = None
         self._device_id: str | None = None
+        self._local_audio_device_id: str | None = None
         self._sequence = 0
         self._segment_counter = 0
         self._active_segment_id: str | None = None
@@ -184,33 +194,223 @@ class RuntimeOrchestrator:
         self._last_partial_emit_monotonic_by_segment: dict[str, float] = {}
         self._external_worker_connected = False
         self._browser_asr_gateway = BrowserAsrGateway(structured_logger=structured_logger)
-        self._active_runtime_mode: str | None = None
-        self._active_local_provider_preference: str | None = None
+        self._asr_mode = AsrModeController(self.config_getter)
         self._remote_audio_connected = False
         self._remote_audio_session_id: str | None = None
         self._remote_audio_last_chunk_monotonic: float | None = None
-        self._translation_dispatcher_snapshot: dict[str, Any] = {}
-        self._runtime_event_sequence = 0
-        self._runtime_event_sequence_by_type: dict[str, int] = {}
-        self._last_runtime_status_signature: str | None = None
-        self._last_runtime_status_broadcast_monotonic: float = 0.0
         self._runtime_status_heartbeat_interval_ms = 1000
+        self._state_controller = RuntimeStateController(
+            ws_manager,
+            metrics_getter=lambda: self._metrics,
+            metrics_setter=lambda metrics: setattr(self, "_metrics", metrics),
+            increment_counter_metric=lambda key, amount: self._increment_counter_metric(key, amount),
+            heartbeat_interval_ms=self._runtime_status_heartbeat_interval_ms,
+        )
+        self._output = OutputFanoutController(
+            ws_manager,
+            obs_caption_output=self._obs_caption_output,
+            state_controller=self._state_controller,
+        )
         self._active_browser_worker_session_id: str | None = None
         self._active_browser_worker_generation_id: int = 0
         self._last_browser_worker_status_signature: tuple[Any, ...] | None = None
         self._asr_runtime_generation: int = 0
         self._in_flight_transcribe_count: int = 0
-        self._translation_dispatcher = TranslationDispatcher(
-            self._translation_engine,
-            self.config_getter,
-            self._publish_translation_dispatch_event,
-            self.subtitle_router.is_sequence_relevant_for_translation,
-            self._apply_translation_dispatcher_metrics,
+        self._translation = TranslationRuntimeController(
+            translation_engine=self._translation_engine,
+            config_getter=self.config_getter,
+            is_sequence_relevant_for_translation=self.subtitle_router.is_sequence_relevant_for_translation,
+            handle_translation_event=self._publish_translation_dispatch_event,
+            metrics_callback=self._apply_translation_dispatcher_metrics,
             structured_logger=structured_logger,
         )
+        self._lifecycle = RuntimeLifecycleCoordinator(
+            start_translation=self._translation.start,
+            stop_translation=self._translation.stop,
+            start_obs_captions=self._obs_caption_output.start,
+            stop_obs_captions=self._obs_caption_output.stop,
+            apply_obs_settings=lambda: self._output.apply_live_settings(self.config_getter()),
+            reset_subtitles=self.subtitle_router.reset,
+        )
+        self._reset = RuntimeResetController(
+            reset_vad=self._vad.reset,
+            clear_segment_queue=self._segment_queue.clear,
+            reset_asr_runtime_state=self._asr_engine.reset_runtime_state,
+            reset_state_broadcast=self._state_controller.reset_broadcast_state,
+            clear_partial_tracking=lambda: (
+                self._last_partial_text_by_segment.clear(),
+                self._last_partial_emit_monotonic_by_segment.clear(),
+            ),
+            reset_browser_worker_status_signature=lambda: setattr(self, "_last_browser_worker_status_signature", None),
+        )
+        self._session = RuntimeSessionController(
+            bump_asr_runtime_generation=lambda: setattr(self, "_asr_runtime_generation", self._asr_runtime_generation + 1),
+            set_sequence_zero=lambda: setattr(self, "_sequence", 0),
+            new_session_id=lambda: datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f"),
+            now_utc_iso=lambda: datetime.now(timezone.utc).isoformat(),
+            now_monotonic=time.perf_counter,
+            set_session_started=lambda session_id, started_at_utc, started_at_monotonic: (
+                setattr(self, "_session_id", session_id),
+                setattr(self, "_session_started_at_utc", started_at_utc),
+                setattr(self, "_session_started_at_monotonic", started_at_monotonic),
+            ),
+            reset_export_session=self._reset_export_session,
+            reset_metrics=lambda: setattr(self, "_metrics", RuntimeMetrics()),
+            reset_in_flight_transcribe_count=lambda: setattr(self, "_in_flight_transcribe_count", 0),
+            clear_runtime_loop=lambda: setattr(self, "_runtime_loop", None),
+        )
+        self._browser_worker_state = BrowserWorkerStateController(
+            set_external_worker_connected=lambda connected: setattr(self, "_external_worker_connected", bool(connected)),
+            set_active_session_id=lambda session_id: setattr(self, "_active_browser_worker_session_id", session_id),
+            set_active_generation_id=lambda generation_id: setattr(self, "_active_browser_worker_generation_id", int(generation_id)),
+            clear_status_signature=lambda: setattr(self, "_last_browser_worker_status_signature", None),
+            set_status_signature=lambda signature: setattr(self, "_last_browser_worker_status_signature", signature),
+        )
+        self._remote_audio_state = RemoteAudioStateController(
+            ensure_queue=self._ensure_remote_audio_queue,
+            shutdown_queue=self._shutdown_remote_audio_queue,
+            clear_queue=self._clear_remote_audio_queue,
+            set_connected=lambda connected: setattr(self, "_remote_audio_connected", bool(connected)),
+            set_session_id=lambda session_id: setattr(self, "_remote_audio_session_id", session_id),
+            set_last_chunk_monotonic=lambda value: setattr(self, "_remote_audio_last_chunk_monotonic", value),
+            now_monotonic=time.perf_counter,
+        )
+        self._start_state = RuntimeStartStateController(
+            set_runtime_loop=lambda: setattr(self, "_runtime_loop", asyncio.get_running_loop()),
+            clear_latest_status_message=lambda: setattr(self, "_latest_runtime_status_message", None),
+            reset_metrics=lambda: setattr(self, "_metrics", RuntimeMetrics()),
+            reset_in_flight_transcribe_count=lambda: setattr(self, "_in_flight_transcribe_count", 0),
+        )
+        self._stop_state = RuntimeStopStateController(
+            clear_latest_status_message=lambda: setattr(self, "_latest_runtime_status_message", None),
+            bump_asr_runtime_generation=lambda: setattr(self, "_asr_runtime_generation", self._asr_runtime_generation + 1),
+            set_idle_state=lambda: self._set_state(is_running=False, status="idle", started_at_utc=None, last_error=None),
+        )
+        self._export_ctl = RuntimeExportController(
+            export_session_files=lambda stopped_at_utc: self._export_session_files(stopped_at_utc=stopped_at_utc),
+        )
+        self._segment_state = SegmentStateController(
+            get_active_segment_id=lambda: self._active_segment_id,
+            clear_active_segment=lambda: (
+                setattr(self, "_active_segment_id", None),
+                setattr(self, "_active_segment_revision", 0),
+            ),
+            clear_partial_tracking_for_segment=lambda segment_id: self._clear_partial_tracking(segment_id),
+        )
+        async def _await_task(task: object) -> None:
+            await task  # type: ignore[misc]
+
+        self._processing_tasks = ProcessingTasksController(
+            get_capture_task=lambda: self._capture_task,
+            set_capture_task=lambda task: setattr(self, "_capture_task", task),
+            get_asr_task=lambda: self._asr_task,
+            set_asr_task=lambda task: setattr(self, "_asr_task", task),
+            create_capture_task=lambda: asyncio.create_task(self._capture_loop()),
+            create_asr_task=lambda: asyncio.create_task(self._asr_loop()),
+            await_task=_await_task,
+        )
+        self._audio_capture_ctl = AudioCaptureController(
+            get_capture=lambda: self._audio_capture,
+            set_capture=lambda capture: setattr(self, "_audio_capture", capture),
+            # Must be late-bound for tests that patch AudioCapture in this module.
+            create_capture=lambda: AudioCapture(),
+            get_device_id=lambda: self._local_audio_device_id,
+            stop_in_thread=lambda capture: asyncio.to_thread(capture.stop),
+        )
+        self._transcript = TranscriptController(
+            subtitle=self.subtitle_router,
+            translation=self._translation,
+            output=self._output,
+            publish_transcript=lambda event: self._broadcast_transcript(event),
+            publish_source_event=self._output.publish_source_event,
+            default_source_lang=str(self.config_getter().get("source_lang", "auto") or "auto"),
+        )
+        self._speech_source_factory = SpeechSourceFactory(
+            _Hooks(
+                browser_worker_connected=self._browser_asr_worker_connected_impl,
+                browser_worker_disconnected=self._browser_asr_worker_disconnected_impl,
+                update_browser_worker_status=self._update_browser_asr_worker_status_impl,
+                ingest_external_asr_update=self._ingest_external_asr_update_impl,
+                ingest_remote_audio_chunk=self._ingest_remote_audio_chunk_impl,
+                ingest_remote_transcript_event=self._ingest_remote_transcript_event_impl,
+                ingest_remote_translation_event=self._ingest_remote_translation_event_impl,
+                start_processing_tasks=self._start_processing_tasks_impl,
+                stop_processing_tasks=self._stop_processing_tasks_impl,
+                start_audio_capture=self._start_audio_capture_impl,
+                stop_audio_capture=self._stop_audio_capture_impl,
+                init_remote_audio=self._init_remote_audio_impl,
+                shutdown_remote_audio=self._shutdown_remote_audio_impl,
+                init_browser_worker=self._init_browser_worker_impl,
+                shutdown_browser_worker=self._shutdown_browser_worker_impl,
+            )
+        )
+        self._browser_speech_source = BrowserSpeechSource(
+            gateway=self._browser_asr_gateway,
+            hooks=_BrowserHooks(
+                browser_worker_connected=self._browser_asr_worker_connected_impl,
+                browser_worker_disconnected=self._browser_asr_worker_disconnected_impl,
+                update_browser_worker_status=self._update_browser_asr_worker_status_impl,
+                build_partial_event=self._build_browser_partial_event,
+                build_final_event=self._build_browser_final_event,
+                transcript_sink_partial=self._handle_browser_partial_event,
+                transcript_sink_final=self._handle_browser_final_event,
+                browser_source_lang=self._browser_asr_source_lang,
+                note_worker_event=lambda: self._increment_counter_metric("browser_worker_event_count", 1),
+            ),
+        )
+        self._remote_controller_source = RemoteControllerSpeechSource(
+            _RemoteControllerHooks(
+                set_runtime_transcribing=lambda message: self._set_runtime_state(
+                    is_running=True,
+                    status="transcribing",
+                    started_at_utc=self._state.started_at_utc,
+                    status_message=message,
+                ),
+                set_runtime_translating=lambda message: self._set_runtime_state(
+                    is_running=True,
+                    status="translating",
+                    started_at_utc=self._state.started_at_utc,
+                    status_message=message,
+                ),
+                set_runtime_listening=lambda message: self._set_runtime_state(
+                    is_running=True,
+                    status="listening",
+                    started_at_utc=self._state.started_at_utc,
+                    status_message=message,
+                ),
+                transcript_sink=self._transcript.handle_event,
+                handle_translation_event=self._publish_translation_dispatch_event,
+                increment_final_metric=lambda: self._increment_metric("finals_emitted"),
+            )
+        )
+        self._remote_worker_source = RemoteWorkerSpeechSource(
+            _RemoteWorkerHooks(ingest_remote_audio_chunk=self._ingest_remote_audio_chunk_impl)
+        )
+        self._local_parakeet_source = LocalParakeetSpeechSource(
+            _LocalParakeetHooks(
+                start=self._start_local_parakeet_impl,
+                stop=self._stop_local_parakeet_impl,
+            )
+        )
+        self._speech_source_state = SpeechSourceStateController(
+            get_active_source=lambda: getattr(self, "_active_speech_source", None),
+            set_active_source=lambda source: setattr(self, "_active_speech_source", source),
+            set_local_audio_device_id=lambda device_id: setattr(self, "_local_audio_device_id", device_id),
+            set_device_id=lambda device_id: setattr(self, "_device_id", device_id),
+            choose_source=lambda is_browser_mode, uses_remote_audio_source, uses_remote_event_source: self._speech_source_factory.build(
+                is_browser_mode=is_browser_mode,
+                uses_remote_audio_source=uses_remote_audio_source,
+                uses_remote_event_source=uses_remote_event_source,
+            ),
+            browser_source=self._browser_speech_source,
+            remote_controller_source=self._remote_controller_source,
+            remote_worker_source=self._remote_worker_source,
+            local_parakeet_source=self._local_parakeet_source,
+        )
+        self._active_speech_source = None
         self._apply_vad_tuning()
         self._apply_recognition_processing_settings()
-        self._translation_engine.apply_live_settings(self.config_getter().get("translation", {}))
+        self._translation.apply_live_settings()
 
     def _emit_asr_runtime_status(self, message: str) -> None:
         normalized = str(message or "").strip()
@@ -243,93 +443,64 @@ class RuntimeOrchestrator:
         )
 
     def _current_asr_mode(self) -> str:
-        return current_asr_mode(self._resolved_asr_provider())
+        return self._asr_mode.current_mode(state_is_running=self._state.is_running)
 
     def _is_browser_asr_mode(self, mode: str | None = None) -> bool:
         return is_browser_asr_mode(mode or self._current_asr_mode())
 
     def _resolved_asr_provider(self) -> dict[str, Any]:
-        return resolved_asr_provider(
-            config_getter=self.config_getter,
-            state_is_running=self._state.is_running,
-            active_runtime_mode=self._active_runtime_mode,
-            active_local_provider_preference=self._active_local_provider_preference,
-        )
+        return self._asr_mode.resolve(state_is_running=self._state.is_running)
 
     def _current_local_provider_preference(self) -> str:
-        return current_local_provider_preference(self._resolved_asr_provider())
+        return self._asr_mode.current_local_provider_preference(state_is_running=self._state.is_running)
 
     def _browser_asr_config(self) -> dict[str, object]:
-        return browser_asr_config(self.config_getter())
+        return self._asr_mode.browser_config()
 
     def _browser_asr_source_lang(self) -> str:
-        return browser_asr_source_lang(self.config_getter())
+        return self._asr_mode.browser_source_lang()
 
     def _browser_worker_provider_name(self) -> str:
-        return browser_worker_provider_name(self._current_asr_mode())
+        return self._asr_mode.browser_worker_provider_name(state_is_running=self._state.is_running)
 
     def _current_remote_role(self) -> str:
-        return current_remote_role(self.config_getter)
+        return self._asr_mode.current_remote_role()
 
     def _uses_remote_audio_source(self) -> bool:
-        return uses_remote_audio_source(
-            mode=self._current_asr_mode(),
-            remote_role=self._current_remote_role(),
-        )
+        return self._asr_mode.uses_remote_audio_source(state_is_running=self._state.is_running)
 
     def _is_remote_enabled(self) -> bool:
-        return is_remote_enabled(self.config_getter)
+        return self._asr_mode.is_remote_enabled()
 
     def _uses_remote_event_source(self) -> bool:
-        return uses_remote_event_source(
-            mode=self._current_asr_mode(),
-            remote_enabled=self._is_remote_enabled(),
-            remote_role=self._current_remote_role(),
-        )
+        return self._asr_mode.uses_remote_event_source(state_is_running=self._state.is_running)
 
     async def _broadcast_runtime(self) -> None:
-        payload = self._state.model_dump()
-        signature = self._runtime_material_status_snapshot(payload)
-        now_monotonic = time.perf_counter()
-        important_change = signature != self._last_runtime_status_signature
-        elapsed_ms = (now_monotonic - self._last_runtime_status_broadcast_monotonic) * 1000.0
-        if not important_change and elapsed_ms < self._runtime_status_heartbeat_interval_ms:
-            self._increment_counter_metric("runtime_status_duplicate_suppressed", 1)
-            self._increment_counter_metric("runtime_events_duplicate_suppressed", 1)
-            return
-        if important_change:
-            self._increment_counter_metric("runtime_status_broadcast_count", 1)
-        else:
-            self._increment_counter_metric("runtime_status_heartbeat_sent", 1)
-        self._last_runtime_status_signature = signature
-        self._last_runtime_status_broadcast_monotonic = now_monotonic
-        await self.ws_manager.broadcast(
-            {
-                "type": "runtime_update",
-                "payload": self._enrich_event_payload("runtime_status", payload),
-            }
-        )
+        if not hasattr(self, "_state_controller") or self._state_controller is None:  # type: ignore[attr-defined]
+            heartbeat = int(getattr(self, "_runtime_status_heartbeat_interval_ms", 1000) or 1000)
+            self._state_controller = RuntimeStateController(  # type: ignore[attr-defined]
+                self.ws_manager,
+                metrics_getter=lambda: self._metrics,
+                metrics_setter=lambda metrics: setattr(self, "_metrics", metrics),
+                increment_counter_metric=lambda key, amount: self._increment_counter_metric(key, amount),
+                heartbeat_interval_ms=heartbeat,
+            )
+        if not hasattr(self, "_output") or self._output is None:  # type: ignore[attr-defined]
+            self._output = OutputFanoutController(  # type: ignore[attr-defined]
+                self.ws_manager,
+                obs_caption_output=getattr(self, "_obs_caption_output", None),
+                state_controller=self._state_controller,  # type: ignore[arg-type]
+            )
+        await self._output.broadcast_runtime_update(self._state)  # type: ignore[attr-defined]
 
     async def _broadcast_transcript(self, event: TranscriptEvent) -> None:
-        await broadcast_event(
-            self.ws_manager,
-            channel="transcript_update",
-            payload=self._enrich_event_payload("transcript_update", event.model_dump()),
-        )
+        await self._output.publish_transcript(event)
 
     async def _broadcast_transcript_segment_event(self, event: TranscriptEvent) -> None:
-        await broadcast_event(
-            self.ws_manager,
-            channel="transcript_segment_event",
-            payload=self._enrich_event_payload("transcript_segment_event", event.model_dump()),
-        )
+        await self._output.publish_transcript_segment_event(event)
 
     async def _broadcast_translation(self, event: TranslationEvent) -> None:
-        await broadcast_event(
-            self.ws_manager,
-            channel="translation_update",
-            payload=self._enrich_event_payload("translation_update", event.model_dump()),
-        )
+        await self._output.publish_translation(event)
 
     async def _publish_translation_dispatch_event(self, event: TranslationEvent) -> None:
         await self.subtitle_router.handle_translation(event)
@@ -338,7 +509,7 @@ class RuntimeOrchestrator:
         await self._broadcast_runtime()
 
     async def _handle_obs_caption_payload(self, payload: SubtitlePayloadEvent) -> None:
-        await publish_subtitle_payload(self._obs_caption_output, payload)
+        await self._output.publish_subtitle_payload(payload)
 
     def _reset_export_session(self) -> None:
         self._session_id = None
@@ -405,8 +576,8 @@ class RuntimeOrchestrator:
     async def apply_live_settings(self, config: dict) -> None:
         self._apply_vad_tuning()
         self._apply_recognition_processing_settings()
-        self._translation_engine.apply_live_settings(config.get("translation", {}) if isinstance(config, dict) else {})
-        await self._obs_caption_output.apply_live_settings(config if isinstance(config, dict) else {})
+        self._translation.apply_live_settings()
+        await self._output.apply_live_settings(config if isinstance(config, dict) else {})
         await self.subtitle_router.republish_latest()
         self._state = self._build_runtime_state(
             is_running=self._state.is_running,
@@ -471,28 +642,16 @@ class RuntimeOrchestrator:
         return runtime_material_status_snapshot(payload)
 
     def _next_event_sequence(self, event_type: str) -> int:
-        self._metrics, self._runtime_event_sequence = next_event_sequence(
-            self._metrics,
-            runtime_event_sequence=self._runtime_event_sequence,
-            runtime_event_sequence_by_type=self._runtime_event_sequence_by_type,
-            event_type=event_type,
-        )
-        return self._runtime_event_sequence
+        _ = event_type
+        # Kept for backward-compat with callers; event sequencing is handled by RuntimeStateController.enrich().
+        return 0
 
     def _enrich_event_payload(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
-        self._metrics, self._runtime_event_sequence, enriched = enrich_event_payload(
-            self._metrics,
-            payload=payload,
-            event_type=event_type,
-            runtime_event_sequence=self._runtime_event_sequence,
-            runtime_event_sequence_by_type=self._runtime_event_sequence_by_type,
-        )
-        return enriched
+        return self._state_controller.enrich(event_type, payload)
 
     def _apply_translation_dispatcher_metrics(self, metrics: dict) -> None:
         if not isinstance(metrics, dict):
             return
-        self._translation_dispatcher_snapshot = dict(metrics)
         self._metrics = apply_translation_dispatcher_metrics(self._metrics, snapshot=metrics)
 
     def _increment_metric(self, key: Literal["partial_updates_emitted", "finals_emitted", "suppressed_partial_updates"]) -> None:
@@ -992,20 +1151,12 @@ class RuntimeOrchestrator:
                         lifecycle_event=lifecycle_event,
                         segment=segment,
                     )
-                    await self._broadcast_transcript(transcript_event)
                     if work_item.kind == "final":
                         self._increment_metric("finals_emitted")
                         self._clear_partial_tracking(work_item.segment_id)
-                        await self.subtitle_router.handle_transcript(transcript_event)
-                        await self._obs_caption_output.publish_source_event(transcript_event)
-                        await self._translation_dispatcher.submit_final(
-                            sequence=self._sequence,
-                            source_text=text,
-                            source_lang=segment.source_lang,
-                        )
+                        await self._transcript.handle_event(transcript_event)
                     else:
-                        await self.subtitle_router.handle_transcript(transcript_event)
-                        await self._obs_caption_output.publish_source_event(transcript_event)
+                        await self._transcript.handle_event(transcript_event)
                         self._increment_metric("partial_updates_emitted")
                 elif work_item.kind == "final":
                     self._clear_partial_tracking(work_item.segment_id)
@@ -1051,6 +1202,135 @@ class RuntimeOrchestrator:
             )
         )
 
+    async def _handle_browser_partial_event(self, event: TranscriptEvent) -> None:
+        await self._transcript.handle_event(event)
+        self._increment_metric("partial_updates_emitted")
+        await self._set_listening_if_current(
+            "listening",
+            last_error=None,
+            status_message="Browser speech recognition is active.",
+            broadcast=False,
+        )
+
+    async def _handle_browser_final_event(self, event: TranscriptEvent) -> None:
+        self._increment_metric("finals_emitted")
+        await self._transcript.handle_event(event)
+        self._active_segment_id = None
+        self._active_segment_revision = 0
+        await self._set_listening_if_current(
+            "listening",
+            last_error=None,
+            status_message="Browser speech recognition is active.",
+            broadcast=False,
+        )
+
+    async def _build_browser_partial_event(
+        self,
+        *,
+        partial_text: str,
+        source_lang: str,
+        client_segment_id: str | None,
+        forced_final: bool,
+        asr_result_created_at_ms: int | None,
+        worker_send_started_at_ms: int | None,
+        worker_message_sequence: int | None,
+        worker_generation_id: int | None,
+        worker_session_id: str | None,
+        backend_received_at_ms: int | None,
+    ) -> TranscriptEvent | None:
+        if not self._state.is_running or not self._is_browser_asr_mode():
+            return None
+        if not partial_text:
+            return None
+        segment_id, revision, started_now = self._assign_segment_tracking("partial", preferred_segment_id=client_segment_id)
+        if started_now:
+            await self._broadcast_external_segment_started(
+                segment_id=segment_id,
+                revision=revision,
+                source_lang=source_lang,
+            )
+        if not self._should_emit_partial(segment_id, partial_text):
+            self._increment_metric("suppressed_partial_updates")
+            return None
+        self._mark_partial_emitted(segment_id, partial_text)
+        self._sequence += 1
+        backend_published_to_router_at_ms = int(time.time() * 1000)
+        segment = self._build_external_transcript_segment(
+            segment_id=segment_id,
+            revision=revision,
+            text=partial_text,
+            is_final=False,
+            source_lang=source_lang,
+            asr_result_created_at_ms=asr_result_created_at_ms,
+            worker_send_started_at_ms=worker_send_started_at_ms,
+            worker_message_sequence=worker_message_sequence,
+            worker_generation_id=worker_generation_id,
+            worker_session_id=worker_session_id,
+            backend_received_at_ms=backend_received_at_ms,
+            backend_published_to_router_at_ms=backend_published_to_router_at_ms,
+        )
+        return TranscriptEvent(
+            event="partial",
+            text=partial_text,
+            device_id=f"{self._browser_worker_provider_name()}_worker",
+            sequence=self._sequence,
+            lifecycle_event="partial_updated",
+            segment=segment,
+            forced_final=bool(forced_final),
+        )
+
+    async def _build_browser_final_event(
+        self,
+        *,
+        final_text: str,
+        source_lang: str,
+        client_segment_id: str | None,
+        forced_final: bool,
+        asr_result_created_at_ms: int | None,
+        worker_send_started_at_ms: int | None,
+        worker_message_sequence: int | None,
+        worker_generation_id: int | None,
+        worker_session_id: str | None,
+        backend_received_at_ms: int | None,
+    ) -> TranscriptEvent | None:
+        if not self._state.is_running or not self._is_browser_asr_mode():
+            return None
+        if not final_text:
+            return None
+        segment_id, revision, started_now = self._assign_segment_tracking("final", preferred_segment_id=client_segment_id)
+        if started_now:
+            await self._broadcast_external_segment_started(
+                segment_id=segment_id,
+                revision=revision,
+                source_lang=source_lang,
+            )
+        self._clear_partial_tracking(segment_id)
+        self._sequence += 1
+        backend_published_to_router_at_ms = int(time.time() * 1000)
+        segment = self._build_external_transcript_segment(
+            segment_id=segment_id,
+            revision=revision,
+            text=final_text,
+            is_final=True,
+            source_lang=source_lang,
+            asr_result_created_at_ms=asr_result_created_at_ms,
+            worker_send_started_at_ms=worker_send_started_at_ms,
+            worker_message_sequence=worker_message_sequence,
+            worker_generation_id=worker_generation_id,
+            worker_session_id=worker_session_id,
+            backend_received_at_ms=backend_received_at_ms,
+            backend_published_to_router_at_ms=backend_published_to_router_at_ms,
+        )
+        return TranscriptEvent(
+            event="final",
+            text=final_text,
+            device_id=f"{self._browser_worker_provider_name()}_worker",
+            sequence=self._sequence,
+            lifecycle_event="segment_finalized",
+            segment=segment,
+            forced_final=bool(forced_final),
+        )
+
     def _build_external_transcript_segment(
         self,
         *,
@@ -1089,9 +1369,16 @@ class RuntimeOrchestrator:
         )
 
     async def browser_asr_worker_connected(self) -> None:
+        source = getattr(self, "_active_speech_source", None)
+        if source is not None:
+            await source.browser_worker_connected()
+            return
+        await self._browser_asr_worker_connected_impl()
+
+    async def _browser_asr_worker_connected_impl(self) -> None:
+        self._browser_worker_state.reset_for_start()
+        # Connected event implies the worker is now reachable.
         self._external_worker_connected = True
-        self._active_browser_worker_session_id = None
-        self._active_browser_worker_generation_id = 0
         browser_mode = self._current_asr_mode() if self._is_browser_asr_mode() else None
         self._browser_asr_gateway.worker_connected(browser_mode=browser_mode)
         if self._state.is_running and self._is_browser_asr_mode():
@@ -1108,15 +1395,23 @@ class RuntimeOrchestrator:
             )
 
     async def browser_asr_worker_disconnected(self) -> None:
-        self._external_worker_connected = False
-        self._active_browser_worker_session_id = None
-        self._active_browser_worker_generation_id = 0
+        source = getattr(self, "_active_speech_source", None)
+        if source is not None:
+            await source.browser_worker_disconnected()
+            return
+        await self._browser_asr_worker_disconnected_impl()
+
+    async def _browser_asr_worker_disconnected_impl(self) -> None:
+        self._browser_worker_state.reset_for_stop()
         browser_mode = self._current_asr_mode() if self._is_browser_asr_mode() else None
         self._browser_asr_gateway.worker_disconnected(browser_mode=browser_mode)
-        segment_id = self._active_segment_id
-        self._active_segment_id = None
-        self._active_segment_revision = 0
-        self._clear_partial_tracking(segment_id)
+        if hasattr(self, "_segment_state") and self._segment_state is not None:  # type: ignore[attr-defined]
+            self._segment_state.cleanup_on_browser_worker_disconnect()  # type: ignore[attr-defined]
+        else:
+            segment_id = self._active_segment_id
+            self._active_segment_id = None
+            self._active_segment_revision = 0
+            self._clear_partial_tracking(segment_id)
         await self.subtitle_router.clear_active_partial()
         if self._state.is_running and self._is_browser_asr_mode():
             await self._set_runtime_state(
@@ -1131,6 +1426,13 @@ class RuntimeOrchestrator:
             )
 
     async def update_browser_asr_worker_status(self, payload: dict[str, Any]) -> None:
+        source = getattr(self, "_active_speech_source", None)
+        if source is not None:
+            await source.update_browser_worker_status(payload)
+            return
+        await self._update_browser_asr_worker_status_impl(payload)
+
+    async def _update_browser_asr_worker_status_impl(self, payload: dict[str, Any]) -> None:
         previous = self._browser_asr_gateway.diagnostics()
         self._browser_asr_gateway.update_status(payload)
         if self._state.is_running and self._is_browser_asr_mode():
@@ -1161,7 +1463,10 @@ class RuntimeOrchestrator:
             if signature == self._last_browser_worker_status_signature and previous.model_dump() == current.model_dump():
                 self._increment_counter_metric("browser_worker_event_coalesced", 1)
                 return
-            self._last_browser_worker_status_signature = signature
+            if hasattr(self, "_browser_worker_state") and self._browser_worker_state is not None:  # type: ignore[attr-defined]
+                self._browser_worker_state.update_status_signature(signature)  # type: ignore[attr-defined]
+            else:
+                self._last_browser_worker_status_signature = signature
             await self._broadcast_runtime()
 
     async def ingest_external_asr_update(
@@ -1180,164 +1485,70 @@ class RuntimeOrchestrator:
         worker_message_sequence: int | None = None,
         backend_received_at_ms: int | None = None,
     ) -> None:
-        if not self._state.is_running or not self._is_browser_asr_mode():
+        source = getattr(self, "_active_speech_source", None)
+        if source is not None:
+            await source.ingest_external_asr_update(
+                partial=partial,
+                final=final,
+                is_final=is_final,
+                source_lang=source_lang,
+                generation_id=generation_id,
+                session_id=session_id,
+                client_segment_id=client_segment_id,
+                forced_final=forced_final,
+                asr_result_created_at_ms=asr_result_created_at_ms,
+                worker_send_started_at_ms=worker_send_started_at_ms,
+                worker_message_sequence=worker_message_sequence,
+                backend_received_at_ms=backend_received_at_ms,
+            )
             return
-        normalized_session_id = str(session_id or "").strip() or None
-        normalized_generation_id = max(0, int(generation_id or 0))
-        if normalized_session_id:
-            if self._active_browser_worker_session_id and normalized_session_id != self._active_browser_worker_session_id:
-                self._increment_counter_metric("browser_worker_event_coalesced", 1)
-                self._browser_asr_gateway.update_status(
-                    {"stale_worker_events_ignored": self._browser_asr_gateway.diagnostics().stale_worker_events_ignored + 1}
-                )
-                return
-            self._active_browser_worker_session_id = normalized_session_id
-        if normalized_generation_id:
-            if normalized_generation_id < self._active_browser_worker_generation_id:
-                self._increment_counter_metric("browser_worker_event_coalesced", 1)
-                self._browser_asr_gateway.update_status(
-                    {"stale_worker_events_ignored": self._browser_asr_gateway.diagnostics().stale_worker_events_ignored + 1}
-                )
-                return
-            self._active_browser_worker_generation_id = normalized_generation_id
-        self._increment_counter_metric("browser_worker_event_count", 1)
+        return
 
-        normalized_source_lang = str(source_lang or self._browser_asr_source_lang() or "auto").strip().lower() or "auto"
-        partial_text = str(partial or "").strip()
-        final_text = str(final or "").strip()
-        normalized_client_segment_id = str(client_segment_id or "").strip() or None
-        backend_published_to_router_at_ms = int(time.time() * 1000)
-        if is_final and not final_text and partial_text:
-            final_text = partial_text
-
-        if partial_text and not is_final:
-            segment_id, revision, started_now = self._assign_segment_tracking(
-                "partial",
-                preferred_segment_id=normalized_client_segment_id,
-            )
-            if started_now:
-                await self._broadcast_external_segment_started(
-                    segment_id=segment_id,
-                    revision=revision,
-                    source_lang=normalized_source_lang,
-                )
-            if not self._should_emit_partial(segment_id, partial_text):
-                self._increment_metric("suppressed_partial_updates")
-                return
-            self._mark_partial_emitted(segment_id, partial_text)
-            self._sequence += 1
-            transcript_event = TranscriptEvent(
-                event="partial",
-                text=partial_text,
-                device_id=f"{self._browser_worker_provider_name()}_worker",
-                sequence=self._sequence,
-                lifecycle_event="partial_updated",
-                segment=self._build_external_transcript_segment(
-                    segment_id=segment_id,
-                    revision=revision,
-                    text=partial_text,
-                    is_final=False,
-                    source_lang=normalized_source_lang,
-                    asr_result_created_at_ms=asr_result_created_at_ms,
-                    worker_send_started_at_ms=worker_send_started_at_ms,
-                    worker_message_sequence=worker_message_sequence,
-                    worker_generation_id=normalized_generation_id or None,
-                    worker_session_id=normalized_session_id,
-                    backend_received_at_ms=backend_received_at_ms,
-                    backend_published_to_router_at_ms=backend_published_to_router_at_ms,
-                ),
-            )
-            self._browser_asr_gateway.note_partial(
-                text_len=len(partial_text),
-                source_lang=normalized_source_lang,
-                sequence=transcript_event.sequence,
-            )
-            await self._broadcast_transcript(transcript_event)
-            await self.subtitle_router.handle_transcript(transcript_event)
-            await self._obs_caption_output.publish_source_event(transcript_event)
-            self._increment_metric("partial_updates_emitted")
-            await self._set_listening_if_current(
-                "listening",
-                last_error=None,
-                status_message="Browser speech recognition is active.",
-                broadcast=False,
-            )
-
-        if is_final and final_text:
-            segment_id, revision, started_now = self._assign_segment_tracking(
-                "final",
-                preferred_segment_id=normalized_client_segment_id,
-            )
-            if started_now:
-                await self._broadcast_external_segment_started(
-                    segment_id=segment_id,
-                    revision=revision,
-                    source_lang=normalized_source_lang,
-                )
-            self._clear_partial_tracking(segment_id)
-            self._sequence += 1
-            transcript_event = TranscriptEvent(
-                event="final",
-                text=final_text,
-                device_id=f"{self._browser_worker_provider_name()}_worker",
-                sequence=self._sequence,
-                lifecycle_event="segment_finalized",
-                segment=self._build_external_transcript_segment(
-                    segment_id=segment_id,
-                    revision=revision,
-                    text=final_text,
-                    is_final=True,
-                    source_lang=normalized_source_lang,
-                    asr_result_created_at_ms=asr_result_created_at_ms,
-                    worker_send_started_at_ms=worker_send_started_at_ms,
-                    worker_message_sequence=worker_message_sequence,
-                    worker_generation_id=normalized_generation_id or None,
-                    worker_session_id=normalized_session_id,
-                    backend_received_at_ms=backend_received_at_ms,
-                    backend_published_to_router_at_ms=backend_published_to_router_at_ms,
-                ),
-            )
-            self._browser_asr_gateway.note_final(
-                text_len=len(final_text),
-                source_lang=normalized_source_lang,
-                sequence=transcript_event.sequence,
-            )
-            await self._broadcast_transcript(transcript_event)
-            self._increment_metric("finals_emitted")
-            await self.subtitle_router.handle_transcript(transcript_event)
-            await self._obs_caption_output.publish_source_event(transcript_event)
-            await self._translation_dispatcher.submit_final(
-                sequence=self._sequence,
-                source_text=final_text,
-                source_lang=normalized_source_lang,
-            )
-            self._active_segment_id = None
-            self._active_segment_revision = 0
-            await self._set_listening_if_current(
-                "listening",
-                last_error=None,
-                status_message="Browser speech recognition is active.",
-                broadcast=False,
-            )
+    async def _ingest_external_asr_update_impl(
+        self,
+        *,
+        partial: str = "",
+        final: str = "",
+        is_final: bool = False,
+        source_lang: str | None = None,
+        generation_id: int | None = None,
+        session_id: str | None = None,
+        client_segment_id: str | None = None,
+        forced_final: bool = False,
+        asr_result_created_at_ms: int | None = None,
+        worker_send_started_at_ms: int | None = None,
+        worker_message_sequence: int | None = None,
+        backend_received_at_ms: int | None = None,
+    ) -> None:
+        _ = (
+            partial,
+            final,
+            is_final,
+            source_lang,
+            generation_id,
+            session_id,
+            client_segment_id,
+            forced_final,
+            asr_result_created_at_ms,
+            worker_send_started_at_ms,
+            worker_message_sequence,
+            backend_received_at_ms,
+        )
+        # Browser speech mode ingestion is owned by BrowserSpeechSource.
+        return None
 
     async def start(self, *, has_audio_inputs: bool, device_id: str | None) -> RuntimeState:
         if self._state.is_running:
             return self._state
 
-        self._runtime_loop = asyncio.get_running_loop()
-        self._latest_runtime_status_message = None
-        self._metrics = RuntimeMetrics()
-        self._in_flight_transcribe_count = 0
-        self._translation_dispatcher_snapshot = {}
-        self._translation_dispatcher = TranslationDispatcher(
-            self._translation_engine,
-            self.config_getter,
-            self._publish_translation_dispatch_event,
-            self.subtitle_router.is_sequence_relevant_for_translation,
-            self._apply_translation_dispatcher_metrics,
-            structured_logger=self._structured_runtime_logger,
-        )
-        self._remote_audio_queue = asyncio.Queue(maxsize=256)
+        if hasattr(self, "_start_state") and self._start_state is not None:  # type: ignore[attr-defined]
+            self._start_state.pre_start()  # type: ignore[attr-defined]
+        else:
+            self._runtime_loop = asyncio.get_running_loop()
+            self._latest_runtime_status_message = None
+            self._metrics = RuntimeMetrics()
+            self._in_flight_transcribe_count = 0
+        await self._lifecycle.start()
         asr_mode = self._current_asr_mode()
         if self._current_remote_role() == REMOTE_ROLE_WORKER and self._is_browser_asr_mode(asr_mode):
             await self._set_runtime_state(
@@ -1350,6 +1561,26 @@ class RuntimeOrchestrator:
             return self._state
         use_remote_audio_source = self._uses_remote_audio_source()
         use_remote_event_source = self._uses_remote_event_source()
+        if hasattr(self, "_speech_source_state") and self._speech_source_state is not None:  # type: ignore[attr-defined]
+            self._speech_source_state.select_for_start(  # type: ignore[attr-defined]
+                is_browser_mode=self._is_browser_asr_mode(asr_mode),
+                uses_remote_audio_source=use_remote_audio_source,
+                uses_remote_event_source=use_remote_event_source,
+            )
+        else:
+            self._active_speech_source = self._speech_source_factory.build(
+                is_browser_mode=self._is_browser_asr_mode(asr_mode),
+                uses_remote_audio_source=use_remote_audio_source,
+                uses_remote_event_source=use_remote_event_source,
+            )
+            if self._is_browser_asr_mode(asr_mode):
+                self._active_speech_source = self._browser_speech_source
+            elif use_remote_event_source:
+                self._active_speech_source = self._remote_controller_source
+            elif use_remote_audio_source:
+                self._active_speech_source = self._remote_worker_source
+            else:
+                self._active_speech_source = self._local_parakeet_source
         if not self._is_browser_asr_mode(asr_mode) and not use_remote_audio_source and not use_remote_event_source and not has_audio_inputs:
             await self._set_runtime_state(
                 is_running=False,
@@ -1380,40 +1611,13 @@ class RuntimeOrchestrator:
                     )
                     return self._state
             self._device_id = "remote_webrtc_controller" if use_remote_audio_source else device_id
+            self._local_audio_device_id = device_id
             if not self._is_browser_asr_mode(asr_mode):
                 self._external_worker_connected = False
-            if not self._is_browser_asr_mode(asr_mode) and not use_remote_audio_source:
-                self._audio_capture = AudioCapture()
-                self._audio_capture.start(device_id=device_id)
-            if use_remote_audio_source:
-                await self._clear_remote_audio_queue()
-                self._remote_audio_connected = False
-                self._remote_audio_session_id = None
-                self._remote_audio_last_chunk_monotonic = None
-            await self._obs_caption_output.start()
-            await self._obs_caption_output.apply_live_settings(self.config_getter())
-            self._reset_export_session()
-            await self.subtitle_router.reset()
-            self._vad.reset()
-            self._asr_engine.reset_runtime_state()
-            self._segment_queue.clear()
-            self._sequence = 0
-            self._asr_runtime_generation += 1
-            self._runtime_event_sequence = 0
-            self._runtime_event_sequence_by_type.clear()
-            self._last_runtime_status_signature = None
-            self._last_runtime_status_broadcast_monotonic = 0.0
-            self._last_browser_worker_status_signature = None
-            self._last_partial_text_by_segment.clear()
-            self._last_partial_emit_monotonic_by_segment.clear()
-            started_at = datetime.now(timezone.utc).isoformat()
-            self._session_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
-            self._session_started_at_utc = started_at
-            self._session_started_at_monotonic = time.perf_counter()
-            self._active_runtime_mode = asr_mode
-            self._active_local_provider_preference = (
-                self._current_local_provider_preference() if asr_mode == LOCAL_ASR_MODE else None
-            )
+            # Core lifecycle is handled by RuntimeLifecycleCoordinator.start()
+            self._reset.on_start_reset()
+            started_at = self._session.start_new_session()
+            self._asr_mode.capture_for_start(state_is_running=self._state.is_running)
             await self._set_runtime_state(
                 is_running=True,
                 status="listening",
@@ -1442,12 +1646,11 @@ class RuntimeOrchestrator:
                     else None
                 ),
             )
-            if not self._is_browser_asr_mode(asr_mode) and not use_remote_event_source:
-                self._capture_task = asyncio.create_task(self._capture_loop())
-                self._asr_task = asyncio.create_task(self._asr_loop())
+            if getattr(self, "_active_speech_source", None) is not None:
+                await self._active_speech_source.start()
         except Exception as exc:
             await self._safe_stop_audio()
-            await self._obs_caption_output.stop()
+            await self._lifecycle.stop()
             await self._set_runtime_state(
                 is_running=False,
                 status="error",
@@ -1458,69 +1661,134 @@ class RuntimeOrchestrator:
         return self._state
 
     async def _safe_stop_audio(self) -> None:
-        if self._audio_capture is not None:
-            await asyncio.to_thread(self._audio_capture.stop)
-            self._audio_capture = None
+        # Some tests construct RuntimeOrchestrator via __new__ and bypass __init__.
+        if not hasattr(self, "_audio_capture_ctl") or self._audio_capture_ctl is None:  # type: ignore[attr-defined]
+            if self._audio_capture is not None:
+                await asyncio.to_thread(self._audio_capture.stop)
+                self._audio_capture = None
+            return
+        await self._audio_capture_ctl.stop_if_running()  # type: ignore[attr-defined]
 
     async def stop(self) -> RuntimeState:
-        self._latest_runtime_status_message = None
-        self._asr_runtime_generation += 1
-        self._set_state(is_running=False, status="idle", started_at_utc=None, last_error=None)
+        if hasattr(self, "_stop_state") and self._stop_state is not None:  # type: ignore[attr-defined]
+            self._stop_state.pre_stop()  # type: ignore[attr-defined]
+        else:
+            self._latest_runtime_status_message = None
+            self._asr_runtime_generation += 1
+            self._set_state(is_running=False, status="idle", started_at_utc=None, last_error=None)
         self._segment_queue.clear()
-        tasks = [task for task in (self._capture_task, self._asr_task) if task is not None]
-        for task in tasks:
-            task.cancel()
-        for task in tasks:
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        self._capture_task = None
-        self._asr_task = None
-        self._external_worker_connected = False
-        self._active_browser_worker_session_id = None
-        self._active_browser_worker_generation_id = 0
-        self._active_runtime_mode = None
-        self._active_local_provider_preference = None
-        self._remote_audio_connected = False
-        self._remote_audio_session_id = None
-        self._remote_audio_last_chunk_monotonic = None
+        if getattr(self, "_active_speech_source", None) is not None:
+            await self._active_speech_source.stop()
+        if hasattr(self, "_processing_tasks") and self._processing_tasks is not None:  # type: ignore[attr-defined]
+            self._processing_tasks.clear_refs()  # type: ignore[attr-defined]
+        else:
+            self._capture_task = None
+            self._asr_task = None
+        self._browser_worker_state.reset_for_stop()
+        self._asr_mode.reset_active()
+        self._remote_audio_state.note_disconnected()
         await self._safe_stop_audio()
-        await self._obs_caption_output.stop()
-        stopped_at_utc = datetime.now(timezone.utc).isoformat()
-        export_error: str | None = None
-        try:
-            self._export_session_files(stopped_at_utc=stopped_at_utc)
-        except Exception as exc:
-            export_error = str(exc)
-        await self.subtitle_router.reset()
-        await self._translation_dispatcher.stop()
-        self._segment_queue.clear()
-        self._vad.reset()
+        await self._lifecycle.stop()
+        if hasattr(self, "_export_ctl") and self._export_ctl is not None:  # type: ignore[attr-defined]
+            _, export_error = self._export_ctl.try_export_on_stop()  # type: ignore[attr-defined]
+        else:
+            stopped_at_utc = datetime.now(timezone.utc).isoformat()
+            export_error: str | None = None
+            try:
+                self._export_session_files(stopped_at_utc=stopped_at_utc)
+            except Exception as exc:
+                export_error = str(exc)
+        # Core lifecycle stop is handled by RuntimeLifecycleCoordinator.stop()
+        self._reset.on_stop_reset()
         await asyncio.to_thread(self._asr_engine.unload_runtime_state)
-        self._last_partial_text_by_segment.clear()
-        self._last_partial_emit_monotonic_by_segment.clear()
-        await self._clear_remote_audio_queue()
-        self._remote_audio_queue = None
-        self._reset_export_session()
-        self._metrics = RuntimeMetrics()
-        self._in_flight_transcribe_count = 0
-        self._last_runtime_status_signature = None
-        self._last_runtime_status_broadcast_monotonic = 0.0
-        self._last_browser_worker_status_signature = None
-        self._runtime_loop = None
+        await self._remote_audio_state.shutdown_for_stop()
+        self._session.stop_cleanup()
         if export_error:
             self._state = self._state.model_copy(update={"last_error": f"Export error: {export_error}"})
         await self._broadcast_runtime()
+        if hasattr(self, "_speech_source_state") and self._speech_source_state is not None:  # type: ignore[attr-defined]
+            self._speech_source_state.clear_after_stop()  # type: ignore[attr-defined]
+        else:
+            self._active_speech_source = None
+            self._local_audio_device_id = None
         return self._state
+
+    async def _start_processing_tasks_impl(self) -> None:
+        if not hasattr(self, "_processing_tasks") or self._processing_tasks is None:  # type: ignore[attr-defined]
+            if self._capture_task is None or self._capture_task.done():
+                self._capture_task = asyncio.create_task(self._capture_loop())
+            if self._asr_task is None or self._asr_task.done():
+                self._asr_task = asyncio.create_task(self._asr_loop())
+            return
+        self._processing_tasks.ensure_started()  # type: ignore[attr-defined]
+
+    async def _stop_processing_tasks_impl(self) -> None:
+        if not hasattr(self, "_processing_tasks") or self._processing_tasks is None:  # type: ignore[attr-defined]
+            tasks = [task for task in (self._capture_task, self._asr_task) if task is not None]
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            self._capture_task = None
+            self._asr_task = None
+            return
+        await self._processing_tasks.stop()  # type: ignore[attr-defined]
+
+    async def _start_audio_capture_impl(self) -> None:
+        if not hasattr(self, "_audio_capture_ctl") or self._audio_capture_ctl is None:  # type: ignore[attr-defined]
+            if self._audio_capture is not None:
+                return
+            device_id = self._local_audio_device_id
+            if device_id is None:
+                return
+            self._audio_capture = AudioCapture()
+            self._audio_capture.start(device_id=device_id)
+            return
+        self._audio_capture_ctl.start_if_needed()  # type: ignore[attr-defined]
+
+    async def _stop_audio_capture_impl(self) -> None:
+        await self._safe_stop_audio()
+
+    async def _init_remote_audio_impl(self) -> None:
+        await self._remote_audio_state.init_for_start()
+
+    async def _shutdown_remote_audio_impl(self) -> None:
+        await self._remote_audio_state.shutdown_for_stop()
+
+    async def _init_browser_worker_impl(self) -> None:
+        # When starting browser speech mode, clear any stale worker generation/session tracking.
+        self._browser_worker_state.reset_for_start()
+
+    async def _shutdown_browser_worker_impl(self) -> None:
+        # Teardown browser worker session state and clear active partial.
+        self._browser_worker_state.reset_for_stop()
+        await self.subtitle_router.clear_active_partial()
+
+    async def _start_local_parakeet_impl(self) -> None:
+        # Use the same hook-based lifecycle as factory local source.
+        await self._start_audio_capture_impl()
+        await self._start_processing_tasks_impl()
+
+    async def _stop_local_parakeet_impl(self) -> None:
+        await self._stop_processing_tasks_impl()
+        await self._stop_audio_capture_impl()
 
     async def _clear_remote_audio_queue(self) -> None:
         await clear_async_queue(self._remote_audio_queue)
 
+    async def _ensure_remote_audio_queue(self) -> None:
+        if self._remote_audio_queue is None:
+            self._remote_audio_queue = asyncio.Queue(maxsize=256)
+
+    async def _shutdown_remote_audio_queue(self) -> None:
+        await self._clear_remote_audio_queue()
+        self._remote_audio_queue = None
+
     async def remote_audio_ingest_connected(self, *, session_id: str | None = None) -> None:
-        self._remote_audio_connected = True
-        self._remote_audio_session_id = str(session_id or "").strip() or None
-        self._remote_audio_last_chunk_monotonic = time.perf_counter()
+        self._remote_audio_state.note_connected(session_id=session_id)
         await self._set_listening_if_current(
             "listening",
             last_error=None,
@@ -1528,8 +1796,7 @@ class RuntimeOrchestrator:
         )
 
     async def remote_audio_ingest_disconnected(self) -> None:
-        self._remote_audio_connected = False
-        self._remote_audio_last_chunk_monotonic = None
+        self._remote_audio_state.note_disconnected()
         await self._set_listening_if_current(
             "listening",
             last_error=None,
@@ -1537,6 +1804,12 @@ class RuntimeOrchestrator:
         )
 
     async def ingest_remote_audio_chunk(self, payload: bytes) -> bool:
+        source = getattr(self, "_active_speech_source", None)
+        if source is not None:
+            return bool(await source.ingest_remote_audio_chunk(payload))
+        return bool(await self._ingest_remote_audio_chunk_impl(payload))
+
+    async def _ingest_remote_audio_chunk_impl(self, payload: bytes) -> bool:
         if not self._state.is_running:
             return False
         if not self._uses_remote_audio_source():
@@ -1568,6 +1841,12 @@ class RuntimeOrchestrator:
         return True
 
     async def ingest_remote_transcript_event(self, payload: dict) -> bool:
+        source = getattr(self, "_active_speech_source", None)
+        if source is not None:
+            return bool(await source.ingest_remote_transcript_event(payload))
+        return bool(await self._ingest_remote_transcript_event_impl(payload))
+
+    async def _ingest_remote_transcript_event_impl(self, payload: dict) -> bool:
         if not self._state.is_running or not self._uses_remote_event_source():
             return False
         if not isinstance(payload, dict):
@@ -1583,9 +1862,7 @@ class RuntimeOrchestrator:
                 started_at_utc=self._state.started_at_utc,
                 status_message="Receiving remote worker transcript stream.",
             )
-        await self._broadcast_transcript(event)
-        await self.subtitle_router.handle_transcript(event)
-        await self._obs_caption_output.publish_source_event(event)
+        await self._transcript.handle_event(event)
         if event.event == "final":
             self._increment_metric("finals_emitted")
             await self._set_runtime_state(
@@ -1597,6 +1874,12 @@ class RuntimeOrchestrator:
         return True
 
     async def ingest_remote_translation_event(self, payload: dict) -> bool:
+        source = getattr(self, "_active_speech_source", None)
+        if source is not None:
+            return bool(await source.ingest_remote_translation_event(payload))
+        return bool(await self._ingest_remote_translation_event_impl(payload))
+
+    async def _ingest_remote_translation_event_impl(self, payload: dict) -> bool:
         if not self._state.is_running or not self._uses_remote_event_source():
             return False
         if not isinstance(payload, dict):
@@ -1668,11 +1951,7 @@ class RuntimeOrchestrator:
         return self._asr_engine.status()
 
     def translation_diagnostics(self) -> TranslationDiagnostics:
-        return summarize_translation_diagnostics(
-            config_getter=self.config_getter,
-            translation_engine=self._translation_engine,
-            translation_dispatcher_snapshot=self._translation_dispatcher_snapshot,
-        )
+        return self._translation.diagnostics()
 
     def obs_caption_diagnostics(self) -> ObsCaptionDiagnostics:
         return self._obs_caption_output.diagnostics()
