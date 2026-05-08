@@ -7,6 +7,10 @@ import time
 from typing import Any, Callable, Literal
 
 from backend.core.asr_engine import AsrEngine
+from backend.asr.parakeet.model_installer import (
+    official_eu_parakeet_integrity_state,
+    read_official_eu_parakeet_manifest,
+)
 from backend.core.cache_manager import CacheManager
 from backend.core.audio_capture import AudioCapture, RNNoiseRecognitionProcessor
 from backend.core.asr_provider_selection import (
@@ -148,6 +152,7 @@ class RuntimeOrchestrator:
             config_getter=config_getter,
             runtime_status_callback=self._emit_asr_runtime_status,
         )
+        self._models_dir = models_dir
         self._translation_engine = TranslationEngine(cache_manager)
         self._exporter = Exporter(export_dir)
         self._structured_runtime_logger = structured_logger
@@ -530,6 +535,37 @@ class RuntimeOrchestrator:
 
         effective = dict(self._LEGACY_VAD_SETTINGS)
         realtime_settings = asr_config.get("realtime", {})
+        latency_preset = None
+        if isinstance(realtime_settings, dict):
+            latency_preset = str(realtime_settings.get("latency_preset", "") or "").strip().lower() or None
+        if latency_preset in {"ultra_low_latency", "balanced", "quality"}:
+            presets: dict[str, dict[str, int]] = {
+                "ultra_low_latency": {
+                    "first_partial_min_speech_ms": 120,
+                    "partial_emit_interval_ms": 240,
+                    "silence_hold_ms": 120,
+                    "finalization_hold_ms": 220,
+                    "partial_min_delta_chars": 3,
+                    "partial_coalescing_ms": 90,
+                },
+                "balanced": {
+                    "first_partial_min_speech_ms": 180,
+                    "partial_emit_interval_ms": 450,
+                    "silence_hold_ms": 180,
+                    "finalization_hold_ms": 350,
+                    "partial_min_delta_chars": 12,
+                    "partial_coalescing_ms": 160,
+                },
+                "quality": {
+                    "first_partial_min_speech_ms": 260,
+                    "partial_emit_interval_ms": 650,
+                    "silence_hold_ms": 260,
+                    "finalization_hold_ms": 520,
+                    "partial_min_delta_chars": 16,
+                    "partial_coalescing_ms": 260,
+                },
+            }
+            effective.update(presets.get(latency_preset, {}))
         if isinstance(realtime_settings, dict):
             for key in effective:
                 value = realtime_settings.get(key)
@@ -814,11 +850,16 @@ class RuntimeOrchestrator:
                             segment_id=segment_id,
                             revision=revision,
                             vad_ms=vad_elapsed_ms,
+                            audio_segment_started_at_ms=int(time.time() * 1000),
+                            vad_partial_ready_at_ms=int(time.time() * 1000),
+                            asr_job_enqueued_at_ms=int(time.time() * 1000),
                         )
                     )
                     self._record_metrics(
                         asr_queue_depth=self._segment_queue.qsize(),
                         asr_partial_jobs_dropped=self._segment_queue.partial_jobs_dropped,
+                        partial_jobs_coalesced=self._segment_queue.partial_jobs_coalesced,
+                        finals_prioritized_count=self._segment_queue.finals_prioritized_count,
                     )
                     if segment.kind == "final":
                         self._active_segment_id = None
@@ -843,10 +884,12 @@ class RuntimeOrchestrator:
                 self._record_metrics(
                     asr_queue_depth=self._segment_queue.qsize(),
                     asr_partial_jobs_dropped=self._segment_queue.partial_jobs_dropped,
+                    partial_jobs_coalesced=self._segment_queue.partial_jobs_coalesced,
+                    finals_prioritized_count=self._segment_queue.finals_prioritized_count,
                 )
                 if work_item.generation != self._asr_runtime_generation:
                     self._record_metrics(
-                        asr_stale_results_ignored=int(self._metrics.asr_stale_results_ignored or 0) + 1,
+                        stale_partial_jobs_dropped=int(self._metrics.stale_partial_jobs_dropped or 0) + 1
                     )
                     continue
 
@@ -857,6 +900,7 @@ class RuntimeOrchestrator:
                 )
                 self._in_flight_transcribe_count += 1
                 self._record_metrics(in_flight_transcribe_count=self._in_flight_transcribe_count)
+                transcribe_started_at_ms = int(time.time() * 1000)
                 try:
                     result = await asyncio.to_thread(
                         self._asr_engine.run,
@@ -865,6 +909,7 @@ class RuntimeOrchestrator:
                         segment_id=work_item.segment_id or None,
                     )
                 finally:
+                    transcribe_done_at_ms = int(time.time() * 1000)
                     self._in_flight_transcribe_count = max(0, self._in_flight_transcribe_count - 1)
                     self._record_metrics(in_flight_transcribe_count=self._in_flight_transcribe_count)
                 if work_item.generation != self._asr_runtime_generation or not self._state.is_running:
@@ -872,8 +917,16 @@ class RuntimeOrchestrator:
                         asr_stale_results_ignored=int(self._metrics.asr_stale_results_ignored or 0) + 1,
                     )
                     continue
-                asr_elapsed_ms = (time.perf_counter() - work_item.created_at_monotonic) * 1000.0 - work_item.vad_ms
-                total_elapsed_ms = (time.perf_counter() - work_item.created_at_monotonic) * 1000.0
+                now_monotonic = time.perf_counter()
+                total_elapsed_ms = (now_monotonic - work_item.created_at_monotonic) * 1000.0
+                transcribe_ms = max(0.0, float(transcribe_done_at_ms - transcribe_started_at_ms))
+                queue_wait_ms = max(0.0, total_elapsed_ms - float(work_item.vad_ms) - transcribe_ms)
+                asr_elapsed_ms = max(0.0, total_elapsed_ms - float(work_item.vad_ms) - queue_wait_ms)
+                self._record_metrics(
+                    vad_to_asr_enqueue_ms=float(work_item.vad_ms),
+                    asr_queue_wait_ms=queue_wait_ms,
+                    asr_transcribe_ms=transcribe_ms,
+                )
                 if work_item.kind == "final":
                     self._record_metrics(
                         vad_ms=work_item.vad_ms,
@@ -921,6 +974,15 @@ class RuntimeOrchestrator:
                         work_item=work_item,
                         text=text,
                         latency_ms=max(0.0, asr_elapsed_ms),
+                    )
+                    segment = segment.model_copy(
+                        update={
+                            "audio_segment_started_at_ms": work_item.audio_segment_started_at_ms,
+                            "vad_partial_ready_at_ms": work_item.vad_partial_ready_at_ms,
+                            "parakeet_transcribe_started_at_ms": transcribe_started_at_ms,
+                            "parakeet_transcribe_done_at_ms": transcribe_done_at_ms,
+                            "provider_result_created_at_ms": int(time.time() * 1000),
+                        }
                     )
                     transcript_event = TranscriptEvent(
                         event=work_item.kind,
@@ -1655,8 +1717,6 @@ class RuntimeOrchestrator:
                     supports_gpu=False,
                     supports_partials=True,
                     supports_streaming=True,
-                    supports_word_timestamps=False,
-                    supports_timestamps=False,
                     gpu_requested=False,
                     gpu_available=False,
                     torch_built_with_cuda=False,
@@ -1692,6 +1752,8 @@ class RuntimeOrchestrator:
             model_load_mode = str(asr_config.get("model_load_mode", "auto") or "auto") if isinstance(asr_config, dict) else "auto"
             model_revision = str(asr_config.get("model_revision", "") or "") if isinstance(asr_config, dict) else ""
             inference_mode_enabled = bool(getattr(self._asr_engine.provider, "inference_mode_enabled", False))
+            integrity_state, _integrity_detail = official_eu_parakeet_integrity_state(self._models_dir)
+            manifest = read_official_eu_parakeet_manifest(self._models_dir)
             return AsrDiagnostics(
                 mode=str(resolved_asr.get("mode", LOCAL_ASR_MODE) or LOCAL_ASR_MODE),
                 provider_preference=str(
@@ -1718,12 +1780,12 @@ class RuntimeOrchestrator:
                 model_repo=OFFICIAL_EU_PARAKEET_REPO,
                 model_revision=model_revision,
                 model_path=diagnostics.model_path,
-                model_integrity_state="present" if diagnostics.model_path else "pending_download",
+                model_integrity_state=integrity_state if diagnostics.model_path else "missing",
+                model_loaded=bool(diagnostics.model_loaded),
+                model_manifest=manifest,
                 supports_gpu=diagnostics.supports_gpu,
                 supports_partials=diagnostics.supports_partials,
                 supports_streaming=diagnostics.supports_streaming,
-                supports_word_timestamps=diagnostics.supports_word_timestamps,
-                supports_timestamps=diagnostics.supports_word_timestamps,
                 gpu_requested=diagnostics.gpu_requested,
                 gpu_available=diagnostics.gpu_available,
                 cuda_available=diagnostics.torch_cuda_is_available,
@@ -1739,6 +1801,7 @@ class RuntimeOrchestrator:
                 fallback_reason=diagnostics.fallback_reason,
                 cpu_fallback_reason=diagnostics.cpu_fallback_reason,
                 selected_device=diagnostics.actual_selected_device,
+                device_active=diagnostics.device_active,
                 selected_execution_provider=diagnostics.actual_execution_provider,
                 partials_supported=diagnostics.supports_partials,
                 sample_rate=getattr(self._audio_capture, "sample_rate", None) or self._asr_engine.sample_rate,
@@ -1757,6 +1820,7 @@ class RuntimeOrchestrator:
                 realtime_chunk_overlap_ms=int(self._effective_realtime_settings.get("chunk_overlap_ms", 0) or 0),
                 partial_min_delta_chars=int(self._effective_realtime_settings.get("partial_min_delta_chars", 0) or 0),
                 partial_coalescing_ms=int(self._effective_realtime_settings.get("partial_coalescing_ms", 0) or 0),
+            active_latency_preset=str(self.config_getter().get("asr", {}).get("realtime", {}).get("latency_preset", "") or "") or None,
                 recognition_noise_reduction_enabled=rnnoise_status.enabled,
                 rnnoise_strength=rnnoise_status.strength,
                 rnnoise_available=rnnoise_status.backend_available,
@@ -1775,10 +1839,19 @@ class RuntimeOrchestrator:
                 provider_last_error=diagnostics.fallback_reason or diagnostics.cpu_fallback_reason,
                 parakeet_generation=self._asr_runtime_generation,
                 asr_queue_depth=self._segment_queue.qsize(),
+                asr_queue_max_size=self._segment_queue.maxsize,
                 asr_partial_jobs_dropped=self._segment_queue.partial_jobs_dropped,
+                partial_jobs_coalesced=self._segment_queue.partial_jobs_coalesced,
+                stale_partial_jobs_dropped=int(self._metrics.stale_partial_jobs_dropped or 0),
+                finals_prioritized_count=self._segment_queue.finals_prioritized_count,
                 asr_stale_results_ignored=int(self._metrics.asr_stale_results_ignored or 0),
                 in_flight_transcribe_count=self._in_flight_transcribe_count,
                 inference_mode_enabled=inference_mode_enabled,
+                gpu_memory_allocated_mb=diagnostics.gpu_memory_allocated_mb,
+                gpu_memory_reserved_mb=diagnostics.gpu_memory_reserved_mb,
+                gpu_peak_memory_allocated_mb=diagnostics.gpu_peak_memory_allocated_mb,
+                cuda_cache_cleared_count=int(diagnostics.cuda_cache_cleared_count or 0),
+                stream_states_count=diagnostics.stream_states_count,
             )
         except Exception as exc:
             return AsrDiagnostics(
@@ -1802,8 +1875,6 @@ class RuntimeOrchestrator:
                 supports_gpu=False,
                 supports_partials=False,
                 supports_streaming=False,
-                supports_word_timestamps=False,
-                supports_timestamps=False,
                 cuda_available=False,
                 torch_built_with_cuda=False,
                 torch_cuda_is_available=False,

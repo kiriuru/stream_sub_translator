@@ -89,6 +89,7 @@ def detect_app_paths() -> AppPaths:
     backend_root = project_root / "backend"
     user_data_dir = project_root / DESKTOP_USER_DATA_DIRNAME
     runtime_dir = _project_runtime_root(project_root)
+    logs_dir = project_root / "logs"
 
     return AppPaths(
         project_root=project_root,
@@ -99,7 +100,7 @@ def detect_app_paths() -> AppPaths:
         fonts_dir=project_root / "fonts",
         user_data_dir=user_data_dir,
         profiles_dir=user_data_dir / "profiles",
-        logs_dir=user_data_dir / "logs",
+        logs_dir=logs_dir,
         secrets_dir=user_data_dir / "secrets",
         models_dir=user_data_dir / "models",
         debug_dir=user_data_dir / "debug",
@@ -123,8 +124,8 @@ def _copy_if_missing(source: Path, destination: Path) -> None:
     shutil.copy2(source, destination)
 
 
-def _migrate_legacy_logs_dir(paths: AppPaths) -> None:
-    legacy_logs_dir = paths.project_root / "logs"
+def _migrate_user_data_logs_dir_to_project_root(paths: AppPaths) -> None:
+    legacy_logs_dir = paths.user_data_dir / "logs"
     target_logs_dir = paths.logs_dir
     if not legacy_logs_dir.exists() or legacy_logs_dir.resolve() == target_logs_dir.resolve():
         return
@@ -189,5 +190,5 @@ def ensure_app_layout(paths: AppPaths | None = None) -> AppPaths:
         app_paths.models_dir / "README.txt",
     )
     _copy_font_assets(app_paths.bundle_root, app_paths.fonts_dir)
-    _migrate_legacy_logs_dir(app_paths)
+    _migrate_user_data_logs_dir_to_project_root(app_paths)
     return app_paths

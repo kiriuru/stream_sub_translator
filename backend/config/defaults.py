@@ -19,6 +19,8 @@ def build_default_config(prefer_gpu_default: bool) -> dict[str, Any]:
             "mode": "local",
             "provider_preference": "official_eu_parakeet_low_latency",
             "prefer_gpu": prefer_gpu_default,
+            "model_load_mode": "auto",
+            "model_revision": "",
             "rnnoise_enabled": False,
             "rnnoise_strength": 70,
             "browser": {
@@ -50,6 +52,7 @@ def build_default_config(prefer_gpu_default: bool) -> dict[str, Any]:
                 },
             },
             "realtime": {
+                "latency_preset": "balanced",
                 "vad_mode": 3,
                 "energy_gate_enabled": False,
                 "min_rms_for_recognition": 0.0018,

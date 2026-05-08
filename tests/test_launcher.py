@@ -40,7 +40,7 @@ class LauncherTests(unittest.TestCase):
         self.root = Path(self.temp_dir.name)
         self.paths = SimpleNamespace(
             project_root=self.root,
-            logs_dir=self.root / "user-data" / "logs",
+            logs_dir=self.root / "logs",
             data_dir=self.root / "user-data",
             runtime_root=self.root / "runtime",
             bundle_root=self.root,
@@ -147,7 +147,7 @@ class LauncherTests(unittest.TestCase):
         self.assertNotIn("--app=http://127.0.0.1:8765/google-asr", args)
 
     def test_launcher_migrates_legacy_root_logs(self) -> None:
-        legacy_logs_dir = self.root / "logs"
+        legacy_logs_dir = self.root / "user-data" / "logs"
         legacy_logs_dir.mkdir(parents=True, exist_ok=True)
         (legacy_logs_dir / "desktop-launcher.log").write_text("legacy", encoding="utf-8")
 

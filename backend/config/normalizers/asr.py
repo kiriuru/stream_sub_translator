@@ -30,8 +30,14 @@ def normalize_realtime_asr_config(payload: Any, *, defaults: dict[str, Any]) -> 
     chunk_overlap_ms = clamp_int("chunk_overlap_ms", 0, max(0, chunk_window_ms))
     min_speech_ms = clamp_int("min_speech_ms", 0, 5000)
     first_partial_min_speech_ms = clamp_int("first_partial_min_speech_ms", min_speech_ms, 5000)
+    latency_preset = str(current.get("latency_preset", defaults.get("latency_preset", "balanced")) or "balanced").strip().lower()
+    if latency_preset not in {"ultra_low_latency", "balanced", "quality", "custom"}:
+        latency_preset = str(defaults.get("latency_preset", "balanced") or "balanced").strip().lower() or "balanced"
+    if latency_preset not in {"ultra_low_latency", "balanced", "quality", "custom"}:
+        latency_preset = "balanced"
 
     return {
+        "latency_preset": latency_preset,
         "vad_mode": clamp_int("vad_mode", 0, 3),
         "energy_gate_enabled": bool(current.get("energy_gate_enabled", defaults["energy_gate_enabled"])),
         "min_rms_for_recognition": clamp_float("min_rms_for_recognition", 0.0, 0.05),
@@ -64,10 +70,19 @@ def normalize_asr_config(payload: Any, *, defaults: dict[str, Any]) -> dict[str,
     except (TypeError, ValueError):
         rnnoise_strength = 70
 
+    model_load_mode = str(asr.get("model_load_mode", defaults.get("model_load_mode", "auto")) or "auto").strip().lower()
+    if model_load_mode not in {"auto", "local_nemo", "from_pretrained"}:
+        model_load_mode = str(defaults.get("model_load_mode", "auto") or "auto").strip().lower() or "auto"
+    if model_load_mode not in {"auto", "local_nemo", "from_pretrained"}:
+        model_load_mode = "auto"
+    model_revision = str(asr.get("model_revision", defaults.get("model_revision", "")) or "").strip()
+
     return {
         "mode": asr_mode,
         "provider_preference": provider_preference,
         "prefer_gpu": bool(asr.get("prefer_gpu", True)),
+        "model_load_mode": model_load_mode,
+        "model_revision": model_revision,
         "rnnoise_enabled": bool(
             asr.get("rnnoise_enabled", asr.get("experimental_noise_reduction_enabled", False))
         ),

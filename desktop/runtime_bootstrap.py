@@ -64,12 +64,13 @@ def detect_runtime_paths() -> DesktopRuntimePaths:
     is_frozen = bool(getattr(sys, "frozen", False))
     project_root = Path(sys.executable).resolve().parent if is_frozen else source_root
     data_dir = project_root / DESKTOP_USER_DATA_DIRNAME
+    logs_dir = project_root / "logs"
     runtime_root = _project_runtime_root(project_root)
     return DesktopRuntimePaths(
         project_root=project_root,
         bundle_root=bundle_root,
         data_dir=data_dir,
-        logs_dir=data_dir / "logs",
+        logs_dir=logs_dir,
         runtime_root=runtime_root,
         cache_root=runtime_root / "cache",
         temp_root=runtime_root / "tmp",
@@ -115,7 +116,8 @@ def _copy_if_missing(source: Path, destination: Path) -> None:
 
 
 def _migrate_legacy_logs_dir(paths: DesktopRuntimePaths) -> None:
-    legacy_logs_dir = paths.project_root / "logs"
+    # Older builds stored logs under user-data/logs. New default is project_root/logs.
+    legacy_logs_dir = paths.data_dir / "logs"
     target_logs_dir = paths.logs_dir
     if not legacy_logs_dir.exists() or legacy_logs_dir.resolve() == target_logs_dir.resolve():
         return

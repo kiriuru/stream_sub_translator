@@ -540,7 +540,7 @@ class DesktopLauncher:
         self._write_log("launcher initialized")
 
     def _migrate_legacy_logs_dir(self) -> None:
-        legacy_logs_dir = self._paths.project_root / "logs"
+        legacy_logs_dir = self._paths.data_dir / "logs"
         target_logs_dir = self._paths.logs_dir
         if not legacy_logs_dir.exists() or legacy_logs_dir.resolve() == target_logs_dir.resolve():
             return

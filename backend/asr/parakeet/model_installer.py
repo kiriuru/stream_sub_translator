@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -9,6 +10,7 @@ import time
 from typing import Callable
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 
 
 OFFICIAL_EU_PARAKEET_REPO = "nvidia/parakeet-tdt-0.6b-v3"
@@ -19,6 +21,51 @@ OFFICIAL_EU_PARAKEET_URL = (
 )
 _MODEL_INSTALL_LOCK = threading.Lock()
 ProgressCallback = Callable[[str], None]
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _sha256_file(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(chunk_size)
+            if not chunk:
+                break
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def read_official_eu_parakeet_manifest(models_dir: Path) -> dict | None:
+    target_dir = models_dir / OFFICIAL_EU_PARAKEET_LOCAL_DIRNAME
+    manifest_file = target_dir / "manifest.json"
+    if not manifest_file.exists():
+        return None
+    try:
+        payload = json.loads(manifest_file.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def official_eu_parakeet_integrity_state(models_dir: Path) -> tuple[str, str | None]:
+    target_dir = models_dir / OFFICIAL_EU_PARAKEET_LOCAL_DIRNAME
+    target_file = target_dir / OFFICIAL_EU_PARAKEET_FILENAME
+    if not target_file.exists():
+        return "missing", None
+    manifest = read_official_eu_parakeet_manifest(models_dir) or {}
+    expected_sha = str(manifest.get("sha256", "") or "").strip().lower()
+    if not expected_sha:
+        return "checksum_unknown", None
+    try:
+        actual_sha = _sha256_file(target_file)
+    except Exception as exc:
+        return "corrupt", f"checksum read failed: {type(exc).__name__}: {exc}"
+    if actual_sha != expected_sha:
+        return "corrupt", "sha256 mismatch"
+    return "valid", None
 
 
 def ensure_official_eu_parakeet_model(
@@ -33,7 +80,18 @@ def ensure_official_eu_parakeet_model(
     manifest_file = target_dir / "manifest.json"
 
     if target_file.exists():
-        return target_file
+        integrity, _detail = official_eu_parakeet_integrity_state(models_dir)
+        if integrity == "corrupt":
+            corrupt_name = f"{target_file.stem}.corrupt.{int(time.time())}{target_file.suffix}"
+            try:
+                shutil.move(str(target_file), str(target_dir / corrupt_name))
+            except Exception:
+                try:
+                    target_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+        else:
+            return target_file
 
     with _MODEL_INSTALL_LOCK:
         if target_file.exists():
@@ -50,6 +108,7 @@ def ensure_official_eu_parakeet_model(
                 temp_path = Path(temp_file.name)
 
             try:
+                hasher = hashlib.sha256()
                 request = urllib.request.Request(
                     OFFICIAL_EU_PARAKEET_URL,
                     headers={"User-Agent": "stream-sub-translator/1.0"},
@@ -72,15 +131,11 @@ def ensure_official_eu_parakeet_model(
                         chunk = response.read(chunk_size)
                         if not chunk:
                             break
+                        hasher.update(chunk)
                         file_handle.write(chunk)
                         downloaded += len(chunk)
                         if total_bytes > 0:
                             percent = downloaded * 100.0 / total_bytes
-                            print(
-                                f"\r[asr-model] Downloading: {percent:6.2f}% ({downloaded}/{total_bytes} bytes)",
-                                end="",
-                                flush=True,
-                            )
                             progress_percent = int(percent)
                             if progress_callback is not None and progress_percent != last_reported_percent:
                                 last_reported_percent = progress_percent
@@ -88,22 +143,25 @@ def ensure_official_eu_parakeet_model(
                                     f"Downloading Parakeet model... {percent:5.1f}% ({downloaded / (1024 * 1024):.0f} MB / {total_bytes / (1024 * 1024):.0f} MB)"
                                 )
                         else:
-                            print(
-                                f"\r[asr-model] Downloading: {downloaded} bytes",
-                                end="",
-                                flush=True,
-                            )
                             downloaded_mb = downloaded // (1024 * 1024)
                             if progress_callback is not None and downloaded_mb != last_reported_mb:
                                 last_reported_mb = downloaded_mb
                                 progress_callback(f"Downloading Parakeet model... {downloaded_mb} MB")
-                print()
                 if progress_callback is not None:
                     progress_callback("Finalizing local Parakeet model files...")
                 shutil.move(str(temp_path), str(target_file))
+                sha256 = hasher.hexdigest()
+                try:
+                    size_bytes = int(target_file.stat().st_size)
+                except Exception:
+                    size_bytes = 0
                 manifest = {
                     "repo_id": OFFICIAL_EU_PARAKEET_REPO,
                     "filename": OFFICIAL_EU_PARAKEET_FILENAME,
+                    "revision": "main",
+                    "sha256": sha256,
+                    "size_bytes": size_bytes,
+                    "downloaded_at_utc": _utc_now_iso(),
                     "local_path": str(target_file),
                     "download_url": OFFICIAL_EU_PARAKEET_URL,
                 }
@@ -145,5 +203,7 @@ __all__ = [
     "OFFICIAL_EU_PARAKEET_REPO",
     "OFFICIAL_EU_PARAKEET_URL",
     "ProgressCallback",
+    "official_eu_parakeet_integrity_state",
+    "read_official_eu_parakeet_manifest",
     "ensure_official_eu_parakeet_model",
 ]

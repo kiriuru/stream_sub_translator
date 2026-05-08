@@ -78,6 +78,7 @@ class AsrBrowserConfig(SchemaModel):
 
 
 class AsrRealtimeConfig(SchemaModel):
+    latency_preset: Literal["ultra_low_latency", "balanced", "quality", "custom"] = "balanced"
     vad_mode: int = 3
     energy_gate_enabled: bool = False
     min_rms_for_recognition: float = 0.0018
@@ -100,6 +101,8 @@ class AsrConfig(SchemaModel):
         "official_eu_parakeet_low_latency"
     )
     prefer_gpu: bool = True
+    model_load_mode: Literal["auto", "local_nemo", "from_pretrained"] = "auto"
+    model_revision: str = ""
     rnnoise_enabled: bool = False
     rnnoise_strength: int = 70
     browser: AsrBrowserConfig = Field(default_factory=AsrBrowserConfig)

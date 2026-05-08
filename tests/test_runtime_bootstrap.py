@@ -46,7 +46,7 @@ class RuntimeBootstrapperSeedTests(unittest.TestCase):
         self.assertTrue((target_site_packages / "lightning-2.4.0.dist-info" / "METADATA").exists())
         self.assertTrue(any("Seeded offline AI package: lightning" in line for line in self.logs))
 
-    def test_detect_runtime_paths_places_logs_under_user_data(self) -> None:
+    def test_detect_runtime_paths_places_logs_under_project_root(self) -> None:
         fake_bundle_root = self.root / "bundle-root"
         fake_bundle_root.mkdir(parents=True, exist_ok=True)
 
@@ -59,9 +59,9 @@ class RuntimeBootstrapperSeedTests(unittest.TestCase):
 
         self.assertEqual(paths.project_root, self.root)
         self.assertEqual(paths.data_dir, self.root / "user-data")
-        self.assertEqual(paths.logs_dir, self.root / "user-data" / "logs")
+        self.assertEqual(paths.logs_dir, self.root / "logs")
 
-    def test_ensure_runtime_layout_migrates_legacy_root_logs_to_user_data(self) -> None:
+    def test_ensure_runtime_layout_migrates_legacy_user_data_logs_to_project_root(self) -> None:
         bundle_root = self.root / "bundle"
         bundled_data_dir = bundle_root / "backend" / "data" / "models"
         bundled_data_dir.mkdir(parents=True, exist_ok=True)
@@ -69,7 +69,7 @@ class RuntimeBootstrapperSeedTests(unittest.TestCase):
         (bundle_root / "backend" / "data" / "config.example.json").write_text("{}", encoding="utf-8")
         (bundle_root / "backend" / "data" / "dictionary_overrides.example.json").write_text("{}", encoding="utf-8")
 
-        legacy_logs_dir = self.root / "logs"
+        legacy_logs_dir = self.root / "user-data" / "logs"
         legacy_logs_dir.mkdir(parents=True, exist_ok=True)
         (legacy_logs_dir / "backend.log").write_text("legacy-backend", encoding="utf-8")
         (legacy_logs_dir / "runtime-events.jsonl").write_text("legacy-runtime", encoding="utf-8")
@@ -78,7 +78,7 @@ class RuntimeBootstrapperSeedTests(unittest.TestCase):
             project_root=self.root,
             bundle_root=bundle_root,
             data_dir=self.root / "user-data",
-            logs_dir=self.root / "user-data" / "logs",
+            logs_dir=self.root / "logs",
             runtime_root=self.root / "runtime",
             cache_root=self.root / "runtime" / "cache",
             temp_root=self.root / "runtime" / "tmp",

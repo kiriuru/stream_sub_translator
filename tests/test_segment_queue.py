@@ -44,8 +44,8 @@ class SegmentQueueTests(unittest.TestCase):
         self.assertIsNotNone(second)
         assert first is not None
         assert second is not None
-        self.assertEqual((first.segment_id, first.audio), ("seg-2", b"keep"))
-        self.assertEqual((second.segment_id, second.kind, second.audio), ("seg-1", "final", b"final"))
+        self.assertEqual((first.segment_id, first.kind, first.audio), ("seg-1", "final", b"final"))
+        self.assertEqual((second.segment_id, second.audio), ("seg-2", b"keep"))
         self.assertIsNone(queue.pop(timeout=0.01))
 
     def test_queue_is_bounded_and_drops_partial_work(self) -> None:

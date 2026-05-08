@@ -106,11 +106,11 @@ class AsrDiagnostics(SchemaModel):
     model_revision: str | None = None
     model_path: str | None = None
     model_integrity_state: str | None = None
+    model_loaded: bool = False
+    model_manifest: dict[str, object] | None = None
     supports_gpu: bool = False
     supports_partials: bool = False
     supports_streaming: bool = False
-    supports_word_timestamps: bool = False
-    supports_timestamps: bool = False
     gpu_requested: bool = False
     gpu_available: bool = False
     cuda_available: bool = False
@@ -126,6 +126,7 @@ class AsrDiagnostics(SchemaModel):
     fallback_reason: str | None = None
     cpu_fallback_reason: str | None = None
     selected_device: str | None = None
+    device_active: str | None = None
     selected_execution_provider: str | None = None
     partials_supported: bool = False
     sample_rate: int | None = None
@@ -144,6 +145,7 @@ class AsrDiagnostics(SchemaModel):
     realtime_chunk_overlap_ms: int | None = None
     partial_min_delta_chars: int | None = None
     partial_coalescing_ms: int | None = None
+    active_latency_preset: str | None = None
     recognition_noise_reduction_enabled: bool = False
     rnnoise_strength: int = 0
     rnnoise_available: bool = False
@@ -205,6 +207,7 @@ class AsrDiagnostics(SchemaModel):
     result_index_last: int | None = None
     parakeet_generation: int | None = None
     asr_queue_depth: int = 0
+    asr_queue_max_size: int | None = None
     asr_partial_jobs_dropped: int = 0
     asr_stale_results_ignored: int = 0
     in_flight_transcribe_count: int = 0
@@ -218,6 +221,11 @@ class AsrDiagnostics(SchemaModel):
     asr_result_to_dashboard_ms: float | None = None
     first_transcribe_warmup_ms: float | None = None
     inference_mode_enabled: bool | None = None
+    gpu_memory_allocated_mb: float | None = None
+    gpu_memory_reserved_mb: float | None = None
+    gpu_peak_memory_allocated_mb: float | None = None
+    cuda_cache_cleared_count: int = 0
+    stream_states_count: int | None = None
     stop_flush_count: int = 0
     browser_worker: BrowserAsrDiagnostics | None = None
 

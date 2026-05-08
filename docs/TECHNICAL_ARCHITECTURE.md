@@ -598,11 +598,11 @@ Constraints:
 Expected local data roots:
 
 - `user-data/`
-- `user-data/logs/`
+- `logs/`
 - `user-data/models/`
 - models/cache/export/profile paths under that local runtime root
 
-Legacy desktop installs that still contain root-level `logs/` are migrated into `user-data/logs/` during launcher/runtime startup so the desktop shell and backend stay aligned on one local log root.
+Legacy installs that still contain `user-data/logs/` are migrated into root `logs/` during launcher/runtime startup so the desktop shell and backend stay aligned on one local log root.
 
 Default bind target:
 

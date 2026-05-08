@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 import wave
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
 from contextlib import nullcontext
@@ -23,6 +23,7 @@ from backend.asr.parakeet.model_installer import (
     OFFICIAL_EU_PARAKEET_URL,
     ProgressCallback,
     ensure_official_eu_parakeet_model,
+    official_eu_parakeet_integrity_state,
 )
 ASR_PROVIDER_OFFICIAL = "official_eu_parakeet"
 ASR_PROVIDER_REALTIME = "official_eu_parakeet_low_latency"
@@ -72,7 +73,6 @@ class AsrProviderCapabilities:
     supports_gpu: bool = False
     supports_partials: bool = False
     supports_streaming: bool = False
-    supports_word_timestamps: bool = False
 
 
 @dataclass
@@ -81,10 +81,10 @@ class AsrProviderDiagnostics:
     requested_provider: str | None = None
     requested_device_policy: str | None = None
     model_path: str | None = None
+    model_loaded: bool = False
     supports_gpu: bool = False
     supports_partials: bool = False
     supports_streaming: bool = False
-    supports_word_timestamps: bool = False
     gpu_requested: bool = False
     gpu_available: bool = False
     torch_version: str | None = None
@@ -100,6 +100,13 @@ class AsrProviderDiagnostics:
     cpu_fallback_reason: str | None = None
     actual_selected_device: str | None = None
     actual_execution_provider: str | None = None
+    device_requested: str | None = None
+    device_active: str | None = None
+    gpu_memory_allocated_mb: float | None = None
+    gpu_memory_reserved_mb: float | None = None
+    gpu_peak_memory_allocated_mb: float | None = None
+    cuda_cache_cleared_count: int = 0
+    stream_states_count: int | None = None
     message: str = ""
     ready: bool = False
     using_mock: bool = False
@@ -117,7 +124,6 @@ class AsrProviderStatus:
     supports_gpu: bool = False
     supports_partials: bool = False
     supports_streaming: bool = False
-    supports_word_timestamps: bool = False
     gpu_requested: bool = False
     gpu_available: bool = False
     torch_version: str | None = None
@@ -149,7 +155,6 @@ class AsrProviderStatus:
             supports_gpu=diagnostics.supports_gpu,
             supports_partials=diagnostics.supports_partials,
             supports_streaming=diagnostics.supports_streaming,
-            supports_word_timestamps=diagnostics.supports_word_timestamps,
             gpu_requested=diagnostics.gpu_requested,
             gpu_available=diagnostics.gpu_available,
             torch_version=diagnostics.torch_version,
@@ -215,7 +220,6 @@ class MockParakeetProvider(BaseAsrProvider):
             supports_gpu=False,
             supports_partials=True,
             supports_streaming=True,
-            supports_word_timestamps=False,
         )
 
     def diagnostics(self, *, include_runtime_state: bool = False) -> AsrProviderDiagnostics:
@@ -225,7 +229,6 @@ class MockParakeetProvider(BaseAsrProvider):
             supports_gpu=caps.supports_gpu,
             supports_partials=caps.supports_partials,
             supports_streaming=caps.supports_streaming,
-            supports_word_timestamps=caps.supports_word_timestamps,
             gpu_requested=False,
             gpu_available=False,
             actual_selected_device="cpu",
@@ -294,6 +297,7 @@ class BaseOfficialEuParakeetNemoProvider(BaseAsrProvider):
         self._cpu_fallback_reason: str | None = None
         self._runtime_status_callback = runtime_status_callback
         self.inference_mode_enabled: bool = False
+        self._cuda_cache_cleared_count: int = 0
 
     def _report_runtime_status(self, message: str) -> None:
         if self._runtime_status_callback is None:
@@ -322,6 +326,7 @@ class BaseOfficialEuParakeetNemoProvider(BaseAsrProvider):
             empty_cache = getattr(cuda, "empty_cache", None)
             if callable(empty_cache):
                 empty_cache()
+                self._cuda_cache_cleared_count += 1
             ipc_collect = getattr(cuda, "ipc_collect", None)
             if callable(ipc_collect):
                 ipc_collect()
@@ -334,21 +339,36 @@ class BaseOfficialEuParakeetNemoProvider(BaseAsrProvider):
             supports_gpu=True,
             supports_partials=False,
             supports_streaming=False,
-            supports_word_timestamps=False,
         )
 
     def diagnostics(self, *, include_runtime_state: bool = False) -> AsrProviderDiagnostics:
         caps = self.capabilities()
         torch_diag = self._collect_torch_diagnostics()
         runtime_initialized = self._model is not None
+        gpu_memory_allocated_mb: float | None = None
+        gpu_memory_reserved_mb: float | None = None
+        gpu_peak_memory_allocated_mb: float | None = None
+        if runtime_initialized:
+            try:
+                torch = importlib.import_module("torch")
+                cuda = getattr(torch, "cuda", None)
+                if cuda is not None and callable(getattr(cuda, "is_available", None)) and cuda.is_available():
+                    gpu_memory_allocated_mb = float(cuda.memory_allocated()) / (1024.0 * 1024.0)
+                    gpu_memory_reserved_mb = float(cuda.memory_reserved()) / (1024.0 * 1024.0)
+                    max_alloc = getattr(cuda, "max_memory_allocated", None)
+                    if callable(max_alloc):
+                        gpu_peak_memory_allocated_mb = float(max_alloc()) / (1024.0 * 1024.0)
+            except Exception:
+                pass
+        device_requested = "cuda" if self._gpu_requested else "cpu"
         if not self.model_path.exists() and not include_runtime_state:
             return AsrProviderDiagnostics(
                 provider_name=caps.provider_name,
                 model_path=str(self.model_path),
+                model_loaded=runtime_initialized,
                 supports_gpu=caps.supports_gpu,
                 supports_partials=caps.supports_partials,
                 supports_streaming=caps.supports_streaming,
-                supports_word_timestamps=caps.supports_word_timestamps,
                 gpu_requested=self._gpu_requested,
                 gpu_available=self._gpu_available,
                 torch_version=torch_diag["torch_version"],
@@ -362,6 +382,12 @@ class BaseOfficialEuParakeetNemoProvider(BaseAsrProvider):
                 cpu_fallback_reason=self._cpu_fallback_reason or self._infer_cpu_fallback_reason(torch_diag),
                 actual_selected_device=self._resolved_device_name(),
                 actual_execution_provider=self.execution_provider_name,
+                device_requested=device_requested,
+                device_active=self._resolved_device_name(),
+                gpu_memory_allocated_mb=gpu_memory_allocated_mb,
+                gpu_memory_reserved_mb=gpu_memory_reserved_mb,
+                gpu_peak_memory_allocated_mb=gpu_peak_memory_allocated_mb,
+                cuda_cache_cleared_count=self._cuda_cache_cleared_count,
                 ready=False,
                 message=(
                     f"Official EU multilingual model '{OFFICIAL_EU_PARAKEET_REPO}' is not installed yet. "
@@ -376,10 +402,10 @@ class BaseOfficialEuParakeetNemoProvider(BaseAsrProvider):
                 return AsrProviderDiagnostics(
                     provider_name=caps.provider_name,
                     model_path=str(self.model_path),
+                    model_loaded=runtime_initialized,
                     supports_gpu=caps.supports_gpu,
                     supports_partials=caps.supports_partials,
                     supports_streaming=caps.supports_streaming,
-                    supports_word_timestamps=caps.supports_word_timestamps,
                     gpu_requested=self._gpu_requested,
                     gpu_available=self._gpu_available,
                     torch_version=torch_diag["torch_version"],
@@ -393,6 +419,12 @@ class BaseOfficialEuParakeetNemoProvider(BaseAsrProvider):
                     cpu_fallback_reason=self._cpu_fallback_reason or self._infer_cpu_fallback_reason(torch_diag),
                     actual_selected_device=self._resolved_device_name(),
                     actual_execution_provider=self.execution_provider_name,
+                    device_requested=device_requested,
+                    device_active=self._resolved_device_name(),
+                    gpu_memory_allocated_mb=gpu_memory_allocated_mb,
+                    gpu_memory_reserved_mb=gpu_memory_reserved_mb,
+                    gpu_peak_memory_allocated_mb=gpu_peak_memory_allocated_mb,
+                    cuda_cache_cleared_count=self._cuda_cache_cleared_count,
                     ready=False,
                     message=(
                         "NeMo ASR runtime dependencies are not installed. "
@@ -408,10 +440,10 @@ class BaseOfficialEuParakeetNemoProvider(BaseAsrProvider):
                 return AsrProviderDiagnostics(
                     provider_name=caps.provider_name,
                     model_path=str(self.model_path),
+                    model_loaded=False,
                     supports_gpu=caps.supports_gpu,
                     supports_partials=caps.supports_partials,
                     supports_streaming=caps.supports_streaming,
-                    supports_word_timestamps=caps.supports_word_timestamps,
                     gpu_requested=self._gpu_requested,
                     gpu_available=self._gpu_available,
                     torch_version=torch_diag["torch_version"],
@@ -425,6 +457,12 @@ class BaseOfficialEuParakeetNemoProvider(BaseAsrProvider):
                     cpu_fallback_reason=self._cpu_fallback_reason or self._infer_cpu_fallback_reason(torch_diag),
                     actual_selected_device=self._actual_selected_device or self._resolved_device_name(),
                     actual_execution_provider=self.execution_provider_name,
+                    device_requested=device_requested,
+                    device_active=self._actual_selected_device or self._resolved_device_name(),
+                    gpu_memory_allocated_mb=gpu_memory_allocated_mb,
+                    gpu_memory_reserved_mb=gpu_memory_reserved_mb,
+                    gpu_peak_memory_allocated_mb=gpu_peak_memory_allocated_mb,
+                    cuda_cache_cleared_count=self._cuda_cache_cleared_count,
                     ready=False,
                     message=str(exc),
                     runtime_initialized=False,
@@ -444,10 +482,10 @@ class BaseOfficialEuParakeetNemoProvider(BaseAsrProvider):
         return AsrProviderDiagnostics(
             provider_name=caps.provider_name,
             model_path=str(self.model_path),
+            model_loaded=runtime_initialized,
             supports_gpu=caps.supports_gpu,
             supports_partials=caps.supports_partials,
             supports_streaming=caps.supports_streaming,
-            supports_word_timestamps=caps.supports_word_timestamps,
             gpu_requested=self._gpu_requested,
             gpu_available=self._gpu_available,
             torch_version=torch_diag["torch_version"],
@@ -461,6 +499,12 @@ class BaseOfficialEuParakeetNemoProvider(BaseAsrProvider):
             cpu_fallback_reason=self._cpu_fallback_reason or self._infer_cpu_fallback_reason(torch_diag),
             actual_selected_device=self._actual_selected_device if runtime_initialized else None,
             actual_execution_provider=self.execution_provider_name,
+            device_requested=device_requested,
+            device_active=self._actual_selected_device if runtime_initialized else self._resolved_device_name(),
+            gpu_memory_allocated_mb=gpu_memory_allocated_mb,
+            gpu_memory_reserved_mb=gpu_memory_reserved_mb,
+            gpu_peak_memory_allocated_mb=gpu_peak_memory_allocated_mb,
+            cuda_cache_cleared_count=self._cuda_cache_cleared_count,
             ready=True,
             message=ready_message,
             runtime_initialized=runtime_initialized,
@@ -482,18 +526,41 @@ class BaseOfficialEuParakeetNemoProvider(BaseAsrProvider):
                 "NeMo ASR runtime dependencies are not installed for the official EU multilingual model."
                 f"{detail}"
             )
+        model_load_mode = "auto"
+        try:
+            config = self._config_getter() if self._config_getter is not None else {}
+            asr_cfg = config.get("asr", {}) if isinstance(config, dict) else {}
+            if isinstance(asr_cfg, dict):
+                model_load_mode = str(asr_cfg.get("model_load_mode", "auto") or "auto").strip().lower()
+        except Exception:
+            model_load_mode = "auto"
+        if model_load_mode not in {"auto", "local_nemo", "from_pretrained"}:
+            model_load_mode = "auto"
+
         if not self.model_path.exists():
-            try:
-                self._report_runtime_status("Preparing the first local Parakeet model download...")
-                self.model_path = ensure_official_eu_parakeet_model(
-                    self.models_dir,
-                    progress_callback=self._report_runtime_status,
-                )
-            except Exception as exc:
+            if model_load_mode == "local_nemo":
                 raise AsrProviderError(
-                    "Failed to download the official EU multilingual model automatically. "
-                    f"Source: '{OFFICIAL_EU_PARAKEET_URL}'. Error: {exc}"
-                ) from exc
+                    f"Local model file is missing, and model_load_mode is 'local_nemo'. Expected: '{self.model_path}'."
+                )
+            if model_load_mode != "from_pretrained":
+                try:
+                    self._report_runtime_status("Preparing the first local Parakeet model download...")
+                    self.model_path = ensure_official_eu_parakeet_model(
+                        self.models_dir,
+                        progress_callback=self._report_runtime_status,
+                    )
+                except Exception as exc:
+                    raise AsrProviderError(
+                        "Failed to download the official EU multilingual model automatically. "
+                        f"Source: '{OFFICIAL_EU_PARAKEET_URL}'. Error: {exc}"
+                    ) from exc
+        if self.model_path.exists():
+            integrity_state, integrity_detail = official_eu_parakeet_integrity_state(self.models_dir)
+            if integrity_state == "corrupt":
+                message = "Local Parakeet model file is corrupt and failed integrity verification."
+                if integrity_detail:
+                    message = f"{message} Detail: {integrity_detail}"
+                raise AsrProviderError(message)
 
         preferred_device = self._resolved_device_name()
         if self._gpu_requested and not self._gpu_available:
@@ -504,7 +571,7 @@ class BaseOfficialEuParakeetNemoProvider(BaseAsrProvider):
             self._report_runtime_status(
                 "Loading Parakeet model on NVIDIA GPU..." if preferred_device == "cuda" else "Loading Parakeet model on CPU..."
             )
-            self._model = self._load_model_on_device(preferred_device)
+            self._model = self._load_model_on_device(preferred_device, model_load_mode=model_load_mode)
             self._actual_selected_device = preferred_device
             self._report_runtime_status(
                 "Parakeet model loaded on NVIDIA GPU." if preferred_device == "cuda" else "Parakeet model loaded on CPU."
@@ -521,7 +588,7 @@ class BaseOfficialEuParakeetNemoProvider(BaseAsrProvider):
                 )
                 try:
                     self._report_runtime_status("CUDA initialization failed. Falling back to CPU model load...")
-                    self._model = self._load_model_on_device("cpu")
+                    self._model = self._load_model_on_device("cpu", model_load_mode=model_load_mode)
                     self._actual_selected_device = "cpu"
                     self._report_runtime_status("Parakeet model loaded on CPU fallback.")
                     return self._model
@@ -536,17 +603,28 @@ class BaseOfficialEuParakeetNemoProvider(BaseAsrProvider):
                 f"Failed to load official EU multilingual model '{self.model_path.name}': {exc}"
             ) from exc
 
-    def _load_model_on_device(self, device_name: str):
+    def _load_model_on_device(self, device_name: str, *, model_load_mode: str = "auto"):
         asr_models = importlib.import_module("nemo.collections.asr.models")
         asr_model_cls = getattr(asr_models, "ASRModel")
         map_location: Any = device_name
         if device_name == "cuda":
             torch = importlib.import_module("torch")
             map_location = torch.device("cuda")
-        model = asr_model_cls.restore_from(
-            restore_path=str(self.model_path),
-            map_location=map_location,
-        )
+        model = None
+        if model_load_mode in {"auto", "local_nemo"} and self.model_path.exists():
+            model = asr_model_cls.restore_from(
+                restore_path=str(self.model_path),
+                map_location=map_location,
+            )
+        elif model_load_mode in {"auto", "from_pretrained"}:
+            from_pretrained = getattr(asr_model_cls, "from_pretrained", None)
+            if callable(from_pretrained):
+                model = from_pretrained(model_name=OFFICIAL_EU_PARAKEET_REPO, map_location=map_location)
+        if model is None:
+            raise AsrProviderError(
+                f"Unable to load the Parakeet model (mode={model_load_mode}). "
+                f"Local path: '{self.model_path}'. Repo: '{OFFICIAL_EU_PARAKEET_REPO}'."
+            )
         if device_name == "cuda":
             if hasattr(model, "to"):
                 moved_model = model.to(map_location)
@@ -802,7 +880,6 @@ class OfficialEuParakeetRealtimeProvider(BaseOfficialEuParakeetNemoProvider):
             supports_gpu=True,
             supports_partials=True,
             supports_streaming=False,
-            supports_word_timestamps=False,
         )
 
     def reset_runtime_state(self) -> None:
@@ -814,6 +891,10 @@ class OfficialEuParakeetRealtimeProvider(BaseOfficialEuParakeetNemoProvider):
     def unload_runtime(self) -> None:
         self.reset_runtime_state()
         super().unload_runtime()
+
+    def diagnostics(self, *, include_runtime_state: bool = False) -> AsrProviderDiagnostics:
+        base = super().diagnostics(include_runtime_state=include_runtime_state)
+        return replace(base, stream_states_count=len(self._stream_states))
 
     def _realtime_config(self) -> dict[str, Any]:
         config = self._config_getter() if self._config_getter is not None else {}

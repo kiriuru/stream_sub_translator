@@ -10,7 +10,7 @@ Post-release изменения для текущей ветки `main` тепе
 Текущее примечание:
 
 - выбор провайдера «на каждую линию перевода», slot-based идентичность перевода, и вынос провайдеров перевода из legacy слоя — это post-`0.3.0` follow-up в ветке `main` и документируется в [CHANGELOG.md](./CHANGELOG.md) -> `Unreleased`, а не в shipped `0.3.0` delta.
-- текущий follow-up в `main` также включает разделение UI вкладки Translation, более широкое покрытие i18n для dashboard, и выравнивание storage вокруг `user-data/logs/` и `user-data/models/`; эти изменения также отслеживаются в `Unreleased`.
+- текущий follow-up в `main` также включает разделение UI вкладки Translation, более широкое покрытие i18n для dashboard, и выравнивание storage вокруг `logs/` и `user-data/models/`; эти изменения также отслеживаются в `Unreleased`.
 
 Важно:
 

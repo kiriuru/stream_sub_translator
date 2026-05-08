@@ -145,7 +145,6 @@ class FakeRuntimeOrchestrator:
             supports_gpu=False,
             supports_partials=True,
             supports_streaming=True,
-            supports_word_timestamps=False,
             torch_built_with_cuda=False,
             torch_cuda_is_available=False,
             torch_device_count=0,
@@ -214,7 +213,7 @@ class AppStateSandbox(AbstractContextManager["AppStateSandbox"]):
         self.paths = SimpleNamespace(
             root=base_dir,
             data_dir=base_dir / "user-data",
-            logs_dir=base_dir / "user-data" / "logs",
+            logs_dir=base_dir / "logs",
             config_path=base_dir / "user-data" / "config.json",
             models_dir=base_dir / "user-data" / "models",
             local_base_url="http://127.0.0.1:8765",

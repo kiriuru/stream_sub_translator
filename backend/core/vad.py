@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import math
 from typing import Literal
 
 import numpy as np
@@ -39,6 +40,7 @@ class VadEngine:
         self.frame_bytes = int(sample_rate * frame_duration_ms / 1000) * 2
         self.vad_mode = max(0, min(3, int(mode)))
         self.vad = webrtcvad.Vad(self.vad_mode)
+        self._pending_audio: bytearray = bytearray()
         self._speech_frames: list[bytes] = []
         self._speech_rms_values: list[float] = []
         self._ambient_rms_values: deque[float] = deque(maxlen=64)
@@ -86,21 +88,23 @@ class VadEngine:
         self.min_rms_for_recognition = max(0.0, float(min_rms_for_recognition))
         self.min_voiced_ratio = max(0.0, min(1.0, float(min_voiced_ratio)))
         self.first_partial_min_speech_ms = max(self.min_speech_ms, int(first_partial_min_speech_ms))
-        self.silence_hold_frames = max(1, self.silence_hold_ms // self.frame_duration_ms)
-        self.finalization_hold_frames = max(1, self.finalization_hold_ms // self.frame_duration_ms)
-        self.min_speech_frames = max(0, self.min_speech_ms // self.frame_duration_ms)
-        self.first_partial_min_speech_frames = max(0, self.first_partial_min_speech_ms // self.frame_duration_ms)
-        self.partial_interval_frames = max(1, self.partial_emit_interval_ms // self.frame_duration_ms)
-        self.max_segment_frames = max(1, self.max_segment_ms // self.frame_duration_ms)
+        # Use ceil so effective timing never resolves *shorter* than requested.
+        self.silence_hold_frames = max(1, int(math.ceil(self.silence_hold_ms / self.frame_duration_ms)))
+        self.finalization_hold_frames = max(1, int(math.ceil(self.finalization_hold_ms / self.frame_duration_ms)))
+        self.min_speech_frames = max(0, int(math.ceil(self.min_speech_ms / self.frame_duration_ms)))
+        self.first_partial_min_speech_frames = max(0, int(math.ceil(self.first_partial_min_speech_ms / self.frame_duration_ms)))
+        self.partial_interval_frames = max(1, int(math.ceil(self.partial_emit_interval_ms / self.frame_duration_ms)))
+        self.max_segment_frames = max(1, int(math.ceil(self.max_segment_ms / self.frame_duration_ms)))
 
     def reset(self) -> None:
+        self._pending_audio = bytearray()
         self._speech_frames = []
         self._speech_rms_values = []
         self._silence_frames = 0
         self._last_partial_frame_count = 0
         self._segment_total_frames = 0
         self._segment_voiced_frames = 0
-        self._segment_dropped_count = 0
+        # Keep dropped counter cumulative across segments for diagnostics.
 
     def _duration_ms(self, frame_count: int) -> int:
         return frame_count * self.frame_duration_ms
@@ -174,10 +178,14 @@ class VadEngine:
             return []
 
         segments: list[VadSegment] = []
-        for start in range(0, len(audio_chunk), self.frame_bytes):
-            frame = audio_chunk[start : start + self.frame_bytes]
-            if len(frame) != self.frame_bytes:
-                continue
+        self._pending_audio.extend(audio_chunk)
+        total_len = len(self._pending_audio)
+        if total_len < self.frame_bytes:
+            return []
+        usable = total_len - (total_len % self.frame_bytes)
+        chunk = bytes(self._pending_audio[:usable])
+        for start in range(0, usable, self.frame_bytes):
+            frame = chunk[start : start + self.frame_bytes]
 
             frame_rms = self._frame_rms(frame)
             is_speech = self.vad.is_speech(frame, self.sample_rate)
@@ -241,4 +249,6 @@ class VadEngine:
             else:
                 self._remember_ambient_rms(frame_rms)
 
+        if usable:
+            del self._pending_audio[:usable]
         return segments

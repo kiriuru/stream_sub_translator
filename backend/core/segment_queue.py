@@ -17,6 +17,9 @@ class AsrWorkItem:
     revision: int = 0
     vad_ms: float = 0.0
     created_at_monotonic: float = 0.0
+    audio_segment_started_at_ms: int | None = None
+    vad_partial_ready_at_ms: int | None = None
+    asr_job_enqueued_at_ms: int | None = None
 
 
 class SegmentQueue:
@@ -25,6 +28,8 @@ class SegmentQueue:
         self._condition = threading.Condition()
         self._maxsize = max(1, int(maxsize or 1))
         self._partial_jobs_dropped = 0
+        self._partial_jobs_coalesced = 0
+        self._finals_prioritized_count = 0
         self._wake_counter = 0
 
     def _prune_redundant_partials_locked(self, item: AsrWorkItem) -> None:
@@ -32,15 +37,19 @@ class SegmentQueue:
             return
 
         retained: deque[AsrWorkItem] = deque()
+        removed_count = 0
         for existing in self._items:
             if (
                 existing.segment_id
                 and existing.segment_id == item.segment_id
                 and existing.kind == "partial"
             ):
+                removed_count += 1
                 continue
             retained.append(existing)
         self._items = retained
+        if removed_count:
+            self._partial_jobs_coalesced += removed_count
 
     def _drop_oldest_partial_locked(self) -> bool:
         retained: deque[AsrWorkItem] = deque()
@@ -54,6 +63,20 @@ class SegmentQueue:
             retained.append(existing)
         self._items = retained
         return removed
+
+    def _pop_next_locked(self) -> AsrWorkItem | None:
+        if not self._items:
+            return None
+        # Finals should not get stuck behind long partial backlogs.
+        for item in self._items:
+            if item.kind == "final":
+                try:
+                    self._items.remove(item)
+                except ValueError:
+                    break
+                self._finals_prioritized_count += 1
+                return item
+        return self._items.popleft()
 
     def push(self, item: AsrWorkItem) -> None:
         if item.created_at_monotonic <= 0:
@@ -85,7 +108,7 @@ class SegmentQueue:
                 if remaining <= 0:
                     return None
                 self._condition.wait(timeout=remaining)
-            return self._items.popleft()
+            return self._pop_next_locked()
 
     def clear(self, *, notify: bool = True) -> None:
         with self._condition:
@@ -111,3 +134,13 @@ class SegmentQueue:
     def partial_jobs_dropped(self) -> int:
         with self._condition:
             return self._partial_jobs_dropped
+
+    @property
+    def partial_jobs_coalesced(self) -> int:
+        with self._condition:
+            return self._partial_jobs_coalesced
+
+    @property
+    def finals_prioritized_count(self) -> int:
+        with self._condition:
+            return self._finals_prioritized_count

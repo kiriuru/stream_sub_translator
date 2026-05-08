@@ -49,9 +49,16 @@ class RuntimeMetrics(SchemaModel):
     overlay_stale_translation_suppressed: int = 0
     overlay_payload_mismatch_count: int = 0
     asr_queue_depth: int = 0
+    asr_queue_max_size: int | None = None
     asr_partial_jobs_dropped: int = 0
     asr_stale_results_ignored: int = 0
     in_flight_transcribe_count: int = 0
+    partial_jobs_coalesced: int = 0
+    stale_partial_jobs_dropped: int = 0
+    finals_prioritized_count: int = 0
+    vad_to_asr_enqueue_ms: float | None = None
+    asr_queue_wait_ms: float | None = None
+    asr_transcribe_ms: float | None = None
     client_log_events_received: int = 0
     client_log_events_written: int = 0
     client_log_events_dropped: int = 0

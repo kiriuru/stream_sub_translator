@@ -150,7 +150,9 @@ class ParakeetLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.runtime._segment_queue.wake()  # noqa: SLF001
         await asyncio.wait_for(task, timeout=1.0)
 
-        self.assertEqual(self.runtime._metrics.asr_stale_results_ignored, 1)  # noqa: SLF001
+        ignored = int(self.runtime._metrics.asr_stale_results_ignored or 0)  # noqa: SLF001
+        dropped = int(self.runtime._metrics.stale_partial_jobs_dropped or 0)  # noqa: SLF001
+        self.assertEqual(ignored + dropped, 1)
         self.assertEqual(self.broadcasted_events, [])
 
     async def test_final_equal_to_previous_partial_is_still_emitted(self) -> None:

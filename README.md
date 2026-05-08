@@ -70,7 +70,7 @@ Current extracted layout:
 - managed runtime folder: `app-runtime/`
 - hidden internal runtime executable: `.sst-runtime.exe`
 - user data: `user-data/`
-- app logs: `user-data/logs/`
+- app logs: `logs/`
 - local models: `user-data/models/`
 
 Build it from source with:
@@ -115,11 +115,11 @@ On first launch the bootstrap launcher extracts and/or creates:
 - `.python/`
 - `.venv/`
 - `user-data/`
-- `user-data/logs/`
+- `logs/`
 - `user-data/models/`
 - `fonts/`
 
-If an older desktop install still has root-level `logs/`, the launcher/runtime migrates those files into `user-data/logs/`.
+If an older install still has `user-data/logs/`, the launcher/runtime migrates those files into `logs/`.
 
 These folders are normal for the desktop flow and should be kept next to the executable.
 
@@ -389,7 +389,7 @@ Created next to the executable:
   - `cache/`
   - `secrets/`
   - `debug/`
-- `user-data/logs/`
+- `logs/`
   - `bootstrap-launcher.log`
   - `desktop-launcher.log`
   - `backend.log`
@@ -397,16 +397,16 @@ Created next to the executable:
   - `session-latest.jsonl`
   - browser/client logs as applicable to the current runtime path
 
-Legacy desktop installs that still contain root-level `logs/` are migrated into `user-data/logs/` during launcher/runtime startup.
+Legacy installs that still contain `user-data/logs/` are migrated into `logs/` during launcher/runtime startup.
 
 Useful diagnostics paths:
 
 - backend/runtime failures:
-  - inspect `user-data/logs/backend.log`
+  - inspect `logs/backend.log`
 - structured runtime events:
-  - inspect `user-data/logs/runtime-events.jsonl`
+  - inspect `logs/runtime-events.jsonl`
 - latest dashboard/overlay/browser-worker client events:
-  - inspect `user-data/logs/session-latest.jsonl`
+  - inspect `logs/session-latest.jsonl`
 
 Runtime cache/temp paths are managed automatically. First start may take longer due to initialization.
 

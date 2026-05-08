@@ -34,7 +34,7 @@ Post-`0.3.0` branch follow-up focused on internal modularization and runtime sta
 
 ### Desktop storage and release alignment
 
-- backend, desktop launcher, and bootstrap launcher now align on `user-data/logs/` for user-facing logs instead of splitting between `user-data/logs/` and root `logs/`;
+- backend and desktop runtime now store user-facing logs in root `logs/` (legacy `user-data/logs/` is migrated on startup);
 - legacy root `logs/` folders are migrated forward automatically during launcher/runtime startup;
 - local runtime model storage is aligned on `user-data/models/`;
 - release documentation and publish guidance now reflect the actual bootstrap release targets and current desktop layout.
@@ -60,7 +60,7 @@ Post-`0.3.0` branch follow-up focused on internal modularization and runtime sta
 - added API coverage proving that `/api/runtime/start` uses the unsaved config snapshot without mutating persisted config payloads;
 - added runtime status coverage for `active_config_source`, `active_config_persisted`, and `active_config_hash`;
 - added architecture coverage asserting that the new `backend/config/`, `backend/core/runtime/`, `backend/asr/parakeet/`, and `backend/translation/` entrypoints exist and import cleanly;
-- added desktop path regression coverage for `user-data/logs` placement and legacy root `logs/` migration in the launcher/bootstrap flow;
+- added desktop path regression coverage for root `logs/` placement and legacy `user-data/logs/` migration in the launcher/runtime flow;
 - verified the current branch with:
   - `python -m compileall backend tests desktop`
   - `.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`
