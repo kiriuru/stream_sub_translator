@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
-
 from backend.translation.base import (
     BaseTranslationProvider,
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
     PROVIDER_GROUP_STABLE,
     TranslationProviderError,
     TranslationProviderInfo,
@@ -25,6 +24,7 @@ class LibreTranslateProvider(BaseTranslationProvider):
         source_lang: str,
         target_lang: str,
         provider_settings: dict[str, str],
+        timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
     ) -> tuple[str, dict[str, Any]]:
         api_url = provider_settings.get("api_url", "").strip() or "https://libretranslate.com/translate"
         payload: dict[str, str] = {
@@ -37,14 +37,13 @@ class LibreTranslateProvider(BaseTranslationProvider):
         if api_key:
             payload["api_key"] = api_key
 
-        async with httpx.AsyncClient() as client:
-            data = await self._get_json(
-                client,
-                url=api_url,
-                method="POST",
-                json=payload,
-                error_prefix="LibreTranslate request failed",
-            )
+        data = await self._request_json(
+            url=api_url,
+            method="POST",
+            json=payload,
+            timeout=timeout,
+            error_prefix="LibreTranslate request failed",
+        )
 
         translated = data.get("translatedText") or data.get("translation")
         if not translated:

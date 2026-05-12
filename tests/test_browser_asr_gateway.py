@@ -123,7 +123,7 @@ class BrowserAsrGatewayTests(unittest.TestCase):
         self.assertIn("browser_worker_connected", events)
         self.assertIn("browser_recognition_started", events)
         self.assertIn("browser_degraded", events)
-        self.assertIn("browser_external_partial", events)
+        self.assertNotIn("browser_external_partial", events)
         self.assertIn("browser_external_final", events)
 
         gateway.worker_disconnected()
@@ -131,6 +131,15 @@ class BrowserAsrGatewayTests(unittest.TestCase):
         self.assertFalse(diagnostics.worker_connected)
         self.assertFalse(diagnostics.websocket_ready)
         self.assertEqual(diagnostics.recognition_state, "disconnected")
+
+    def test_note_partial_does_not_emit_structured_events(self) -> None:
+        logger = _RecordingStructuredLogger()
+        gateway = BrowserAsrGateway(structured_logger=logger)
+        gateway.worker_connected()
+        logger.records.clear()
+        for index in range(40):
+            gateway.note_partial(text_len=5, source_lang="en", sequence=index)
+        self.assertFalse(any(record["event"] == "browser_external_partial" for record in logger.records))
 
     def test_skips_chatty_status_snapshots_for_routine_cycle_reasons(self) -> None:
         logger = _RecordingStructuredLogger()
@@ -183,7 +192,7 @@ class BrowserAsrGatewayTests(unittest.TestCase):
         )
 
         logger.records.clear()
-        gateway._last_status_heartbeat_at_ms = gateway._now_ms() - 6000  # noqa: SLF001
+        gateway._last_status_heartbeat_at_ms = gateway._now_ms() - 20_000  # noqa: SLF001
         gateway.update_status(
             {
                 "reason": "heartbeat",

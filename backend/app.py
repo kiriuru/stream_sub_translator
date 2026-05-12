@@ -347,9 +347,15 @@ async def ws_remote_result_ingest(websocket: WebSocket) -> None:
 async def shutdown_runtime() -> None:
     runtime_orchestrator = getattr(app.state, "runtime_orchestrator", None)
     session_logger = getattr(app.state, "session_logger", None)
+    cache_manager = getattr(app.state, "cache_manager", None)
     if runtime_orchestrator is None:
         if session_logger is not None:
             session_logger.flush()
+        if cache_manager is not None:
+            try:
+                cache_manager.flush_now()
+            except Exception:
+                pass
         return
     try:
         await runtime_orchestrator.stop()
@@ -357,5 +363,16 @@ async def shutdown_runtime() -> None:
         # Shutdown should stay best-effort so the local server can still exit.
         pass
     finally:
+        translation_engine = getattr(runtime_orchestrator, "_translation_engine", None)
+        if translation_engine is not None:
+            try:
+                await translation_engine.aclose()
+            except Exception:
+                pass
+        if cache_manager is not None:
+            try:
+                cache_manager.flush_now()
+            except Exception:
+                pass
         if session_logger is not None:
             session_logger.flush()

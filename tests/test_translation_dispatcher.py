@@ -95,6 +95,7 @@ class _StubTranslationEngine:
         provider_group: str | None = None,
         experimental: bool | None = None,
         local_provider: bool | None = None,
+        budget_seconds: float | None = None,
     ) -> tuple[TranslationItem, dict]:
         try:
             self.calls.append((slot_id, target_lang, provider_name))

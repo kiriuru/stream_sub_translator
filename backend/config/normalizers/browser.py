@@ -25,8 +25,17 @@ def normalize_browser_asr_config(payload: Any, *, defaults: dict[str, Any]) -> d
     if not isinstance(audio_track_constraints, dict):
         audio_track_constraints = {}
 
+    _allowed_launch = {"auto", "google_chrome"}
+    _raw_launch = str(browser.get("worker_launch_browser", "auto") or "auto").strip().lower()
+    if _raw_launch == "chromium":
+        _raw_launch = "auto"
+    if _raw_launch == "microsoft_edge":
+        _raw_launch = "google_chrome"
+    worker_launch_browser = _raw_launch if _raw_launch in _allowed_launch else "auto"
+
     return {
         "recognition_language": recognition_language,
+        "worker_launch_browser": worker_launch_browser,
         "interim_results": bool(browser.get("interim_results", True)),
         "continuous_results": bool(browser.get("continuous_results", True)),
         "force_finalization_enabled": bool(browser.get("force_finalization_enabled", True)),

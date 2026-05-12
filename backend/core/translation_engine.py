@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 import logging
+import random
 import socket
 import threading
+import time
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
+
+import httpx
 
 from backend.core.cache_manager import CacheManager
 from backend.models import TranslationDiagnostics, TranslationItem
 from backend.translation.base import (
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
     PROVIDER_GROUP_EXPERIMENTAL,
     PROVIDER_GROUP_STABLE,
     BaseTranslationProvider,
@@ -34,6 +39,13 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_PROVIDER_NAME = "google_translate_v2"
 _CANONICAL_TRANSLATION_SLOTS = tuple(f"translation_{index}" for index in range(1, 6))
+
+_DEFAULT_HTTP_KEEPALIVE_LIMIT = 20
+_DEFAULT_HTTP_TOTAL_LIMIT = 40
+_DEFAULT_HTTP_KEEPALIVE_EXPIRY_SECONDS = 30.0
+
+_RETRY_BACKOFF_BASE_SECONDS = 0.3
+_RETRY_BACKOFF_MAX_SECONDS = 2.0
 
 
 @dataclass
@@ -82,6 +94,60 @@ class TranslationEngine:
         self._endpoint_reachability_cache: dict[str, tuple[float, bool, str | None]] = {}
         self._endpoint_cache_lock = threading.Lock()
         self._endpoint_cache_ttl_seconds = 5.0
+        self._http_client: httpx.AsyncClient | None = None
+        self._http_client_lock = threading.Lock()
+        self._closed = False
+        self._bind_providers_http_client()
+
+    def _bind_providers_http_client(self) -> None:
+        for provider in self.providers.values():
+            try:
+                provider.bind_http_client_provider(self._get_or_create_http_client)
+            except AttributeError:
+                # Providers built outside the standard registry (e.g. test stubs)
+                # may not expose the binding hook. They simply continue to use
+                # whatever transport they manage themselves.
+                continue
+
+    def _get_or_create_http_client(self) -> httpx.AsyncClient:
+        if self._closed:
+            raise RuntimeError("TranslationEngine HTTP client is closed.")
+        client = self._http_client
+        if client is not None and not client.is_closed:
+            return client
+        with self._http_client_lock:
+            client = self._http_client
+            if client is None or client.is_closed:
+                limits = httpx.Limits(
+                    max_keepalive_connections=_DEFAULT_HTTP_KEEPALIVE_LIMIT,
+                    max_connections=_DEFAULT_HTTP_TOTAL_LIMIT,
+                    keepalive_expiry=_DEFAULT_HTTP_KEEPALIVE_EXPIRY_SECONDS,
+                )
+                timeout = httpx.Timeout(DEFAULT_REQUEST_TIMEOUT_SECONDS, connect=10.0)
+                client = httpx.AsyncClient(limits=limits, timeout=timeout)
+                self._http_client = client
+        return client
+
+    async def aclose(self) -> None:
+        with self._http_client_lock:
+            client = self._http_client
+            self._http_client = None
+            self._closed = True
+        if client is not None and not client.is_closed:
+            try:
+                await client.aclose()
+            except Exception:
+                logger.exception("Failed to close translation HTTP client cleanly.")
+        try:
+            self.cache_manager.flush_now()
+        except Exception:
+            logger.exception("Failed to flush translation cache during engine close.")
+
+    def reset_for_restart(self) -> None:
+        """Re-open the HTTP client after a previous aclose()."""
+        with self._http_client_lock:
+            self._closed = False
+            self._http_client = None
 
     def _supported_provider_name(self, raw_provider_name: Any) -> str:
         provider_name = str(raw_provider_name or _DEFAULT_PROVIDER_NAME).strip()
@@ -205,33 +271,26 @@ class TranslationEngine:
         if not endpoint:
             return self._check_local_endpoint(endpoint)
 
-        try:
-            now = float(asyncio.get_running_loop().time())
-        except RuntimeError:
-            import time as _time
-
-            now = float(_time.monotonic())
+        now = time.monotonic()
         with self._endpoint_cache_lock:
             cached = self._endpoint_reachability_cache.get(endpoint)
             if cached is not None:
                 checked_at, reachable, reason = cached
-                age = (now - checked_at) if now and checked_at else None
-                if age is not None and age <= self._endpoint_cache_ttl_seconds:
+                age = now - checked_at
+                if age <= self._endpoint_cache_ttl_seconds:
                     return reachable, reason
 
         # Best-effort refresh in background; return stale cache if available.
         def _refresh() -> None:
             reachable, reason = self._check_local_endpoint(endpoint)
-            import time as _time
-
-            refreshed_at = float(_time.monotonic())
+            refreshed_at = time.monotonic()
             with self._endpoint_cache_lock:
                 self._endpoint_reachability_cache[endpoint] = (refreshed_at, reachable, reason)
 
         with self._endpoint_cache_lock:
             if cached is not None:
-                age = (now - cached[0]) if cached[0] else None
-                if age is None or age > self._endpoint_cache_ttl_seconds:
+                age = now - cached[0]
+                if age > self._endpoint_cache_ttl_seconds:
                     threading.Thread(target=_refresh, name="sst-endpoint-readiness", daemon=True).start()
                 _checked_at, reachable, reason = cached
                 return reachable, reason
@@ -461,11 +520,35 @@ class TranslationEngine:
                 signature_payload[f"provider_setting:{provider_name}:{key}"] = str(value)
         return tuple(sorted(signature_payload.items()))
 
+    def _normalized_cache_settings(self, translation_config: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(translation_config, dict):
+            return {"enabled": True, "persist": True}
+        cache_config = translation_config.get("cache", {})
+        if not isinstance(cache_config, dict):
+            cache_config = {}
+        normalized: dict[str, Any] = {
+            "enabled": bool(cache_config.get("enabled", True)),
+            "persist": bool(cache_config.get("persist", True)),
+        }
+        if "max_entries" in cache_config:
+            try:
+                normalized["max_entries"] = max(0, int(cache_config.get("max_entries") or 0))
+            except (TypeError, ValueError):
+                pass
+        return normalized
+
     def apply_live_settings(self, translation_config: dict[str, Any]) -> None:
         new_signature = self._build_settings_signature(translation_config)
         if self._last_settings_signature is not None and new_signature != self._last_settings_signature:
             self.cache_manager.clear_translation_cache()
         self._last_settings_signature = new_signature
+        cache_settings = self._normalized_cache_settings(translation_config)
+        try:
+            self.cache_manager.update_settings(**cache_settings)
+        except AttributeError:
+            # Older CacheManager implementations (e.g. test doubles) might not
+            # expose update_settings; ignore so the engine stays usable.
+            pass
 
     def prepare_request(self, translation_config: dict[str, Any]) -> PreparedTranslationRequest:
         provider_settings_map = self._normalized_provider_settings_map(translation_config)
@@ -525,9 +608,11 @@ class TranslationEngine:
         provider_group: str | None = None,
         experimental: bool | None = None,
         local_provider: bool | None = None,
+        budget_seconds: float | None = None,
     ) -> tuple[TranslationItem, dict[str, Any]]:
         provider = self.providers.get(provider_name)
         normalized_target_lang = str(target_lang).strip().lower()
+        normalized_source_lang = str(source_lang or "auto").strip().lower() or "auto"
         normalized_settings = {str(key): str(value) for key, value in provider_settings.items()}
         if provider is None:
             diagnostics = {
@@ -553,6 +638,33 @@ class TranslationEngine:
                     error=diagnostics["status_message"],
                 ),
                 diagnostics,
+            )
+
+        # Short-circuit: empty text or matching source/target language never
+        # need to hit the network. This avoids spurious "empty translation"
+        # provider errors and keeps the dispatcher responsive when the
+        # finalized phrase is blank or already in the target language.
+        if not str(source_text or "").strip() or (
+            normalized_source_lang != "auto" and normalized_source_lang == normalized_target_lang
+        ):
+            short_circuit_diagnostics = provider.diagnostics(normalized_settings)
+            short_circuit_diagnostics["status_message"] = (
+                "Translation short-circuited (empty or identical source/target language)."
+            )
+            return (
+                TranslationItem(
+                    target_lang=normalized_target_lang,
+                    text=str(source_text or ""),
+                    provider=provider_name,
+                    provider_group=short_circuit_diagnostics.get("provider_group"),
+                    experimental=bool(short_circuit_diagnostics.get("experimental", False)),
+                    local_provider=bool(short_circuit_diagnostics.get("local_provider", False)),
+                    slot_id=slot_id,
+                    label=label,
+                    cached=True,
+                    success=True,
+                ),
+                short_circuit_diagnostics,
             )
 
         cached = self.cache_manager.get_translation(
@@ -588,6 +700,7 @@ class TranslationEngine:
             retries=retries,
             slot_id=slot_id,
             label=label,
+            budget_seconds=budget_seconds,
         )
         if translated_item.success and translated_item.text:
             self.cache_manager.set_translation(
@@ -674,17 +787,31 @@ class TranslationEngine:
         retries: int,
         slot_id: str | None = None,
         label: str | None = None,
+        budget_seconds: float | None = None,
     ) -> tuple[TranslationItem, dict[str, Any]]:
         attempt = 0
         last_error = "Translation failed."
         last_diagnostics = provider.diagnostics(provider_settings)
-        while attempt <= retries:
+        max_attempts = retries + 1
+        started_at = time.monotonic()
+        normalized_budget = (
+            float(budget_seconds)
+            if budget_seconds is not None and budget_seconds > 0
+            else None
+        )
+
+        while attempt < max_attempts:
+            attempt += 1
+            per_attempt_timeout = self._per_attempt_timeout(
+                normalized_budget, started_at, max_attempts, attempt
+            )
             try:
                 translated, diagnostics = await provider.translate(
                     text=source_text,
                     source_lang=source_lang,
                     target_lang=target_lang,
                     provider_settings=provider_settings,
+                    timeout=per_attempt_timeout,
                 )
                 return (
                     TranslationItem(
@@ -701,14 +828,50 @@ class TranslationEngine:
                     ),
                     diagnostics,
                 )
+            except TypeError:
+                # Backwards compatibility: providers (or test stubs) that have
+                # not been updated to accept the `timeout` kwarg should still
+                # work, just without per-attempt budget propagation.
+                try:
+                    translated, diagnostics = await provider.translate(
+                        text=source_text,
+                        source_lang=source_lang,
+                        target_lang=target_lang,
+                        provider_settings=provider_settings,
+                    )
+                    return (
+                        TranslationItem(
+                            target_lang=target_lang,
+                            text=translated,
+                            provider=provider.info.name,
+                            provider_group=diagnostics.get("provider_group"),
+                            experimental=bool(diagnostics.get("experimental", False)),
+                            local_provider=bool(diagnostics.get("local_provider", False)),
+                            slot_id=slot_id,
+                            label=label,
+                            cached=False,
+                            success=True,
+                        ),
+                        diagnostics,
+                    )
+                except Exception as exc:
+                    provider_error = (
+                        exc if isinstance(exc, TranslationProviderError) else TranslationProviderError(str(exc))
+                    )
+                    last_error = str(provider_error)
+                    last_diagnostics = provider.diagnostics(provider_settings)
+                    last_diagnostics["status_message"] = last_error
+                    if attempt < max_attempts and getattr(provider_error, "retryable", False) and self._has_remaining_budget(normalized_budget, started_at):
+                        await self._sleep_with_jitter(attempt, normalized_budget, started_at)
+                        continue
+                    break
             except Exception as exc:
                 provider_error = exc if isinstance(exc, TranslationProviderError) else TranslationProviderError(str(exc))
                 last_error = str(provider_error)
                 last_diagnostics = provider.diagnostics(provider_settings)
                 last_diagnostics["status_message"] = last_error
-                attempt += 1
-                if attempt <= retries and getattr(provider_error, "retryable", False):
-                    await asyncio.sleep(0.35 * attempt)
+                if attempt < max_attempts and getattr(provider_error, "retryable", False) and self._has_remaining_budget(normalized_budget, started_at):
+                    await self._sleep_with_jitter(attempt, normalized_budget, started_at)
                     continue
                 break
 
@@ -728,6 +891,50 @@ class TranslationEngine:
             ),
             last_diagnostics,
         )
+
+    @staticmethod
+    def _per_attempt_timeout(
+        budget_seconds: float | None,
+        started_at: float,
+        max_attempts: int,
+        attempt_number: int,
+    ) -> float:
+        if budget_seconds is None:
+            return DEFAULT_REQUEST_TIMEOUT_SECONDS
+        elapsed = max(0.0, time.monotonic() - started_at)
+        remaining_total = max(0.0, budget_seconds - elapsed)
+        remaining_attempts = max(1, (max_attempts - attempt_number) + 1)
+        # Spread remaining budget across remaining attempts but never wait for
+        # less than a tight floor so flaky providers still get a fair shot.
+        return max(0.25, remaining_total / float(remaining_attempts))
+
+    @staticmethod
+    def _has_remaining_budget(budget_seconds: float | None, started_at: float) -> bool:
+        if budget_seconds is None:
+            return True
+        elapsed = time.monotonic() - started_at
+        return (budget_seconds - elapsed) > 0.1
+
+    @staticmethod
+    async def _sleep_with_jitter(
+        attempt_number: int,
+        budget_seconds: float | None,
+        started_at: float,
+    ) -> None:
+        base_delay = min(
+            _RETRY_BACKOFF_MAX_SECONDS,
+            _RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt_number - 1)),
+        )
+        jitter = random.uniform(0.0, _RETRY_BACKOFF_BASE_SECONDS)
+        delay = base_delay + jitter
+        if budget_seconds is not None:
+            elapsed = time.monotonic() - started_at
+            remaining = budget_seconds - elapsed
+            # Never sleep past the budget; leave at least ~50ms for the next
+            # provider attempt to actually run.
+            delay = min(delay, max(0.0, remaining - 0.05))
+        if delay > 0:
+            await asyncio.sleep(delay)
 
     def _failed_batch(
         self,

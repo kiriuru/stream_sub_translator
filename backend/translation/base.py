@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, AsyncIterator, Callable
 
 import httpx
 
@@ -10,6 +11,8 @@ PROVIDER_GROUP_STABLE = "stable"
 PROVIDER_GROUP_LLM = "llm"
 PROVIDER_GROUP_LOCAL_LLM = "local_llm"
 PROVIDER_GROUP_EXPERIMENTAL = "experimental"
+
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 20.0
 
 SUPPORTED_TRANSLATION_PROVIDERS = (
     "google_translate_v2",
@@ -45,6 +48,21 @@ class TranslationProviderInfo:
 
 class BaseTranslationProvider:
     info = TranslationProviderInfo(name="base", group=PROVIDER_GROUP_STABLE)
+
+    def __init__(self) -> None:
+        self._http_client_provider: Callable[[], httpx.AsyncClient] | None = None
+
+    def bind_http_client_provider(
+        self, provider: Callable[[], httpx.AsyncClient] | None
+    ) -> None:
+        """Allow the translation engine to share a connection-pooled client.
+
+        When bound, request helpers reuse the engine-owned client which keeps
+        TLS/keep-alive connections warm between requests. When unbound, the
+        helpers fall back to a one-off client so providers stay usable in
+        standalone tests and tooling.
+        """
+        self._http_client_provider = provider
 
     async def translate(
         self,
@@ -104,7 +122,7 @@ class BaseTranslationProvider:
         json: Any | None = None,
         data: Any | None = None,
         headers: dict[str, str] | None = None,
-        timeout: float = 20.0,
+        timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
         error_prefix: str,
     ) -> Any:
         try:
@@ -121,3 +139,38 @@ class BaseTranslationProvider:
             return response.json()
         except Exception as exc:
             raise self._http_error(error_prefix, exc) from exc
+
+    @asynccontextmanager
+    async def _http_client_context(self) -> AsyncIterator[httpx.AsyncClient]:
+        provider_callable = self._http_client_provider
+        if provider_callable is not None:
+            client = provider_callable()
+            yield client
+            return
+        async with httpx.AsyncClient() as client:
+            yield client
+
+    async def _request_json(
+        self,
+        *,
+        url: str,
+        method: str = "GET",
+        params: dict[str, Any] | None = None,
+        json: Any | None = None,
+        data: Any | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
+        error_prefix: str,
+    ) -> Any:
+        async with self._http_client_context() as client:
+            return await self._get_json(
+                client,
+                url=url,
+                method=method,
+                params=params,
+                json=json,
+                data=data,
+                headers=headers,
+                timeout=timeout,
+                error_prefix=error_prefix,
+            )

@@ -6,7 +6,7 @@
     <title data-i18n="document.title.dashboard">Stream Subtitle Translator</title>
     <link rel="stylesheet" href="/project-fonts.css?v=20260422a" />
     <link rel="stylesheet" href="/static/css/app.css?v=20260508a" />
-    <link rel="stylesheet" href="/static/css/subtitle-style.css?v=20260422a" />
+    <link rel="stylesheet" href="/static/css/subtitle-style.css?v=20260512a" />
   </head>
   <body>
     <main class="app-shell">
@@ -99,14 +99,22 @@
                   <span class="label" data-i18n="overview.recognition.mode">Recognition method</span>
                   <select id="recognition-mode-select">
                     <option value="local" data-i18n="overview.recognition.mode.local">Local Parakeet ASR</option>
-                    <option value="browser_google" data-i18n="overview.recognition.mode.browser_google">Browser Google Speech</option>
-                    <option value="browser_google_experimental" data-i18n="overview.recognition.mode.browser_google_experimental">Browser Google Speech Experimental</option>
+                    <option value="browser_google" data-i18n="overview.recognition.mode.browser_google">Web Speech</option>
+                    <option value="browser_google_experimental" data-i18n="overview.recognition.mode.browser_google_experimental">Web Speech (Experimental)</option>
                   </select>
                 </label>
                 <label id="recognition-language-row" hidden>
                   <span class="label" data-i18n="overview.recognition.language">Recognition language</span>
                   <select id="recognition-language-select"></select>
                 </label>
+                <label id="recognition-worker-browser-row" hidden>
+                  <span class="label" data-i18n="overview.recognition.worker_browser">Worker browser (desktop)</span>
+                  <select id="recognition-worker-browser-select">
+                    <option value="auto" data-i18n="overview.recognition.worker_browser.auto">Auto (Google Chrome)</option>
+                    <option value="google_chrome" data-i18n="overview.recognition.worker_browser.chrome">Google Chrome</option>
+                  </select>
+                </label>
+                <p id="recognition-worker-browser-web-note" class="muted" hidden data-i18n="overview.recognition.worker_browser.web_hint"></p>
                 <label id="local-asr-provider-row">
                   <span class="label" data-i18n="overview.recognition.provider">Backend ASR provider</span>
                   <select id="local-asr-provider-select">
@@ -114,7 +122,7 @@
                     <option value="official_eu_parakeet" data-i18n="overview.recognition.provider.parakeet">Official EU Parakeet</option>
                   </select>
                 </label>
-                <p id="local-asr-provider-hint" class="muted" data-i18n="overview.recognition.provider.hint">Backend providers are configured here for local microphone capture. Browser Speech modes use the separate browser recognition window.</p>
+                <p id="local-asr-provider-hint" class="muted" data-i18n="overview.recognition.provider.hint">Backend providers are configured here for local microphone capture. Web Speech modes use the separate browser worker window.</p>
               </div>
             </article>
 
@@ -172,6 +180,16 @@
             <label class="checkbox-row">
               <input id="translation-enabled" type="checkbox" />
               <span data-i18n="translation.enable">Translate recognized speech</span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label class="checkbox-row">
+              <input id="translation-cache-enabled" type="checkbox" />
+              <span data-i18n="translation.cache.enable">Reuse translation cache (skip duplicate API calls)</span>
+            </label>
+            <label class="checkbox-row">
+              <input id="translation-cache-persist" type="checkbox" />
+              <span data-i18n="translation.cache.persist">Save translation cache to disk between sessions</span>
             </label>
           </div>
           <ul id="translation-language-order" class="ordered-list translation-line-list"></ul>
@@ -634,18 +652,6 @@
         <div class="settings-surface">
           <div class="surface-header">
             <div>
-              <h3 data-i18n="style.fonts.title">Fonts</h3>
-              <p class="muted" data-i18n="style.fonts.note">Project-local fonts are the reliable custom-font path. System font listing is best-effort.</p>
-            </div>
-            <button id="font-refresh-btn" class="secondary" data-i18n="style.fonts.refresh">Refresh System Fonts</button>
-          </div>
-          <p class="muted"><span data-i18n="style.fonts.dir">Project-local fonts folder:</span> <span id="project-fonts-dir" class="mono">loading...</span></p>
-          <p id="font-source-status" class="muted" data-i18n="style.fonts.status.default">Fallback fonts are always available. Local system font access depends on the browser/runtime.</p>
-        </div>
-
-        <div class="settings-surface">
-          <div class="surface-header">
-            <div>
               <h3 data-i18n="style.ui_theme.title">UI Theme</h3>
               <p class="muted" data-i18n="style.ui_theme.note">Controls the dashboard + browser worker windows appearance (light/dark + gradient palette). Saved in config/profiles.</p>
             </div>
@@ -687,6 +693,18 @@
             </div>
           </div>
           <p id="ui-theme-status" class="muted" data-i18n="style.ui_theme.status">Changes apply immediately. Use the global Save button to persist.</p>
+        </div>
+
+        <div class="settings-surface">
+          <div class="surface-header">
+            <div>
+              <h3 data-i18n="style.fonts.title">Fonts</h3>
+              <p class="muted" data-i18n="style.fonts.note">Project-local fonts are the reliable custom-font path. System font listing is best-effort.</p>
+            </div>
+            <button id="font-refresh-btn" class="secondary" data-i18n="style.fonts.refresh">Refresh System Fonts</button>
+          </div>
+          <p class="muted"><span data-i18n="style.fonts.dir">Project-local fonts folder:</span> <span id="project-fonts-dir" class="mono">loading...</span></p>
+          <p id="font-source-status" class="muted" data-i18n="style.fonts.status.default">Fallback fonts are always available. Local system font access depends on the browser/runtime.</p>
         </div>
 
         <p class="muted" data-i18n="style.final_note">The same saved subtitle style payload drives this dashboard preview and the OBS overlay. Presets are a starting point, and your edits stay local in config/profiles.</p>
@@ -1147,11 +1165,11 @@
                 <dl class="help-definition-list">
                   <dt>Health badge</dt><dd>Shows whether the local FastAPI app is responding. If health is not OK, other controls can be stale.</dd>
                   <dt>Runtime badge</dt><dd>Shows the lifecycle of the recognition runtime: idle, starting, listening, transcribing, translating, or error.</dd>
-                  <dt>ASR provider / device / mode badges</dt><dd>Summarize the active recognition provider, selected microphone, partial-text behavior, and whether the app is in local or browser speech mode.</dd>
+                  <dt>ASR provider / device / mode badges</dt><dd>Summarize the active recognition provider, selected microphone, partial-text behavior, and whether the app is in local or Web Speech mode.</dd>
                   <dt>Start</dt><dd>Loads the selected runtime and begins listening. Local AI modes may need model/runtime bootstrap before they start.</dd>
                   <dt>Stop</dt><dd>Stops the current runtime. Use Stop/Start after changing microphone, ASR provider, or runtime profile choices.</dd>
-                  <dt>Recognition method</dt><dd>Chooses Local Parakeet, Browser Speech, or Browser Speech Experimental. Worker mode disables browser recognition by design.</dd>
-                  <dt>Microphone</dt><dd>Selects the local input device for local capture. Browser Speech microphone switching happens in the browser worker address-bar permission UI.</dd>
+                  <dt>Recognition method</dt><dd>Chooses Local Parakeet, Web Speech, or Web Speech (Experimental). Worker mode disables browser recognition by design.</dd>
+                  <dt>Microphone</dt><dd>Selects the local input device for local capture. Web Speech microphone switching happens in the browser worker address-bar permission UI.</dd>
                   <dt>Subtitle Output Preview</dt><dd>Shows the same ordering and visibility rules that the OBS overlay receives.</dd>
                   <dt>Global Save</dt><dd>Saves most dashboard settings to local config. Some settings apply instantly; runtime-affecting settings need Stop/Start.</dd>
                 </dl>
@@ -1166,8 +1184,8 @@
                   <dt>ASR provider / device / mode badges</dt><dd>Кратко показывают активный провайдер распознавания, выбранный микрофон, режим partial-текста и путь local/browser.</dd>
                   <dt>Start</dt><dd>Загружает выбранный runtime и начинает слушать. Локальные AI-режимы могут сначала запускать bootstrap модели/runtime.</dd>
                   <dt>Stop</dt><dd>Останавливает текущий runtime. После смены микрофона, ASR-провайдера или runtime-профиля делайте Stop/Start.</dd>
-                  <dt>Recognition method</dt><dd>Выбор Local Parakeet, Browser Speech или Browser Speech Experimental. В worker-режиме browser recognition отключён намеренно.</dd>
-                  <dt>Microphone</dt><dd>Выбирает локальный вход для local capture. В Browser Speech микрофон меняется через значок разрешений в адресной строке окна worker-а.</dd>
+                  <dt>Recognition method</dt><dd>Выбор Local Parakeet, Web Speech или Web Speech (Experimental). В worker-режиме browser recognition отключён намеренно.</dd>
+                  <dt>Microphone</dt><dd>Выбирает локальный вход для local capture. В Web Speech микрофон меняется через значок разрешений в адресной строке окна worker-а.</dd>
                   <dt>Subtitle Output Preview</dt><dd>Показывает те же правила порядка и видимости строк, которые уйдут в OBS overlay.</dd>
                   <dt>Global Save</dt><dd>Сохраняет большую часть настроек панели в локальный config. Часть настроек применяется сразу, runtime-настройки требуют Stop/Start.</dd>
                 </dl>
@@ -1181,8 +1199,8 @@
                 <p class="muted">This section describes the recognition method selector and the user-facing Tuning controls. Exact millisecond-level ASR parameters live in Tools &amp; Data.</p>
                 <dl class="help-definition-list">
                   <dt>Local Parakeet</dt><dd>Main local AI path. It uses local microphone capture, VAD, and the selected Parakeet provider. GPU is preferred when available.</dd>
-                  <dt>Browser Speech</dt><dd>Opens a visible browser worker window. The browser performs recognition and sends partial/final text to the app over WebSocket.</dd>
-                  <dt>Browser Speech Experimental</dt><dd>Uses a newer audio-track startup path. Keep it for compatibility experiments, not as the most stable default.</dd>
+                  <dt>Web Speech</dt><dd>Opens a visible browser worker window. The browser performs recognition and sends partial/final text to the app over WebSocket.</dd>
+                  <dt>Web Speech (Experimental)</dt><dd>Uses a newer audio-track startup path. Keep it for compatibility experiments, not as the most stable default.</dd>
                   <dt>Recognition language</dt><dd>Language hint for browser recognition modes. Local providers may use their own model/language behavior.</dd>
                   <dt>How quickly text appears</dt><dd>Tuning slider for the first live text. Higher values make partial text appear sooner; lower values wait for more speech before showing text.</dd>
                   <dt>How quickly speech is considered finished</dt><dd>Tuning slider for phrase finalization. Higher values close phrases faster after a pause; lower values keep the phrase open longer.</dd>
@@ -1198,8 +1216,8 @@
                 <p class="muted">Этот раздел описывает выбор способа распознавания и пользовательские настройки вкладки Tuning. Точные ASR-параметры в миллисекундах находятся в Tools &amp; Data.</p>
                 <dl class="help-definition-list">
                   <dt>Local Parakeet</dt><dd>Основной локальный AI-путь. Использует локальный захват микрофона, VAD и выбранный Parakeet provider. При наличии CUDA целевой путь — GPU.</dd>
-                  <dt>Browser Speech</dt><dd>Открывает видимое окно browser worker-а. Браузер сам распознаёт речь и отправляет partial/final текст в приложение по WebSocket.</dd>
-                  <dt>Browser Speech Experimental</dt><dd>Пробует новый запуск через audio track. Это режим для проверки совместимости, а не самый стабильный default.</dd>
+                  <dt>Web Speech</dt><dd>Открывает видимое окно browser worker-а. Браузер сам распознаёт речь и отправляет partial/final текст в приложение по WebSocket.</dd>
+                  <dt>Web Speech (Experimental)</dt><dd>Пробует новый запуск через audio track. Это режим для проверки совместимости, а не самый стабильный default.</dd>
                   <dt>Recognition language</dt><dd>Подсказка языка для browser recognition. Локальные провайдеры могут использовать свои правила модели/языка.</dd>
                   <dt>Как быстро появляется текст</dt><dd>Ползунок Tuning для первого live-текста. Больше — partial появляется раньше; меньше — приложение ждёт больше речи перед показом текста.</dd>
                   <dt>Как быстро речь считается законченной</dt><dd>Ползунок Tuning для завершения фразы. Больше — фраза быстрее закрывается после паузы; меньше — фраза дольше остаётся открытой.</dd>
@@ -1341,7 +1359,7 @@
                   <dt>ASR diagnostics</dt><dd>Reports recognition-side state: selected mode/provider, runtime status, device/runtime details, and backend messages when available.</dd>
                   <dt>Translation diagnostics</dt><dd>Shows translation queue/provider state. If translation appears late or missing, check whether the queue is idle, busy, disabled, or failing.</dd>
                   <dt>Translation queue idle</dt><dd>Means no translation job is currently waiting or running. If you expected output, check whether translation is enabled and lines are configured.</dd>
-                  <dt>Browser worker diagnostics</dt><dd>Shows whether the Browser Speech worker window is connected. If it says not connected, browser modes cannot feed text into the app.</dd>
+                  <dt>Browser worker diagnostics</dt><dd>Shows whether the Web Speech worker window is connected. If it says not connected, browser modes cannot feed text into the app.</dd>
                   <dt>OBS Closed Captions diagnostics</dt><dd>Shows OBS caption connection/output state separately from the visible overlay.</dd>
                   <dt>Logs location</dt><dd>Reminder of where local logs are written: backend log, runtime events, and latest session JSONL.</dd>
                   <dt>VAD mode</dt><dd>Speech detector sensitivity. 0 is fastest and easiest to trigger; 3 is strictest and rejects more noise.</dd>
@@ -1375,7 +1393,7 @@
                   <dt>ASR diagnostics</dt><dd>Показывает состояние распознавания: выбранный mode/provider, runtime status, device/runtime details и backend-сообщения, если они доступны.</dd>
                   <dt>Translation diagnostics</dt><dd>Показывает состояние очереди и провайдера перевода. Если перевод запаздывает или пропал, проверьте queue idle/busy/disabled/failing.</dd>
                   <dt>Translation queue idle</dt><dd>Означает, что сейчас нет ожидающей или выполняющейся задачи перевода. Если вы ждали текст, проверьте включён ли перевод и настроены ли линии.</dd>
-                  <dt>Browser worker diagnostics</dt><dd>Показывает, подключено ли окно Browser Speech worker-а. Если not connected, browser modes не могут отправлять текст в приложение.</dd>
+                  <dt>Browser worker diagnostics</dt><dd>Показывает, подключено ли окно Web Speech worker-а. Если not connected, browser modes не могут отправлять текст в приложение.</dd>
                   <dt>OBS Closed Captions diagnostics</dt><dd>Показывает состояние OBS captions отдельно от видимого overlay.</dd>
                   <dt>Logs location</dt><dd>Напоминание, где лежат локальные логи: backend log, runtime events и latest session JSONL.</dd>
                   <dt>VAD mode</dt><dd>Чувствительность детектора речи. 0 — самый быстрый и легко срабатывает, 3 — самый строгий и лучше отсекает шум.</dd>
@@ -1423,11 +1441,11 @@
                   <li>Press Start on the main dashboard/controller side to begin microphone capture and remote audio/result flow.</li>
                 </ol>
                 <dl class="help-definition-list">
-                  <dt>Browser Speech quick start</dt><dd>Desktop profile that can skip local AI bootstrap and use the browser recognition worker.</dd>
+                  <dt>Web Speech quick start</dt><dd>Desktop profile that can skip local AI bootstrap and use the browser recognition worker.</dd>
                   <dt>NVIDIA GPU</dt><dd>Desktop profile intended for local AI recognition with CUDA/GPU acceleration.</dd>
                   <dt>CPU-only</dt><dd>Local AI fallback profile. It is expected to be slower and should be treated as degraded mode.</dd>
                   <dt>Remote Controller</dt><dd>Runs the dashboard/control side. It captures microphone audio locally, sends it to a LAN worker, and receives transcript/translation events back.</dd>
-                  <dt>Remote Worker</dt><dd>Runs the ASR processing side on another LAN machine. It must use local AI runtime, not Browser Speech.</dd>
+                  <dt>Remote Worker</dt><dd>Runs the ASR processing side on another LAN machine. It must use local AI runtime, not Web Speech.</dd>
                   <dt>Worker Base URL</dt><dd>HTTP address of the worker app, for example http://192.168.1.50:8765. Use the worker machine LAN IP and the port it was started with.</dd>
                   <dt>Session ID</dt><dd>Remote session identifier shared by controller and worker. It ties signaling, audio ingest, and result ingest to the same run.</dd>
                   <dt>Pair Code</dt><dd>Short verification code used during pairing so the controller and worker agree on the intended session.</dd>
@@ -1464,11 +1482,11 @@
                   <li>Нажмите Start в основной dashboard/controller панели, чтобы начать захват микрофона и remote audio/result flow.</li>
                 </ol>
                 <dl class="help-definition-list">
-                  <dt>Browser Speech quick start</dt><dd>Desktop profile, который может пропустить bootstrap локального AI и использовать browser recognition worker.</dd>
+                  <dt>Web Speech quick start</dt><dd>Desktop profile, который может пропустить bootstrap локального AI и использовать browser recognition worker.</dd>
                   <dt>NVIDIA GPU</dt><dd>Desktop profile для локального AI-распознавания с CUDA/GPU acceleration.</dd>
                   <dt>CPU-only</dt><dd>Локальный AI fallback profile. Ожидаемо медленнее и считается degraded mode.</dd>
                   <dt>Remote Controller</dt><dd>Сторона dashboard/control. Захватывает микрофон локально, отправляет звук LAN worker-у и получает обратно transcript/translation events.</dd>
-                  <dt>Remote Worker</dt><dd>Сторона ASR processing на другой LAN-машине. Должна использовать local AI runtime, а не Browser Speech.</dd>
+                  <dt>Remote Worker</dt><dd>Сторона ASR processing на другой LAN-машине. Должна использовать local AI runtime, а не Web Speech.</dd>
                   <dt>Worker Base URL</dt><dd>HTTP-адрес worker app, например http://192.168.1.50:8765. Используйте LAN IP worker-машины и порт, с которым она запущена.</dd>
                   <dt>Session ID</dt><dd>Идентификатор remote session, общий для controller и worker. Связывает signaling, audio ingest и result ingest в один run.</dd>
                   <dt>Pair Code</dt><dd>Короткий verification code при pairing, чтобы controller и worker подтвердили одну и ту же session.</dd>
@@ -1500,7 +1518,7 @@
     <div class="project-version-tag" title="Project version">v0.2.9.0</div>
 
     <script src="/static/js/core/redaction.js?v=20260505a"></script>
-    <script src="/static/js/subtitle-style.js?v=20260422a"></script>
+    <script src="/static/js/subtitle-style.js?v=20260512a"></script>
     <script src="/static/js/desktop.js?v=20260423a"></script>
     <script src="/static/js/i18n.js?v=20260508a"></script>
     <script type="module" src="/static/js/main.js?v=20260508a"></script>

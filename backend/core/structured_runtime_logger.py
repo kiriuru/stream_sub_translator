@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from backend.core.redaction import redact_mapping
+from backend.core.structured_log_compact import compact_mapping_for_runtime_log
 
 
 class StructuredRuntimeLogger:
@@ -16,8 +17,8 @@ class StructuredRuntimeLogger:
         self,
         logs_dir: Path,
         *,
-        max_bytes: int = 20 * 1024 * 1024,
-        backup_count: int = 3,
+        max_bytes: int = 5 * 1024 * 1024,
+        backup_count: int = 2,
     ) -> None:
         self._logs_dir = Path(logs_dir)
         self._max_bytes = max(1_048_576, int(max_bytes))
@@ -66,9 +67,9 @@ class StructuredRuntimeLogger:
         if normalized_source:
             record["source"] = normalized_source
         if payload:
-            record.update(self.redact_mapping(payload))
+            record.update(compact_mapping_for_runtime_log(self.redact_mapping(payload)))
         if fields:
-            record.update(self.redact_mapping(fields))
+            record.update(compact_mapping_for_runtime_log(self.redact_mapping(fields)))
         self._write_record(record)
 
     def redact_mapping(self, payload: Mapping[str, Any]) -> dict[str, Any]:

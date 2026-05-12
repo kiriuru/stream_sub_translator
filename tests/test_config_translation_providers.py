@@ -344,6 +344,42 @@ class ConfigTranslationProviderTests(unittest.TestCase):
         self.assertEqual(saved["translation"]["target_languages"], ["en"])
         self.assertEqual(saved["subtitle_output"]["display_order"], ["translation_2", "source", "translation_1"])
 
+    def test_translation_cache_round_trips_when_disabled(self) -> None:
+        saved = self.manager.save(
+            {
+                "translation": {
+                    "enabled": True,
+                    "provider": "google_translate_v2",
+                    "target_languages": ["en"],
+                    "cache": {"enabled": False, "persist": False, "max_entries": 100},
+                    "provider_settings": {"google_translate_v2": {"api_key": "AIza-test"}},
+                }
+            }
+        )
+
+        self.assertFalse(saved["translation"]["cache"]["enabled"])
+        self.assertFalse(saved["translation"]["cache"]["persist"])
+        self.assertEqual(saved["translation"]["cache"]["max_entries"], 100)
+        loaded = self.manager.load()
+        self.assertFalse(loaded["translation"]["cache"]["enabled"])
+        self.assertFalse(loaded["translation"]["cache"]["persist"])
+        self.assertEqual(loaded["translation"]["cache"]["max_entries"], 100)
+
+    def test_translation_provider_limits_round_trip(self) -> None:
+        limits = {"google_translate_v2": {"max_concurrent_targets": 2, "min_interval_ms": 50}}
+        saved = self.manager.save(
+            {
+                "translation": {
+                    "enabled": True,
+                    "provider": "google_translate_v2",
+                    "target_languages": ["en"],
+                    "provider_limits": limits,
+                    "provider_settings": {"google_translate_v2": {"api_key": "AIza-test"}},
+                }
+            }
+        )
+        self.assertEqual(saved["translation"]["provider_limits"], limits)
+
     def test_schema_accepts_translation_line_config(self) -> None:
         config = TranslationConfig(
             enabled=True,

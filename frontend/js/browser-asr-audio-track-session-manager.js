@@ -359,7 +359,7 @@
               error,
               this._locale() === "ru"
                 ? "Не удалось запустить экспериментальное браузерное распознавание."
-                : "Could not start experimental browser speech recognition."
+                : "Could not start experimental Web Speech recognition."
             );
             this.state.lastStartError = message;
             this.state.audioTrackStartFailures = Number(this.state.audioTrackStartFailures || 0) + 1;
@@ -379,7 +379,7 @@
           error,
           this._locale() === "ru"
             ? "Не удалось запустить экспериментальное браузерное распознавание."
-            : "Could not start experimental browser speech recognition."
+            : "Could not start experimental Web Speech recognition."
         );
         if (String(message).toLowerCase().includes("already started")) {
           this._setSupervisorState("running");

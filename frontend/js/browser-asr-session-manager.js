@@ -25,14 +25,25 @@
       this.micSilentDegradedAfterMs = 5000;
       this.recentMicActivityWindowMs = 2000;
       this.minimumReconnectIntervalMs = 500;
-      this.maxBrowserSessionAgeMs = 240000;
+      this.maxBrowserSessionAgeMs = 180000;
       this.prepareCycleBeforeMs = 15000;
       this.forceFinalOnInterruption = true;
       this.forceFinalMinChars = 3;
       this.forceFinalMinStableMs = 700;
+      this.voiceBelowRecognitionRmsThreshold = 0.025;
+      this.voiceBelowRecognitionGraceMs = 8000;
+      this.voiceBelowRecognitionMicWindowMs = 2000;
+      this.voiceBelowRecognitionMinNoSpeech = 1;
+      this.networkPreflightBurstThreshold = 3;
+      this.networkPreflightBurstWindowMs = 12000;
+      this.networkPreflightTimeoutMs = 4000;
+      this.networkPreflightCooldownMs = 30000;
       this._watchdogTimer = null;
       this._permissionPromise = null;
       this._socketListenersAttached = false;
+      this._wakeLockSentinel = null;
+      this._wakeLockBound = false;
+      this._wakeLockRetryTimer = null;
       this._initializeState();
     }
 
@@ -93,7 +104,14 @@
         noSpeechRestartDelayMs: Number(this.state.noSpeechRestartDelayMs || 350),
         networkReconnectInitialMs: Number(this.state.networkReconnectInitialMs || 1000),
         networkReconnectMaxMs: Number(this.state.networkReconnectMaxMs || 30000),
-        maxBrowserSessionAgeMs: Number(this.state.maxBrowserSessionAgeMs || 240000),
+        maxBrowserSessionAgeMs: Number(this.state.maxBrowserSessionAgeMs || 180000),
+        networkErrorBurstCount: Number(this.state.networkErrorBurstCount || 0),
+        networkErrorBurstStartedAtMs: Number(this.state.networkErrorBurstStartedAtMs || 0),
+        lastNetworkPreflightAtMs: Number(this.state.lastNetworkPreflightAtMs || 0),
+        lastNetworkPreflightOk: this.state.lastNetworkPreflightOk == null ? null : Boolean(this.state.lastNetworkPreflightOk),
+        networkPreflightInFlight: Boolean(this.state.networkPreflightInFlight),
+        wakeLockActive: Boolean(this.state.wakeLockActive),
+        wakeLockSupported: typeof navigator !== "undefined" && Boolean(navigator?.wakeLock?.request),
         prepareCycleBeforeMs: Number(this.state.prepareCycleBeforeMs || 15000),
         forceFinalOnInterruption: this.state.forceFinalOnInterruption !== false,
         forceFinalMinChars: Number(this.state.forceFinalMinChars || 3),
@@ -319,6 +337,7 @@
         this.state.lastResultAtMs = this.state.lastEventAtMs;
         this.state.noSpeechBackoffMs = 0;
         this.state.restartBackoffMs = 0;
+        this._resetNetworkErrorBurst();
       }
     }
 
@@ -478,6 +497,24 @@
         this._setHealthDegradedReason("mic_silent");
         return;
       }
+      const micRms = Number(this.state.micRms || 0);
+      const voiceLevelGoodRecently =
+        micRms >= this.voiceBelowRecognitionRmsThreshold
+        || (
+          micActivityAgeMs != null
+          && micActivityAgeMs <= this.voiceBelowRecognitionMicWindowMs
+          && Number(this.state.noSpeechCount || 0) >= this.voiceBelowRecognitionMinNoSpeech
+        );
+      if (
+        !document.hidden
+        && this.state.browserSupervisorState === "running"
+        && recognitionQuietMs >= this.voiceBelowRecognitionGraceMs
+        && voiceLevelGoodRecently
+        && Number(this.state.noSpeechCount || 0) >= this.voiceBelowRecognitionMinNoSpeech
+      ) {
+        this._setHealthDegradedReason("voice_below_recognition_threshold");
+        return;
+      }
       if (
         !document.hidden
         && this.state.browserSupervisorState === "running"
@@ -547,6 +584,11 @@
         media_tracks_stopped_count: Number(this.state.mediaTracksStoppedCount || 0),
         media_track_leak_guard_count: Number(this.state.mediaTrackLeakGuardCount || 0),
         visibility_state: this._currentVisibilityState(),
+        wake_lock_active: Boolean(this.state.wakeLockActive),
+        wake_lock_supported: this._hasWakeLockSupport(),
+        network_error_burst_count: Number(this.state.networkErrorBurstCount || 0),
+        network_preflight_last_at_ms: Number(this.state.lastNetworkPreflightAtMs || 0) || null,
+        network_preflight_last_ok: this.state.lastNetworkPreflightOk == null ? null : Boolean(this.state.lastNetworkPreflightOk),
         last_seen_at_ms: this._now(),
         ...extra,
       };
@@ -664,7 +706,7 @@
         this.state.networkReconnectInitialMs,
         Number(settings.networkReconnectMaxMs || this.state.networkReconnectMaxMs || 30000)
       );
-      this.state.maxBrowserSessionAgeMs = Math.max(10000, Number(settings.maxBrowserSessionAgeMs || this.state.maxBrowserSessionAgeMs || 240000));
+      this.state.maxBrowserSessionAgeMs = Math.max(10000, Number(settings.maxBrowserSessionAgeMs || this.state.maxBrowserSessionAgeMs || 180000));
       this.state.prepareCycleBeforeMs = Math.max(0, Number(settings.prepareCycleBeforeMs || this.state.prepareCycleBeforeMs || 15000));
       this.state.forceFinalOnInterruption = settings.forceFinalOnInterruption !== false;
       this.state.forceFinalMinChars = Math.max(1, Number(settings.forceFinalMinChars || this.state.forceFinalMinChars || 3));
@@ -739,8 +781,17 @@
         this._emitWorkerStatus("microphone-permission-failed");
         return;
       }
+      const proceed = await this._waitUntilDocumentVisibleForRecognition();
+      if (!proceed || !this.state.desiredRunning) {
+        if (!this.state.desiredRunning) {
+          this._appendLog("start aborted while waiting for visibility/focus");
+        }
+        return;
+      }
       this.state.pendingStart = false;
       this._setTerminalDegradedReason(null);
+      this._resetNetworkErrorBurst();
+      this._acquireWakeLock("user-start");
       this._performControlledStart("user-start");
     }
 
@@ -759,18 +810,21 @@
       this.state.noSpeechBackoffMs = 0;
       this.state.restartBackoffMs = 0;
       this._resetSegmentTracking();
+      this._resetNetworkErrorBurst();
       this._setTerminalDegradedReason(null);
       this.state.socketDegraded = false;
       this.state.visibilityDegraded = false;
       this._refreshDegradedReason();
       this.options.setPartialText?.("");
       this._transitionToStopping("user-stop");
+      this._releaseWakeLock("user-stop");
       this._emitWorkerStatus("user-stop");
     }
 
     destroy() {
       this.stop();
       this._stopWatchdog();
+      this._releaseWakeLock("destroy");
       const socket = this.state.socket;
       this.state.socket = null;
       this.state.websocketReady = false;
@@ -796,11 +850,22 @@
     handleVisibilityChange() {
       this.state.visibilityDegraded = Boolean(document.hidden && this.state.desiredRunning);
       this._refreshDegradedReason();
-      if (!document.hidden && this.state.desiredRunning && this.state.browserSupervisorState !== "running") {
+      const supervisor = this.state.browserSupervisorState;
+      const startupInFlight =
+        supervisor === "starting" || supervisor === "stopping";
+      if (
+        !document.hidden
+        && this.state.desiredRunning
+        && supervisor !== "running"
+        && !startupInFlight
+      ) {
         this._scheduleRestart("websocket_reconnect");
       }
       if (!document.hidden) {
         this._refreshHealthSignals();
+        if (this.state.desiredRunning && !this.state.wakeLockActive) {
+          this._acquireWakeLock("visibility-visible");
+        }
       }
       this._emitWorkerStatus("visibility");
     }
@@ -901,6 +966,173 @@
       }
     }
 
+    _hasWakeLockSupport() {
+      return typeof navigator !== "undefined" && Boolean(navigator?.wakeLock?.request);
+    }
+
+    _clearWakeLockRetryTimer() {
+      if (this._wakeLockRetryTimer) {
+        window.clearTimeout(this._wakeLockRetryTimer);
+        this._wakeLockRetryTimer = null;
+      }
+    }
+
+    async _acquireWakeLock(reason) {
+      if (!this._hasWakeLockSupport()) {
+        this.state.wakeLockActive = false;
+        return false;
+      }
+      if (document.hidden) {
+        // Browser will reject wake lock on hidden documents; defer until visible.
+        this._clearWakeLockRetryTimer();
+        this._wakeLockRetryTimer = window.setTimeout(() => this._acquireWakeLock("retry-after-visibility"), 1500);
+        return false;
+      }
+      if (this._wakeLockSentinel && !this._wakeLockSentinel.released) {
+        this.state.wakeLockActive = true;
+        return true;
+      }
+      try {
+        const sentinel = await navigator.wakeLock.request("screen");
+        if (!sentinel) {
+          this.state.wakeLockActive = false;
+          return false;
+        }
+        this._wakeLockSentinel = sentinel;
+        this.state.wakeLockActive = true;
+        if (!this._wakeLockBound) {
+          this._wakeLockBound = true;
+        }
+        sentinel.addEventListener("release", () => {
+          if (this._wakeLockSentinel === sentinel) {
+            this._wakeLockSentinel = null;
+            this.state.wakeLockActive = false;
+            if (this.state.desiredRunning) {
+              this._clearWakeLockRetryTimer();
+              this._wakeLockRetryTimer = window.setTimeout(
+                () => this._acquireWakeLock("re-acquire-after-release"),
+                500
+              );
+            }
+          }
+        });
+        this._appendLog(`screen wake lock acquired (${reason || "start"})`);
+        return true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error || "");
+        this.state.wakeLockActive = false;
+        if (message) {
+          this._appendLog(`screen wake lock acquisition failed: ${message}`);
+        }
+        return false;
+      }
+    }
+
+    async _releaseWakeLock(reason) {
+      this._clearWakeLockRetryTimer();
+      const sentinel = this._wakeLockSentinel;
+      this._wakeLockSentinel = null;
+      this.state.wakeLockActive = false;
+      if (!sentinel) {
+        return;
+      }
+      try {
+        await sentinel.release();
+        this._appendLog(`screen wake lock released (${reason || "stop"})`);
+      } catch (_error) {
+        // best effort
+      }
+    }
+
+    _shouldRunNetworkPreflight(nowMs) {
+      if (this.state.networkPreflightInFlight) {
+        return false;
+      }
+      if (Number(this.state.networkErrorBurstCount || 0) < this.networkPreflightBurstThreshold) {
+        return false;
+      }
+      const burstStartedAt = Number(this.state.networkErrorBurstStartedAtMs || 0);
+      if (!burstStartedAt || (nowMs - burstStartedAt) > this.networkPreflightBurstWindowMs) {
+        return false;
+      }
+      const lastPreflightAt = Number(this.state.lastNetworkPreflightAtMs || 0);
+      if (lastPreflightAt && (nowMs - lastPreflightAt) < this.networkPreflightCooldownMs) {
+        return false;
+      }
+      return true;
+    }
+
+    async _runNetworkPreflight(reason) {
+      this.state.networkPreflightInFlight = true;
+      this.state.lastNetworkPreflightAtMs = this._now();
+      this._appendLog(`network preflight probe started (${reason || "network-burst"})`);
+      this._emitWorkerStatus("network-preflight-start");
+      const controller = typeof AbortController === "function" ? new AbortController() : null;
+      const timeoutId = controller ? window.setTimeout(() => controller.abort(), this.networkPreflightTimeoutMs) : null;
+      let ok = false;
+      try {
+        const response = await fetch("https://www.google.com/generate_204", {
+          method: "GET",
+          mode: "no-cors",
+          cache: "no-store",
+          credentials: "omit",
+          referrerPolicy: "no-referrer",
+          signal: controller ? controller.signal : undefined,
+        });
+        ok = Boolean(response);
+      } catch (_error) {
+        ok = false;
+      } finally {
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+        }
+      }
+      this.state.lastNetworkPreflightOk = ok;
+      this.state.networkPreflightInFlight = false;
+      this._appendLog(`network preflight probe result: ${ok ? "reachable" : "unreachable"}`);
+      this._emitWorkerStatus(ok ? "network-preflight-ok" : "network-preflight-failed");
+      if (!ok) {
+        this.state.desiredRunning = false;
+        this.state.pendingStart = false;
+        this._clearAllTimers();
+        this._setSupervisorState("fatal");
+        this._setTerminalDegradedReason("recognition_network_unreachable");
+        this._setStatus(
+          this._locale() === "ru"
+            ? "сеть недоступна для Web Speech"
+            : "recognition cloud unreachable"
+        );
+        this._appendLog(
+          this._locale() === "ru"
+            ? "Web Speech: сетевой preflight provalil — облако распознавания недоступно. Проверьте VPN/firewall/DNS/прокси и нажмите Start заново."
+            : "Web Speech: network preflight failed — recognition cloud unreachable. Check VPN/firewall/DNS/proxy and press Start again."
+        );
+        await this._releaseWakeLock("network-preflight-failed");
+        this._emitWorkerStatus("terminal-network-unreachable");
+        return false;
+      }
+      return true;
+    }
+
+    _resetNetworkErrorBurst() {
+      this.state.networkErrorBurstCount = 0;
+      this.state.networkErrorBurstStartedAtMs = 0;
+    }
+
+    _registerNetworkErrorForPreflight() {
+      const now = this._now();
+      const startedAt = Number(this.state.networkErrorBurstStartedAtMs || 0);
+      if (!startedAt || (now - startedAt) > this.networkPreflightBurstWindowMs) {
+        this.state.networkErrorBurstStartedAtMs = now;
+        this.state.networkErrorBurstCount = 1;
+      } else {
+        this.state.networkErrorBurstCount = Number(this.state.networkErrorBurstCount || 0) + 1;
+      }
+      if (this._shouldRunNetworkPreflight(now)) {
+        this._runNetworkPreflight("network-burst-threshold");
+      }
+    }
+
     async _ensureMicrophonePermission() {
       if (this._permissionPromise) {
         return this._permissionPromise;
@@ -920,6 +1152,73 @@
           throw error;
         });
       return this._permissionPromise;
+    }
+
+    async _waitUntilDocumentVisibleForRecognition(options = {}) {
+      const visibilityMaxMs = Math.max(0, Number(options.visibilityMaxMs ?? 20000));
+      const focusMaxMs = Math.max(0, Number(options.focusMaxMs ?? 6000));
+      const waitFocus = Boolean(options.waitWindowFocus ?? false);
+
+      if (document.hidden) {
+        this._appendLog("document hidden; waiting for tab visibility before recognition start");
+        await new Promise((resolve) => {
+          let done = false;
+          const cleanup = () => {
+            document.removeEventListener("visibilitychange", onVis);
+            window.clearTimeout(timer);
+          };
+          const finish = () => {
+            if (done) {
+              return;
+            }
+            done = true;
+            cleanup();
+            resolve();
+          };
+          const onVis = () => {
+            if (!document.hidden) {
+              this._appendLog("tab became visible; continuing recognition start");
+              finish();
+            }
+          };
+          document.addEventListener("visibilitychange", onVis);
+          const timer = window.setTimeout(() => {
+            this._appendLog("visibility wait timed out; continuing recognition start anyway");
+            finish();
+          }, visibilityMaxMs);
+        });
+      }
+
+      if (!this.state.desiredRunning) {
+        return false;
+      }
+
+      if (waitFocus && typeof document.hasFocus === "function" && !document.hasFocus()) {
+        this._appendLog("window not focused; waiting briefly before recognition start");
+        const startAt = this._now();
+        await new Promise((resolve) => {
+          const timer = window.setInterval(() => {
+            if (!this.state.desiredRunning) {
+              window.clearInterval(timer);
+              resolve();
+              return;
+            }
+            if (document.hasFocus()) {
+              this._appendLog("window focused; continuing recognition start");
+              window.clearInterval(timer);
+              resolve();
+              return;
+            }
+            if (this._now() - startAt >= focusMaxMs) {
+              this._appendLog("focus wait timed out; continuing recognition start anyway");
+              window.clearInterval(timer);
+              resolve();
+            }
+          }, 80);
+        });
+      }
+
+      return Boolean(this.state.desiredRunning);
     }
 
     _createRecognition(generationId) {
@@ -995,6 +1294,17 @@
           this.state.pendingRestartReason = "network";
           this._setSupervisorState("backoff");
           this._setStatus("socket-reconnecting");
+          const now = this._now();
+          const last = Number(this._lastWebSpeechNetworkHintAtMs || 0);
+          if (now - last > 15000) {
+            this._lastWebSpeechNetworkHintAtMs = now;
+            this._appendLog(
+              this._locale() === "ru"
+                ? "Web Speech: ошибка network — облако распознавания недоступно (VPN, фаервол, DNS, прокси, блокировщики). Проверьте интернет; смена микрофона в браузере это обычно не лечит."
+                : "Web Speech network error: recognition service unreachable (VPN, firewall, DNS, proxy, blockers). Check connectivity; changing the browser microphone usually does not fix this."
+            );
+          }
+          this._registerNetworkErrorForPreflight();
           this._emitWorkerStatus("recognition-error");
           return;
         }

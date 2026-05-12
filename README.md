@@ -1,8 +1,8 @@
-# SST Desktop 0.3.0
+# SST Desktop 0.3.1
 
 SST Desktop is a local Windows application for real-time speech recognition, optional translation, subtitle routing, and OBS-ready output.
 
-This README describes the current desktop product surface for the `0.3.0` code line, including the current main-branch follow-up changes that are not yet cut as a separate release.
+This README describes the current desktop product surface for the `0.3.1` code line.
 
 ## Language
 
@@ -12,24 +12,26 @@ This README describes the current desktop product surface for the `0.3.0` code l
 
 - Full technical architecture document: [docs/TECHNICAL_ARCHITECTURE.md](./docs/TECHNICAL_ARCHITECTURE.md)
 - Unified changelog: [docs/CHANGELOG.md](./docs/CHANGELOG.md)
-- `0.3.0` delta notes: [docs/DESKTOP_RELEASE_CHANGELOG_0.3.0.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.3.0.md)
-- Current branch follow-up notes: `docs/CHANGELOG.md` -> `Unreleased`
+- `0.3.1` delta notes: [docs/DESKTOP_RELEASE_CHANGELOG_0.3.1.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.3.1.md)
+- Current branch follow-up notes (after `0.3.1`): `docs/CHANGELOG.md` -> `Unreleased`
 
 ## Release Highlights
 
-`0.3.0` is the release where the current codebase shape becomes official:
+`0.3.1` is a stabilization release on top of `0.3.0`. Public contracts (`/api`, WebSocket payloads, overlay/runtime/transcript shapes) do not change. The local-first product baseline is preserved.
 
-- backend is now split across `api/routes`, `services`, `core`, and `schemas`;
-- app initialization is centralized through `backend/core/app_bootstrap.py`;
-- config now uses explicit migrations and has a generated JSON Schema;
-- dashboard frontend is modular ES module JavaScript without any build step;
-- translation routing is now managed through stable `translation_1 .. translation_5` slot cards with per-line provider selection;
-- provider settings editing can follow the selected translation slot and warns when enabled lines are missing required credentials;
-- Browser Speech lifecycle is supervised and more resilient to `onend`, reconnect, stale worker state, and client-event/logging failures;
-- dashboard/runtime WebSocket paths are more defensive under reconnect and dead-socket scenarios;
-- user-facing logs live under root `logs/` (legacy `user-data/logs/` migrates on startup); local ASR models stay under `user-data/models/`;
-- `/google-asr-experimental` is documented as a separate experimental browser worker path;
-- local backend ASR is now limited to the supported Parakeet providers only.
+- `backend/versioning.py::PROJECT_VERSION = "0.3.1"` is the single source of truth.
+- `RuntimeOrchestrator` is now a facade over explicit controllers in `backend/core/runtime/` (state, lifecycle, metrics, session, segments, browser-worker bookkeeping, speech sources, audio capture, processing tasks, translation runtime, transcript pipeline, output fanout).
+- `SubtitleRouter` is split into `subtitle_lifecycle_core.py` (FSM, TTL, relevance), `subtitle_presentation.py` (payload assembly, slot styling, partial/final merging), and a thin publish facade.
+- Translation providers moved into a dedicated `backend/translation/providers/` package; the translation cache (`backend/core/cache_manager.py`) is an in-memory LRU with debounced disk persistence and quarantine for corrupt cache files.
+- Config writes are atomic on Windows (`backend/core/atomic_io.py` via `os.replace()`), and a corrupt `user-data/config.json` is safely rotated into `*.corrupt-<timestamp>.json` while the app boots on defaults.
+- Translation routing is managed through stable `translation_1 .. translation_5` slot cards with per-line provider selection; the dashboard warns when enabled lines are missing required credentials.
+- The Microsoft Edge worker branch is removed: Browser Speech always opens in a dedicated **Google Chrome** window with an isolated `user-data-dir`, `HIGH_PRIORITY_CLASS`, Windows 10/11 EcoQoS opt-out, Screen Wake Lock, terminal `recognition_network_unreachable` degradation, and the new `voice_below_recognition_threshold` health signal.
+- `/google-asr-edge` and `/google-asr-experimental-edge` return `404` (regression-pinned in `tests/test_api_and_websockets.py`).
+- Live update check: `POST /api/updates/check` polls GitHub Releases (opt-in via `updates.enabled`), persists `updates.latest_known_version` + `updates.last_checked_utc`, and the bootstrap launcher silently prompts only when a newer version is available.
+- OpenAI helper endpoints (`GET /api/openai/recommended-models`, `POST /api/openai/models`, `POST /api/openai/usable-models`) let the dashboard populate the `model` field without storing keys in the browser.
+- User-facing logs live under root `logs/` (legacy `user-data/logs/` migrates on startup); local ASR models stay under `user-data/models/`.
+- Built-in subtitle effects now include `none`, `fade`, `subtle_pop`, `slide_up`, `zoom_in`, `blur_in`, `glow` and apply both in dashboard preview and OBS overlay.
+- A `Help` dashboard tab is wired in after `Tools & Data`, organized as topic tabs (overview, recognition/tuning, translation, subtitles/style, OBS, tools/diagnostics, desktop/remote).
 
 ## Release Package
 
@@ -46,7 +48,7 @@ On first launch the bootstrap launcher extracts the managed runtime next to itse
 3. Launch `Stream Subtitle Translator.exe`.
 4. Wait for the bootstrap launcher to extract the managed runtime on first start.
 5. In the splash launcher choose one startup profile:
-   - `Quick Start (Browser Speech)`
+   - `Quick Start (Web Speech)`
    - `NVIDIA GPU (CUDA)`
    - `CPU-only`
    - `Remote Controller`
@@ -91,7 +93,7 @@ Bootstrap output:
 
 ## Startup Profiles
 
-- `Quick Start (Browser Speech)`:
+- `Quick Start (Web Speech)`:
   - fastest startup path;
   - keeps recognition in the browser worker window;
   - skips local AI dependency installation.
@@ -107,7 +109,7 @@ Bootstrap output:
   - is intended to pair with a LAN worker while keeping the local dashboard and overlay on the controller machine.
 - `Remote Worker`:
   - starts the local AI worker role with LAN bind enabled;
-  - keeps Browser Speech disabled on the worker side;
+  - keeps Web Speech disabled on the worker side;
   - reuses the local AI runtime profile that matches the detected or selected CPU/GPU environment.
 
 ## First Launch Behavior
@@ -144,7 +146,7 @@ These folders are normal for the desktop flow and should be kept next to the exe
 - Optional OBS Closed Captions output.
 - Session export in `SRT` and `JSONL`.
 - Profile-based local settings management.
-- Configurable dashboard UI theme (light/dark) with a customizable accent gradient palette applied to both the dashboard and Browser Speech worker windows.
+- Configurable dashboard UI theme (light/dark) with a customizable accent gradient palette applied to both the dashboard and Web Speech worker windows.
 - Local-first diagnostics and runtime logs.
 
 ## Architecture Summary
@@ -196,9 +198,9 @@ The main window includes:
   - local overlay URL
   - diagnostics/event feed
 
-`Start` now sends the current in-memory config snapshot to `/api/runtime/start`, so unsaved dashboard changes can take effect immediately in the runtime without forcing a disk save first.
+`Start` sends the current in-memory config snapshot to `/api/runtime/start`, so unsaved dashboard changes can take effect immediately in the runtime without forcing a disk save first. The snapshot is tracked through `active_config_source = runtime_start_snapshot`, `active_config_persisted = false`, and `active_config_hash`, so it does not silently overwrite `user-data/config.json`.
 
-Visual layout was not redesigned in `0.3.0`; the major change is the internal modular architecture and runtime robustness.
+Visual layout was not redesigned in `0.3.1`; the major changes remain the internal modular architecture and runtime robustness inherited from `0.3.0`.
 
 ## Main Tabs
 
@@ -207,7 +209,10 @@ Visual layout was not redesigned in `0.3.0`; the major change is the internal mo
 - Enable/disable translation.
 - Select a default provider for new lines and legacy fallback behavior.
 - Configure provider credentials/endpoints/model/prompt where applicable.
-- For the OpenAI provider, the dashboard can populate the model field from a short recommended list (no OpenAI API call from the browser).
+- For OpenAI and OpenAI-compatible providers (`openai`, `openrouter`, `lm_studio`, `ollama`), the dashboard can populate the `model` field via local helper endpoints:
+  - `GET /api/openai/recommended-models` — curated shortlist with no OpenAI API call from the browser;
+  - `POST /api/openai/models` — list available models for the provided key;
+  - `POST /api/openai/usable-models` — light probe through `/responses` with on-server caching.
 - `Google Cloud Translation - Advanced (v3)` is available as a separate provider and uses `project_id` plus OAuth access token instead of a v2 API key.
 - Configure up to five translation lines with their own enabled state, target language, provider, and optional label.
 - The Translation tab now shows each `translation_1 .. translation_5` slot as a separate card with an explicit per-line provider selector.
@@ -273,7 +278,7 @@ Visual layout was not redesigned in `0.3.0`; the major change is the internal mo
 ### Tools & Data
 
 - Runtime diagnostics and latency metrics.
-- Runtime diagnostics cover latency, ASR state, translation queue/provider state, Browser Speech worker connectivity, OBS Closed Captions state, and local log locations.
+- Runtime diagnostics cover latency, ASR state, translation queue/provider state, Web Speech worker connectivity, OBS Closed Captions state, and local log locations.
 - Advanced ASR controls expose exact timing and gate values such as VAD mode, partial emit interval, min speech, silence hold, pause-to-finalize, max phrase length, chunk window/overlap, min RMS, voiced ratio, and first partial speech.
 - Live event feed with bounded logging behavior.
 - Wider dashboard localization coverage, including runtime progress, remote tools, style slot editor labels, and diagnostics strings.
@@ -301,21 +306,24 @@ Visual layout was not redesigned in `0.3.0`; the major change is the internal mo
 - Uses the local runtime and local audio capture path.
 - Supports GPU-first policy on compatible NVIDIA systems.
 - CPU fallback is available when needed.
-- Remains the default local AI path and is still available in `0.3.0`.
+- Remains the default local AI path and is still available in `0.3.1`.
 - `Recognition -> Backend ASR provider` now only offers `Official EU Parakeet Low Latency` and `Official EU Parakeet`.
 
-### Browser Speech
+### Web Speech
 
-- Uses a separate dedicated Chrome/Chromium/Edge worker window (`/google-asr`).
+- Uses a separate dedicated **Google Chrome** worker window (`/google-asr`).
+- On desktop, Overview → Recognition can pick **Auto** or **Google Chrome** for that worker (`asr.browser.worker_launch_browser`: `auto` or `google_chrome`); both resolve to launching Chrome. Legacy values `microsoft_edge` and `chromium` are migrated to `google_chrome` and `auto` respectively. The launcher reads this from `config.json` each time the worker URL is opened. The same control is hidden in the web-only dashboard (`start.bat` in a normal browser), where `window.open` always follows the OS default browser.
 - Desktop behavior is fixed:
-  - SST always opens Browser Speech as a separate browser window with an address bar.
-  - The launcher uses an isolated browser profile for this worker window.
+  - SST always opens Web Speech as a separate browser window with an address bar.
+  - The launcher opens the worker in a **separate Chrome window** with the address bar (`--new-window` + worker URL).
+  - Chrome uses an **isolated** `user-data-dir` under the runtime root for that window only.
+  - The `Microsoft Edge` worker branch is removed; `/google-asr-edge` and `/google-asr-experimental-edge` return `404`.
   - There is no browser-window mode toggle in the desktop UI.
   - This behavior must not be replaced with `--app`, popup-launcher pages, hidden bootstrap windows, or in-tab navigation.
 - Requires browser microphone permission.
 - For stable operation, keep the worker window visible while active.
 
-Classic Browser Speech in `0.3.0` now includes:
+Classic Web Speech in `0.3.1` includes:
 
 - a dedicated lifecycle supervisor;
 - controlled `start/stop/restart` behavior;
@@ -326,7 +334,49 @@ Classic Browser Speech in `0.3.0` now includes:
 - localStorage-priority worker settings with backend mirror as best effort;
 - best-effort client-event logging so log file problems do not break the page.
 
-### Browser Speech Live Smoke Checklist
+### Web Speech Recognition Stability Hardening
+
+The worker pipeline now layers several additional defenses on top of the base supervisor to keep
+recognition flowing when the OS, the network, or Chrome itself would otherwise quietly degrade it:
+
+- **Screen Wake Lock**: when recognition is running and the worker tab is visible, the worker
+  acquires `navigator.wakeLock.request("screen")` and releases it on `Stop`. This prevents the OS
+  from putting the display/system into power-save modes that throttle Chrome's audio callbacks
+  and silently stall Web Speech. The lock is re-acquired automatically after a visibility flip
+  (e.g. moving the worker between monitors).
+- **Earlier controlled session rotation**: `asr.browser.max_browser_session_age_ms` now defaults
+  to **180000 ms** (was 240000 ms), giving Chrome more headroom before its own ~4 min silent
+  Web Speech kill. The 15 s `prepare_cycle_before_ms` window still applies, so the worker
+  rotates the session at ~2:45 instead of being cut off mid-phrase.
+- **Network preflight terminal degradation**: after three `network` errors within ~12 s, the
+  worker probes `https://www.google.com/generate_204` once with a short timeout. If the probe
+  fails, the supervisor transitions to a terminal `recognition_network_unreachable` state and
+  stops the auto-restart loop instead of burning CPU/battery. The user gets a clear log line
+  about VPN/firewall/DNS/proxy. Successful recognition results reset the burst counter.
+- **`voice_below_recognition_threshold` health signal**: distinct from `web_speech_stalled` and
+  `mic_silent`. Triggered when the mic clearly has voice-level RMS (>= 0.025) and `no-speech`
+  has accumulated while recognition has been quiet for >= 8 s. Surfaces the case of "voice is
+  there, Google can't recognise it" (too quiet for the model, locale mismatch, or upstream
+  network deterioration).
+- **Chrome worker process priority and Windows EcoQoS opt-out**: the desktop launcher now starts
+  the Chrome worker window with `HIGH_PRIORITY_CLASS` and, on Windows 10/11, calls
+  `SetProcessInformation(ProcessPowerThrottling, OPT_OUT)` so the OS does not place the worker
+  into Efficiency Mode when it sits in the background. This stops the common "Web Speech stops
+  when OBS covers the Chrome window" failure mode on Windows 11.
+- **Chrome feature gates disabled for the worker window**: `CalculateNativeWinOcclusion`,
+  `HighEfficiencyModeAvailable`, `HeuristicMemorySaver`, `IntensiveWakeUpThrottling`,
+  `GlobalMediaControls`. These prevent Chrome from declaring the window occluded, discarding
+  the tab as a Memory Saver victim, throttling timers, or stealing focus through media-key
+  popups. Combined with the pre-existing `--disable-backgrounding-occluded-windows`,
+  `--disable-renderer-backgrounding`, and `--disable-background-timer-throttling` switches,
+  this is the strongest browser-side configuration we can apply without replacing the address
+  bar window.
+
+These hardening pieces are wired into both classic Web Speech and Web Speech Experimental.
+None of them change the `/api` or websocket payload contracts. The supervisor still rotates
+sessions, suppresses duplicates, and force-finalizes on interruption the same way as before.
+
+### Web Speech Live Smoke Checklist
 
 - Open `/google-asr`, refresh the page, and confirm language/toggles restore from the worker-local settings.
 - Start recognition and verify one spoken phrase yields interim text followed by one final segment without duplicate final spam.
@@ -334,8 +384,11 @@ Classic Browser Speech in `0.3.0` now includes:
 - Refresh the dashboard or let `/ws/asr_worker` reconnect and confirm the worker does not create a second active recognition instance.
 - Mute or remove microphone access and confirm diagnostics can degrade to `mic_silent` or `mic_track_unavailable` instead of silently hanging forever.
 - Let force-finalization close an interim, then confirm a later browser final for the same phrase is suppressed as a late duplicate instead of being emitted again.
+- After Start, verify a Wake Lock is held while recognition is running (Chrome DevTools -> Application -> Wake Locks); confirm it is released after Stop or after `recognition_network_unreachable` degrade.
+- Block Web Speech endpoints (e.g. unplug ethernet or block `*.google.com` in a firewall) and confirm the supervisor enters terminal `recognition_network_unreachable` after the burst threshold instead of looping forever.
+- Cover the Chrome worker window with another window (OBS preview, dashboard) on Windows 11 and confirm partials/finals keep flowing - this exercises the `CalculateNativeWinOcclusion` and EcoQoS opt-out paths.
 
-### Browser Speech Experimental
+### Web Speech Experimental
 
 - Uses a separate experimental worker window (`/google-asr-experimental`).
 - Opens one live microphone `MediaStreamTrack` first, then calls `SpeechRecognition.start(audioTrack)`.
@@ -343,19 +396,25 @@ Classic Browser Speech in `0.3.0` now includes:
 - The page is now wired to the same controlled base FSM contract as the classic worker.
 - Browser support may vary. Keep the worker window visible while active.
 
-### Browser Speech Experimental Smoke Checklist
+### Web Speech Experimental Smoke Checklist
 
-- Open `/google-asr-experimental` and do a hard refresh so the isolated worker profile picks up the latest JS.
+- Open `/google-asr-experimental` and do a hard refresh so the worker picks up the latest JS (Chrome uses an isolated profile).
 - Start recognition and confirm either `audio-track-start-success` or controlled fallback to normal `recognition.start()`.
 - Stop and start again quickly; the worker should not get stuck in permanent `stopping`.
 - Disconnect/reconnect the dashboard and confirm the worker does not create a duplicate active recognition instance.
 - Close or revoke microphone access and confirm the page degrades rather than failing silently.
 
-## Runtime Robustness in 0.3.0
+## Runtime Robustness in 0.3.1
 
-The runtime/event stack is substantially more defensive than in `0.2.9.2`.
+The runtime/event stack is substantially more defensive than in `0.2.9.2`, and `0.3.1` adds more structure on top of `0.3.0`:
 
-Highlights:
+- `RuntimeOrchestrator` is a facade over explicit controllers in `backend/core/runtime/` (state, lifecycle, metrics, session, segments, browser-worker bookkeeping, speech sources, audio capture, processing tasks, translation runtime, transcript pipeline, output fanout).
+- `SubtitleRouter` is split into `subtitle_lifecycle_core.py` (FSM, TTL, relevance), `subtitle_presentation.py` (payload assembly, slot styling, partial/final merging), and a thin publish facade.
+- `TranslationDispatcher` is restart-safe (`stop() -> start()` no longer breaks subsequent sessions) and has per-provider concurrency/rate limits.
+- `CacheManager` (`backend/core/cache_manager.py`) replaces the previous read-modify-write JSON cache with an in-memory LRU and debounced disk persistence, and quarantines corrupt cache files into `*.corrupt-<timestamp>.json`.
+- Config writes are atomic (`backend/core/atomic_io.py`, Windows-safe `os.replace()`). A corrupt `user-data/config.json` is rotated into `*.corrupt-<timestamp>.json` and the app boots on defaults, still passing through the same migration/normalization pipeline.
+
+Highlights inherited and refined from `0.3.0`:
 
 - `/ws/events` reconnect should no longer freeze the dashboard as easily;
 - identical runtime status floods are coalesced;
@@ -369,8 +428,8 @@ Highlights:
 
 - Dashboard: `http://127.0.0.1:8765/`
 - Overlay page: `http://127.0.0.1:8765/overlay`
-- Browser Speech worker page: `http://127.0.0.1:8765/google-asr`
-- Browser Speech experimental worker page: `http://127.0.0.1:8765/google-asr-experimental`
+- Web Speech worker page: `http://127.0.0.1:8765/google-asr`
+- Web Speech experimental worker page: `http://127.0.0.1:8765/google-asr-experimental`
 
 Overlay query examples:
 
@@ -381,16 +440,17 @@ Overlay remains a separate lightweight page for OBS Browser Source and auto-reco
 
 ## Config and Schema Notes
 
-`0.3.0` introduces a more explicit config contract:
+`0.3.1` keeps the explicit config contract introduced in `0.3.0` and tightens it further:
 
-- config is versioned and migrated through explicit steps;
-- config normalization now lives under `backend/config/` instead of one monolithic `backend/config.py`;
+- config is versioned and migrated through explicit steps (`backend/core/config_migrations.py`, current `CURRENT_CONFIG_VERSION = 6`);
+- config normalization lives under `backend/config/` (`defaults.py`, `secrets.py`, `normalizers/asr.py|browser.py|obs.py|remote.py|subtitles.py|translation.py`);
 - profiles use the same migration/normalization pipeline;
-- generated schema lives at `backend/data/config.schema.json`;
-- `translation.lines` is the new slot-aware translation config surface, while legacy `translation.provider` and `translation.target_languages` stay for compatibility;
+- generated schema lives at `backend/data/config.schema.json` and is published via `python -m backend.core.config_schema_export`;
+- `translation.lines` is the slot-aware translation config surface (`translation_1..translation_5` with per-line `enabled`, `target_lang`, `provider`, `label`), while legacy `translation.provider` and `translation.target_languages` stay for compatibility;
 - legacy language-based `subtitle_output.display_order` values are migrated to slot ids like `translation_1`;
-- `/api/runtime/start` can apply an optional normalized `config_payload` snapshot for runtime-only changes without persisting `user-data/config.json`;
-- `backend/versioning.py` remains the single source of truth for the app version.
+- `/api/runtime/start` can apply an optional normalized `config_payload` snapshot for runtime-only changes without persisting `user-data/config.json` (tracked via `active_config_source = runtime_start_snapshot`, `active_config_persisted = false`, `active_config_hash`);
+- config writes are atomic on Windows (temporary file in the same folder + `os.replace()`); a corrupt `user-data/config.json` is rotated into `*.corrupt-<timestamp>.json` and defaults are restored;
+- `backend/versioning.py` (`PROJECT_VERSION = "0.3.1"`) remains the single source of truth for the app version.
 
 ## Remote Notes
 
@@ -500,7 +560,7 @@ Build output:
     - run `POST /api/updates/check` (persists `updates.latest_known_version` + `updates.last_checked_utc`).
 - UI is unreachable:
   - ensure local port `8765` is not occupied by another process.
-- Browser Speech returns no text:
+- Web Speech returns no text:
   - grant microphone permission in the browser;
   - keep the worker window open and visible;
   - if you are testing the experimental path, do a hard refresh after updates.
@@ -513,7 +573,7 @@ Run the current regression suite with:
 
 - `.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`
 
-The current `0.3.0` verification run for the pending changes used:
+The current `0.3.1` verification run used:
 
 - `python -m compileall backend desktop tests`
 - `.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`
@@ -523,7 +583,7 @@ The current `0.3.0` verification run for the pending changes used:
 
 Result:
 
-- `231 tests`
+- `286 tests`
 - `OK`
 - release artifacts refreshed:
   - `dist\Stream Subtitle Translator\Stream Subtitle Translator.exe`
@@ -539,5 +599,5 @@ Result:
 
 ## Release Version
 
-- `0.3.0`
+- `0.3.1`
 - Single runtime source of truth: `backend/versioning.py` (`PROJECT_VERSION`).

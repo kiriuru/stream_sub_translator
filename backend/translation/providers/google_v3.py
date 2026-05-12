@@ -3,10 +3,9 @@ from __future__ import annotations
 from html import unescape
 from typing import Any
 
-import httpx
-
 from backend.translation.base import (
     BaseTranslationProvider,
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
     PROVIDER_GROUP_STABLE,
     TranslationProviderError,
     TranslationProviderInfo,
@@ -27,6 +26,7 @@ class GoogleCloudTranslationV3Provider(BaseTranslationProvider):
         source_lang: str,
         target_lang: str,
         provider_settings: dict[str, str],
+        timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
     ) -> tuple[str, dict[str, Any]]:
         project_id = provider_settings.get("project_id", "").strip()
         access_token = provider_settings.get("access_token", "").strip()
@@ -72,15 +72,14 @@ class GoogleCloudTranslationV3Provider(BaseTranslationProvider):
             }
         )
 
-        async with httpx.AsyncClient() as client:
-            data = await self._get_json(
-                client,
-                url=endpoint,
-                method="POST",
-                json=payload,
-                headers=headers,
-                error_prefix="Google Cloud Translation v3 request failed",
-            )
+        data = await self._request_json(
+            url=endpoint,
+            method="POST",
+            json=payload,
+            headers=headers,
+            timeout=timeout,
+            error_prefix="Google Cloud Translation v3 request failed",
+        )
 
         translations = data.get("translations", [])
         translated = translations[0].get("translatedText") if translations else None

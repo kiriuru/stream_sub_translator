@@ -27,8 +27,9 @@ function renderProgress(runtime, elements, { mode } = {}) {
   card.classList.toggle("is-compact", browserMode);
   const percentMatch = message.match(/(\d+(?:\.\d+)?)%/);
   const percent = percentMatch ? Number.parseFloat(percentMatch[1]) : (runtime?.status === "starting" ? 12 : 0);
+  const msgLower = message.toLowerCase();
   elements.progressTitle.textContent =
-    message.toLowerCase().includes("browser speech")
+    msgLower.includes("browser speech") || msgLower.includes("web speech")
       ? t("runtime.progress.browser_speech")
       : t("runtime.progress.title");
   elements.progressPercent.textContent = Number.isFinite(percent) ? `${Math.round(percent)}%` : "...";

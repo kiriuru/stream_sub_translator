@@ -12,6 +12,9 @@ class SchemaModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+BrowserWorkerLaunchBrowser = Literal["auto", "google_chrome"]
+
+
 SupportedTranslationProvider = Literal[
     "google_translate_v2",
     "google_cloud_translation_v3",
@@ -67,6 +70,7 @@ class AsrBrowserExperimentalConfig(SchemaModel):
 
 class AsrBrowserConfig(SchemaModel):
     recognition_language: str = "ru-RU"
+    worker_launch_browser: BrowserWorkerLaunchBrowser = "auto"
     interim_results: bool = True
     continuous_results: bool = True
     force_finalization_enabled: bool = True
@@ -77,7 +81,7 @@ class AsrBrowserConfig(SchemaModel):
     network_reconnect_initial_ms: int = 1000
     network_reconnect_max_ms: int = 30000
     stuck_stopping_timeout_ms: int = 2500
-    max_browser_session_age_ms: int = 240000
+    max_browser_session_age_ms: int = 180000
     prepare_cycle_before_ms: int = 15000
     force_final_on_interruption: bool = True
     force_final_min_chars: int = 3
@@ -269,6 +273,12 @@ class TranslationLineConfig(SchemaModel):
     label: str = ""
 
 
+class TranslationCacheConfig(SchemaModel):
+    enabled: bool = True
+    persist: bool = True
+    max_entries: int = 5000
+
+
 class TranslationConfig(SchemaModel):
     enabled: bool = False
     provider: SupportedTranslationProvider = "google_translate_v2"
@@ -286,6 +296,8 @@ class TranslationConfig(SchemaModel):
             label="EN",
         )
     ])
+    cache: TranslationCacheConfig = Field(default_factory=TranslationCacheConfig)
+    provider_limits: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class SubtitleOutputConfig(SchemaModel):

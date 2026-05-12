@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Browser Speech Worker</title>
+    <title>Web Speech Worker</title>
     <script type="module">
       import { autoLoadAndApplyUiTheme } from "/static/js/ui-theme.js?v=20260508a";
       autoLoadAndApplyUiTheme();
@@ -286,16 +286,16 @@
   <body>
     <main>
       <section class="panel hero">
-        <p class="eyebrow" data-i18n="worker.eyebrow">Browser Speech Worker</p>
-        <h1 data-i18n="worker.title">Browser Recognition Window</h1>
+        <p class="eyebrow" data-i18n="worker.eyebrow">Web Speech Worker</p>
+        <h1 data-i18n="worker.title">Web Speech Window</h1>
         <p class="muted" data-i18n="worker.description">
-          This worker captures microphone audio with the browser Speech Recognition API and forwards
+          This worker captures microphone audio with the browser Web Speech API (SpeechRecognition) and forwards
           partial/final text to the local subtitle app over WebSocket.
         </p>
         <div class="notice">
           <strong data-i18n="worker.warning.title">Keep This Window Visible</strong>
           <p id="visibility-warning-text" data-i18n="worker.warning.body">
-            Browser Speech can become unstable if this window is minimized, fully hidden, or left in a throttled background state for too long. For the most reliable recognition, keep this window open and visible while it is listening.
+            Web Speech can become unstable if this window is minimized, fully hidden, or left in a throttled background state for too long. For the most reliable recognition, keep this window open and visible while it is listening.
           </p>
         </div>
       </section>
@@ -405,7 +405,7 @@
     </footer>
 
     <script src="/static/js/i18n.js?v=20260423c"></script>
-    <script src="/static/js/browser-asr-session-manager.js?v=20260506b"></script>
+    <script src="/static/js/browser-asr-session-manager.js?v=20260512c"></script>
     <script>
       (() => {
         const t = (key, variables) => (window.I18n?.t ? window.I18n.t(key, variables) : key);
@@ -433,6 +433,7 @@
         const CLIENT_LOG_THROTTLE_MS = 3000;
         const MIC_MONITOR_INTERVAL_MS = 250;
         const MIC_ACTIVE_RMS_THRESHOLD = 0.015;
+        const MIC_VOICE_RMS_THRESHOLD = 0.025;
         const WORKER_SETTINGS_STORAGE_KEY = "sst.browser_worker.settings.v1";
 
         const state = {
@@ -462,6 +463,7 @@
           restartTimer: null,
           restartAttemptsWithoutAudio: 0,
           lastRecognitionStartAt: 0,
+          lastHighRmsAt: 0,
           lastAudioActivityAt: 0,
           lastErrorCode: "",
           lastErrorMessage: "",
@@ -497,7 +499,7 @@
             networkReconnectInitialMs: 1000,
             networkReconnectMaxMs: 30000,
             stuckStoppingTimeoutMs: 2500,
-            maxBrowserSessionAgeMs: 240000,
+            maxBrowserSessionAgeMs: 180000,
             prepareCycleBeforeMs: 15000,
             forceFinalOnInterruption: true,
             forceFinalMinChars: 3,
@@ -532,7 +534,7 @@
           networkReconnectInitialMs: 1000,
           networkReconnectMaxMs: 30000,
           stuckStoppingTimeoutMs: 2500,
-          maxBrowserSessionAgeMs: 240000,
+          maxBrowserSessionAgeMs: 180000,
           prepareCycleBeforeMs: 15000,
           forceFinalOnInterruption: true,
           forceFinalMinChars: 3,
@@ -687,7 +689,7 @@
           const stored = storedWorkerSettings && typeof storedWorkerSettings === "object" ? storedWorkerSettings : {};
           return {
             recognition_language: String(
-              stored.recognition_language || backend.recognition_language || workerDefaults.recognitionLanguage
+              backend.recognition_language || stored.recognition_language || workerDefaults.recognitionLanguage
             ),
             interim_results: Object.prototype.hasOwnProperty.call(stored, "interim_results")
               ? stored.interim_results !== false
@@ -899,8 +901,8 @@
           }
           if (document.hidden) {
             visibilityWarningText.textContent = locale() === "ru"
-              ? "Окно browser speech сейчас скрыто или свернуто. В таком состоянии браузерное распознавание может подвисать, завершаться через onend или переставать выдавать partial/final результаты."
-              : "The browser speech window is currently hidden or minimized. In this state, browser recognition can stall, end via onend, or stop producing partial/final results.";
+              ? "Окно Web Speech сейчас скрыто или свернуто. В таком состоянии распознавание может подвисать, завершаться через onend или переставать выдавать partial/final результаты."
+              : "The Web Speech window is currently hidden or minimized. In this state, recognition can stall, end via onend, or stop producing partial/final results.";
             return;
           }
           visibilityWarningText.textContent = t("worker.warning.body");
@@ -1050,6 +1052,9 @@
               state.micActiveRecentMs = Math.max(0, nowMs - state.lastMicActivityAt);
             } else {
               state.micActiveRecentMs = null;
+            }
+            if (state.micRms >= MIC_VOICE_RMS_THRESHOLD && !state.micTrackMuted) {
+              state.lastHighRmsAt = nowMs;
             }
             state.micHealthUpdatedAt = nowMs;
           };

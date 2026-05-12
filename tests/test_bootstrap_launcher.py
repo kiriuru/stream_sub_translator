@@ -5,8 +5,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from desktop import bootstrap_launcher as bootstrap_module
+from desktop.bootstrap_payload import PayloadManifest
 
 
 class _FakeUi:
@@ -69,6 +71,52 @@ class BootstrapLauncherTests(unittest.TestCase):
         self.assertTrue((self.launcher._paths.logs_dir / "bootstrap-launcher.log").exists())
         # When target logs_dir is already root/logs, the migration is a no-op.
         self.assertTrue(legacy_logs_dir.exists())
+
+    def test_maybe_prompt_update_skip_continues_bootstrap(self) -> None:
+        class _UiSkip:
+            def prompt_update_available(self, **kwargs: object) -> str:
+                return "skip"
+
+        launcher = object.__new__(bootstrap_module.BootstrapLauncher)
+        launcher._paths = self.launcher._paths
+        launcher._ui = _UiSkip()
+        launcher._log = lambda _m: None
+        launcher._status = lambda *_a, **_k: None
+        manifest = PayloadManifest(
+            app_version="0.1.0",
+            release_track="stable",
+            runtime_entrypoint=".sst-runtime.exe",
+            install_marker="app-runtime/.install-complete",
+            files=[],
+        )
+        with mock.patch.object(launcher, "_fetch_latest_release", return_value=("9.9.9", "https://example.com/release")):
+            with mock.patch("desktop.bootstrap_launcher.os.startfile") as startfile:
+                cont = launcher._maybe_prompt_update(manifest)
+        self.assertTrue(cont)
+        startfile.assert_not_called()
+
+    def test_maybe_prompt_update_download_opens_url_and_aborts(self) -> None:
+        class _UiDownload:
+            def prompt_update_available(self, **kwargs: object) -> str:
+                return "download"
+
+        launcher = object.__new__(bootstrap_module.BootstrapLauncher)
+        launcher._paths = self.launcher._paths
+        launcher._ui = _UiDownload()
+        launcher._log = lambda _m: None
+        launcher._status = lambda *_a, **_k: None
+        manifest = PayloadManifest(
+            app_version="0.1.0",
+            release_track="stable",
+            runtime_entrypoint=".sst-runtime.exe",
+            install_marker="app-runtime/.install-complete",
+            files=[],
+        )
+        with mock.patch.object(launcher, "_fetch_latest_release", return_value=("9.9.9", "https://example.com/release")):
+            with mock.patch("desktop.bootstrap_launcher.os.startfile") as startfile:
+                cont = launcher._maybe_prompt_update(manifest)
+        self.assertFalse(cont)
+        startfile.assert_called_once_with("https://example.com/release")
 
 
 if __name__ == "__main__":

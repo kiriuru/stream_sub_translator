@@ -647,6 +647,44 @@ class TranslationDispatcher:
                 if self._queue:
                     self._queue_event.set()
 
+    async def _call_translate_target(
+        self,
+        *,
+        job: _QueuedJob,
+        line: PreparedTranslationLine,
+        budget_seconds: float,
+    ) -> tuple[TranslationItem, dict[str, Any]]:
+        """Call engine.translate_target, falling back gracefully when the
+        engine implementation (e.g. test stubs) does not accept the
+        budget_seconds keyword."""
+        try:
+            return await self._translation_engine.translate_target(
+                source_text=job.source_text,
+                source_lang=job.source_lang,
+                provider_name=line.provider_name,
+                provider_settings=line.provider_settings,
+                target_lang=line.target_lang,
+                slot_id=line.slot_id,
+                label=line.label,
+                provider_group=line.provider_group,
+                experimental=line.experimental,
+                local_provider=line.local_provider,
+                budget_seconds=budget_seconds,
+            )
+        except TypeError:
+            return await self._translation_engine.translate_target(
+                source_text=job.source_text,
+                source_lang=job.source_lang,
+                provider_name=line.provider_name,
+                provider_settings=line.provider_settings,
+                target_lang=line.target_lang,
+                slot_id=line.slot_id,
+                label=line.label,
+                provider_group=line.provider_group,
+                experimental=line.experimental,
+                local_provider=line.local_provider,
+            )
+
     async def _translate_one_line(
         self,
         *,
@@ -660,17 +698,10 @@ class TranslationDispatcher:
             if semaphore is None:
                 await self._provider_rate_wait(line.provider_name)
                 item, diagnostics = await asyncio.wait_for(
-                    self._translation_engine.translate_target(
-                        source_text=job.source_text,
-                        source_lang=job.source_lang,
-                        provider_name=line.provider_name,
-                        provider_settings=line.provider_settings,
-                        target_lang=line.target_lang,
-                        slot_id=line.slot_id,
-                        label=line.label,
-                        provider_group=line.provider_group,
-                        experimental=line.experimental,
-                        local_provider=line.local_provider,
+                    self._call_translate_target(
+                        job=job,
+                        line=line,
+                        budget_seconds=timeout_seconds,
                     ),
                     timeout=timeout_seconds,
                 )
@@ -678,17 +709,10 @@ class TranslationDispatcher:
                 async with semaphore:
                     await self._provider_rate_wait(line.provider_name)
                     item, diagnostics = await asyncio.wait_for(
-                        self._translation_engine.translate_target(
-                            source_text=job.source_text,
-                            source_lang=job.source_lang,
-                            provider_name=line.provider_name,
-                            provider_settings=line.provider_settings,
-                            target_lang=line.target_lang,
-                            slot_id=line.slot_id,
-                            label=line.label,
-                            provider_group=line.provider_group,
-                            experimental=line.experimental,
-                            local_provider=line.local_provider,
+                        self._call_translate_target(
+                            job=job,
+                            line=line,
+                            budget_seconds=timeout_seconds,
                         ),
                         timeout=timeout_seconds,
                     )

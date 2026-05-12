@@ -44,6 +44,37 @@ function buildSaveStatusMessage(liveApplied, restartReasons, runtime) {
     : `Saved locally. ${subject} changes will take effect ${restartLabel}.`;
 }
 
+const BROWSER_WORKER_SETTINGS_STORAGE_KEY = "sst.browser_worker.settings.v1";
+const BROWSER_WORKER_EXPERIMENTAL_SETTINGS_STORAGE_KEY = "sst.browser_worker.experimental.settings.v1";
+
+function mirrorBrowserWorkerSettingsToLocalStorage(savedPayload) {
+  try {
+    const mode = String(savedPayload?.asr?.mode || "local");
+    const browser = savedPayload?.asr?.browser;
+    if (!browser || typeof browser !== "object") {
+      return;
+    }
+    const mirror = {
+      recognition_language: String(browser.recognition_language || "ru-RU"),
+      interim_results: browser.interim_results !== false,
+      continuous_results: browser.continuous_results !== false,
+      force_finalization_enabled: browser.force_finalization_enabled !== false,
+      force_finalization_timeout_ms: Math.max(
+        300,
+        parseIntegerOr(browser.force_finalization_timeout_ms, 1600)
+      ),
+    };
+    const raw = JSON.stringify(mirror);
+    if (mode === "browser_google") {
+      window.localStorage.setItem(BROWSER_WORKER_SETTINGS_STORAGE_KEY, raw);
+    } else if (mode === "browser_google_experimental") {
+      window.localStorage.setItem(BROWSER_WORKER_EXPERIMENTAL_SETTINGS_STORAGE_KEY, raw);
+    }
+  } catch (_error) {
+    // best-effort: must not affect save flow
+  }
+}
+
 function getRestartRequiredReasons(previousPayload, nextPayload) {
   const reasons = [];
   if ((previousPayload?.audio?.input_device_id ?? null) !== (nextPayload?.audio?.input_device_id ?? null)) {
@@ -62,7 +93,7 @@ function getRestartRequiredReasons(previousPayload, nextPayload) {
     String(previousPayload?.asr?.browser?.recognition_language || "ru-RU") !==
     String(nextPayload?.asr?.browser?.recognition_language || "ru-RU")
   ) {
-    reasons.push(getCurrentLocale() === "ru" ? "язык браузерного распознавания" : "browser recognition language");
+    reasons.push(getCurrentLocale() === "ru" ? "язык Web Speech" : "Web Speech recognition language");
   }
   return reasons;
 }
@@ -342,6 +373,7 @@ export function createDashboardActions({ store, api, logger }) {
         fontCatalog: response.font_catalog || snapshot.fontCatalog,
       });
       setConfig(savedPayload);
+      mirrorBrowserWorkerSettingsToLocalStorage(savedPayload);
       store.updateState({
         ui: {
           saveStatus: buildSaveStatusMessage(Boolean(response.live_applied), restartReasons, snapshot.runtime),
@@ -408,7 +440,9 @@ export function createDashboardActions({ store, api, logger }) {
       subtitleStylePresets: response.subtitle_style_presets || store.getState().subtitleStylePresets,
       fontCatalog: response.font_catalog || store.getState().fontCatalog,
     });
-    setConfig(response.payload || payload);
+    const importedPayload = response.payload || payload;
+    setConfig(importedPayload);
+    mirrorBrowserWorkerSettingsToLocalStorage(importedPayload);
     logger(getCurrentLocale() === "ru" ? "[config] импорт выполнен" : "[config] imported");
     return response;
   }
@@ -453,8 +487,8 @@ export function createDashboardActions({ store, api, logger }) {
         status_message: isBrowserRecognitionMode(mode)
           ? (
             isExperimentalBrowserRecognitionMode(mode)
-              ? (getCurrentLocale() === "ru" ? "Подготавливается experimental browser speech worker..." : "Preparing experimental browser speech worker...")
-              : (getCurrentLocale() === "ru" ? "Подготавливается browser speech worker..." : "Preparing browser speech worker...")
+              ? (getCurrentLocale() === "ru" ? "Подготавливается Web Speech (Experimental)..." : "Preparing Web Speech (Experimental)...")
+              : (getCurrentLocale() === "ru" ? "Подготавливается Web Speech..." : "Preparing Web Speech...")
           )
           : (getCurrentLocale() === "ru" ? "Подготавливается ASR runtime..." : "Preparing ASR runtime..."),
         last_error: null,
@@ -682,9 +716,8 @@ export function createDashboardActions({ store, api, logger }) {
     const params = new URLSearchParams();
     params.set("autostart", "1");
     params.set("locale", getCurrentLocale());
-    const relativeUrl = isExperimentalBrowserRecognitionMode(mode)
-      ? `/google-asr-experimental?${params.toString()}`
-      : `/google-asr?${params.toString()}`;
+    const path = isExperimentalBrowserRecognitionMode(mode) ? "/google-asr-experimental" : "/google-asr";
+    const relativeUrl = `${path}?${params.toString()}`;
     try {
       return new URL(relativeUrl, window.location.href).toString();
     } catch (_error) {

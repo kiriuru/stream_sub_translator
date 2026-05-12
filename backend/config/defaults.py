@@ -31,6 +31,7 @@ def build_default_config(prefer_gpu_default: bool) -> dict[str, Any]:
             "rnnoise_strength": 70,
             "browser": {
                 "recognition_language": "ru-RU",
+                "worker_launch_browser": "auto",
                 "interim_results": True,
                 "continuous_results": True,
                 "force_finalization_enabled": True,
@@ -41,7 +42,7 @@ def build_default_config(prefer_gpu_default: bool) -> dict[str, Any]:
                 "network_reconnect_initial_ms": 1000,
                 "network_reconnect_max_ms": 30000,
                 "stuck_stopping_timeout_ms": 2500,
-                "max_browser_session_age_ms": 240000,
+                "max_browser_session_age_ms": 180000,
                 "prepare_cycle_before_ms": 15000,
                 "force_final_on_interruption": True,
                 "force_final_min_chars": 3,
@@ -204,6 +205,11 @@ def build_default_config(prefer_gpu_default: bool) -> dict[str, Any]:
                     "api_url": "https://translate.fedilab.app/translate",
                 },
                 "free_web_translate": {},
+            },
+            "cache": {
+                "enabled": True,
+                "persist": True,
+                "max_entries": 5000,
             },
         },
         "subtitle_output": {

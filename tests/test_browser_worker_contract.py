@@ -14,6 +14,7 @@ BROWSER_ASR_AUDIO_TRACK_MANAGER_JS = (
 RUNTIME_PANEL_JS = PROJECT_ROOT / "frontend" / "js" / "panels" / "runtime-panel.js"
 ASR_PANEL_JS = PROJECT_ROOT / "frontend" / "js" / "panels" / "asr-panel.js"
 INDEX_HTML = PROJECT_ROOT / "frontend" / "index.html"
+DESKTOP_JS = PROJECT_ROOT / "frontend" / "js" / "desktop.js"
 
 
 class BrowserWorkerContractTests(unittest.TestCase):
@@ -26,10 +27,11 @@ class BrowserWorkerContractTests(unittest.TestCase):
         cls.runtime_panel_js = RUNTIME_PANEL_JS.read_text(encoding="utf-8")
         cls.asr_panel_js = ASR_PANEL_JS.read_text(encoding="utf-8")
         cls.index_html = INDEX_HTML.read_text(encoding="utf-8")
+        cls.desktop_js = DESKTOP_JS.read_text(encoding="utf-8")
 
     def test_hidden_or_minimized_window_warning_is_present(self) -> None:
         self.assertIn("hidden or minimized", self.html)
-        self.assertIn("browser recognition can stall, end via onend", self.html)
+        self.assertIn("recognition can stall", self.html)
 
     def test_worker_page_loads_external_session_manager(self) -> None:
         self.assertIn('/static/js/browser-asr-session-manager.js', self.html)
@@ -70,6 +72,11 @@ class BrowserWorkerContractTests(unittest.TestCase):
         self.assertIn("_isActiveGeneration(generationId)", self.manager_js)
         self.assertIn("capturedGeneration !== Number(this.state.generationId || 0)", self.manager_js)
         self.assertIn("document.hidden", self.manager_js)
+        self.assertIn("_waitUntilDocumentVisibleForRecognition", self.manager_js)
+        self.assertIn("_lastWebSpeechNetworkHintAtMs", self.manager_js)
+        self.assertIn("startupInFlight", self.manager_js)
+        self.assertIn('supervisor === "starting"', self.manager_js)
+        self.assertIn('supervisor === "stopping"', self.manager_js)
         self.assertIn("maxStoppingMs = 2500", self.manager_js)
         self.assertIn("watchdog-stop", self.manager_js)
         self.assertIn("lastResultIndex", self.manager_js)
@@ -81,8 +88,43 @@ class BrowserWorkerContractTests(unittest.TestCase):
         self.assertIn("browser session age limit reached; controlled cycle requested", self.manager_js)
         self.assertIn("browser_recognition_interrupted", self.manager_js)
         self.assertIn("minimumReconnectIntervalMs = 500", self.manager_js)
-        self.assertIn("maxBrowserSessionAgeMs = 240000", self.manager_js)
+        self.assertIn("maxBrowserSessionAgeMs = 180000", self.manager_js)
         self.assertIn("prepareCycleBeforeMs = 15000", self.manager_js)
+
+    def test_manager_applies_screen_wake_lock_during_recognition(self) -> None:
+        # Wake Lock keeps the OS from throttling the worker tab when display/system
+        # would otherwise enter idle/sleep. Acquire on start, release on stop/destroy.
+        self.assertIn("_acquireWakeLock", self.manager_js)
+        self.assertIn("_releaseWakeLock", self.manager_js)
+        self.assertIn("navigator.wakeLock.request", self.manager_js)
+        self.assertIn('navigator.wakeLock.request("screen")', self.manager_js)
+        self.assertIn('this._acquireWakeLock("user-start")', self.manager_js)
+        self.assertIn('this._releaseWakeLock("user-stop")', self.manager_js)
+        self.assertIn('this._releaseWakeLock("destroy")', self.manager_js)
+        self.assertIn("wake_lock_active", self.manager_js)
+        self.assertIn("wake_lock_supported", self.manager_js)
+
+    def test_manager_runs_network_preflight_after_consecutive_network_errors(self) -> None:
+        # After repeated "network" errors within a short window we probe
+        # https://www.google.com/generate_204 once; on failure we mark the
+        # supervisor terminally degraded ("recognition_network_unreachable")
+        # so we stop looping forever on a dead network/VPN/firewall.
+        self.assertIn("_registerNetworkErrorForPreflight", self.manager_js)
+        self.assertIn("_runNetworkPreflight", self.manager_js)
+        self.assertIn("https://www.google.com/generate_204", self.manager_js)
+        self.assertIn("recognition_network_unreachable", self.manager_js)
+        self.assertIn("network_error_burst_count", self.manager_js)
+        self.assertIn("network_preflight_last_at_ms", self.manager_js)
+        self.assertIn("network_preflight_last_ok", self.manager_js)
+
+    def test_manager_emits_voice_below_recognition_threshold_health_signal(self) -> None:
+        # When the mic clearly has voice-level RMS but Web Speech stays silent
+        # and "no-speech" has accumulated, surface a distinct degraded reason
+        # so operators see "voice present, Google not recognising" instead of
+        # only the generic "web_speech_stalled".
+        self.assertIn("voice_below_recognition_threshold", self.manager_js)
+        self.assertIn("voiceBelowRecognitionRmsThreshold", self.manager_js)
+        self.assertIn("voiceBelowRecognitionGraceMs", self.manager_js)
 
     def test_worker_keeps_socket_reconnect_loop_and_backend_status_bridge(self) -> None:
         self.assertIn("ensureSocketConnected()", self.manager_js)
@@ -124,7 +166,14 @@ class BrowserWorkerContractTests(unittest.TestCase):
 
     def test_experimental_worker_page_exists_and_loads_dedicated_audio_track_manager(self) -> None:
         self.assertIn("/static/js/browser-asr-audio-track-session-manager.js", self.experimental_html)
-        self.assertIn("Browser Recognition Window (Experimental)", self.experimental_html)
+        self.assertIn("Web Speech Worker (Experimental)", self.experimental_html)
+
+    def test_edge_only_worker_pages_are_removed(self) -> None:
+        self.assertFalse(GOOGLE_ASR_HTML.with_name("google_asr_edge.html").exists())
+        self.assertFalse(GOOGLE_ASR_HTML.with_name("google_asr_experimental_edge.html").exists())
+
+    def test_dashboard_worker_browser_select_has_no_microsoft_edge(self) -> None:
+        self.assertNotIn('value="microsoft_edge"', self.index_html)
 
     def test_experimental_manager_uses_audio_track_start_and_default_fallback(self) -> None:
         self.assertIn("recognition.start(audioTrack)", self.experimental_manager_js)
@@ -154,10 +203,22 @@ class BrowserWorkerContractTests(unittest.TestCase):
         self.assertIn("resolveBrowserLifecycleConfig(browserConfig)", self.experimental_html)
         self.assertIn("providerName: state.browserMode", self.experimental_html)
 
+    def test_dashboard_exposes_desktop_worker_browser_selector(self) -> None:
+        self.assertIn('id="recognition-worker-browser-select"', self.index_html)
+        self.assertIn('id="recognition-worker-browser-web-note"', self.index_html)
+        self.assertIn("worker_launch_browser", self.asr_panel_js)
+        self.assertIn("controlsWorkerBrowserLaunch", self.asr_panel_js)
+        self.assertIn("controlsWorkerBrowserLaunch", self.desktop_js)
+
     def test_local_provider_selector_only_lists_parakeet_variants(self) -> None:
         self.assertIn('id="local-asr-provider-hint"', self.index_html)
-        self.assertIn("Backend providers are configured here for local microphone capture. Browser Speech modes use the separate browser recognition window.", self.index_html)
-        self.assertNotIn('value="auto"', self.index_html)
+        self.assertIn("Backend providers are configured here for local microphone capture. Web Speech modes use the separate browser worker window.", self.index_html)
+        local_select_pos = self.index_html.find('id="local-asr-provider-select"')
+        self.assertGreater(local_select_pos, 0)
+        local_select_end = self.index_html.find("</select>", local_select_pos)
+        self.assertGreater(local_select_end, local_select_pos)
+        local_provider_block = self.index_html[local_select_pos:local_select_end]
+        self.assertNotIn('value="auto"', local_provider_block)
         self.assertNotIn("_".join(["google", "legacy", "http"]), self.index_html)
         self.assertIn("setElementVisibility(elements.localAsrProviderRow, !browserMode)", self.asr_panel_js)
         self.assertIn('draft.asr.mode = "local";', self.asr_panel_js)

@@ -132,6 +132,49 @@ def _build_compat_target_languages(lines: list[dict[str, Any]]) -> list[str]:
     return compat_targets
 
 
+def _normalize_translation_cache(payload: Any, *, defaults: dict[str, Any]) -> dict[str, Any]:
+    cache_defaults = defaults.get("cache", {}) if isinstance(defaults.get("cache"), dict) else {}
+    current = payload if isinstance(payload, dict) else {}
+    enabled_default = bool(cache_defaults.get("enabled", True))
+    persist_default = bool(cache_defaults.get("persist", True))
+    # Respect explicit false from the client; only fall back to defaults when the key is absent.
+    if "enabled" in current:
+        enabled = bool(current.get("enabled"))
+    else:
+        enabled = enabled_default
+    if "persist" in current:
+        persist = bool(current.get("persist"))
+    else:
+        persist = persist_default
+    try:
+        raw_max = current.get("max_entries", cache_defaults.get("max_entries", 5000))
+        max_entries = int(raw_max if raw_max is not None else 5000)
+    except (TypeError, ValueError):
+        max_entries = 5000
+    max_entries = max(0, min(50000, max_entries))
+    return {"enabled": enabled, "persist": persist, "max_entries": max_entries}
+
+
+def _normalize_provider_limits(payload: Any) -> dict[str, Any]:
+    """Preserve optional per-provider concurrency/rate limits (dispatcher)."""
+    if not isinstance(payload, dict):
+        return {}
+    normalized: dict[str, Any] = {}
+    for provider_name, cfg in payload.items():
+        name = str(provider_name or "").strip()
+        if not name or not isinstance(cfg, dict):
+            continue
+        inner: dict[str, Any] = {}
+        for key, value in cfg.items():
+            key_str = str(key or "").strip()
+            if not key_str:
+                continue
+            inner[key_str] = value
+        if inner:
+            normalized[name] = inner
+    return normalized
+
+
 def normalize_translation_config(
     payload: Any,
     *,
@@ -166,6 +209,9 @@ def normalize_translation_config(
     )
     compat_target_languages = _build_compat_target_languages(normalized_lines)
 
+    cache = _normalize_translation_cache(translation.get("cache", {}), defaults=defaults)
+    provider_limits = _normalize_provider_limits(translation.get("provider_limits", {}))
+
     return {
         "enabled": bool(translation.get("enabled", False)),
         "provider": provider,
@@ -178,4 +224,6 @@ def normalize_translation_config(
             translation.get("provider_settings", {}),
             defaults=defaults["provider_settings"],
         ),
+        "cache": cache,
+        "provider_limits": provider_limits,
     }

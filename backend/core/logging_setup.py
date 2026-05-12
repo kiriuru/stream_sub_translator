@@ -42,8 +42,8 @@ def configure_backend_logging(logs_dir: Path) -> Path:
 
     handler = RotatingFileHandler(
         log_path,
-        maxBytes=10 * 1024 * 1024,
-        backupCount=5,
+        maxBytes=5 * 1024 * 1024,
+        backupCount=3,
         encoding="utf-8",
     )
     handler._sst_handler_name = _HANDLER_NAME

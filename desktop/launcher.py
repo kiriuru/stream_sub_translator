@@ -40,6 +40,18 @@ LAUNCH_OPTION_CPU = "cpu"
 LAUNCH_OPTION_REMOTE_CONTROLLER = "remote_controller"
 LAUNCH_OPTION_REMOTE_WORKER = "remote_worker"
 
+_BROWSER_WORKER_PATHS = frozenset(
+    {
+        "/google-asr",
+        "/google-asr-experimental",
+    }
+)
+_BROWSER_WORKER_EXPERIMENTAL_PATHS = frozenset({"/google-asr-experimental"})
+
+
+class LaunchSelectionCancelled(Exception):
+    """The user closed the desktop window before choosing a startup mode."""
+
 
 def _show_error_dialog(title: str, message: str) -> None:
     try:
@@ -285,7 +297,7 @@ def _build_splash_html(title: str) -> str:
           <div class="profile-actions">
             <button id="profile-browser" class="profile-button" data-mode="browser_google" type="button" onclick="window.__sstChooseLaunchOption('browser_google')">
               <strong>Quick Start</strong>
-              <small>Browser Speech only. Opens the dashboard fast and skips local AI runtime installation.</small>
+              <small>Web Speech only. Opens the dashboard fast and skips local AI runtime installation.</small>
             </button>
             <button id="profile-nvidia" class="profile-button" data-mode="nvidia" type="button" onclick="window.__sstChooseLaunchOption('nvidia')">
               <strong>NVIDIA GPU (CUDA)</strong>
@@ -387,12 +399,56 @@ class LaunchContext:
     dashboard_url: str
     overlay_url: str
     browser_worker_url: str
+    worker_launch_browser: str
     startup_mode: str
     install_profile: str
     remote_role: str
     profile_name: str
     project_root: str
     data_dir: str
+
+
+def _load_worker_launch_browser_preference(config_path: Path) -> str:
+    allowed = {"auto", "google_chrome"}
+    default = "auto"
+    if not config_path.exists():
+        return default
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return default
+    asr = payload.get("asr", {}) if isinstance(payload, dict) else {}
+    if not isinstance(asr, dict):
+        return default
+    browser = asr.get("browser", {})
+    if not isinstance(browser, dict):
+        return default
+    raw = str(browser.get("worker_launch_browser", default) or default).strip().lower()
+    if raw == "chromium":
+        raw = default
+    if raw == "microsoft_edge":
+        raw = "google_chrome"
+    return raw if raw in allowed else default
+
+
+def ordered_browser_executable_names(_launch_preference: str) -> tuple[str, ...]:
+    return ("chrome.exe",)
+
+
+def _classic_browser_worker_path_for_preference(_worker_launch_browser: str) -> str:
+    return "/google-asr"
+
+
+def _filesystem_relative_candidates_for_exes(ordered_exes: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
+    parts_by_exe: dict[str, tuple[str, ...]] = {
+        "chrome.exe": ("Google", "Chrome", "Application", "chrome.exe"),
+    }
+    out: list[tuple[str, ...]] = []
+    for name in ordered_exes:
+        rel = parts_by_exe.get(name)
+        if rel:
+            out.append(rel)
+    return tuple(out)
 
 
 def _load_profile_name(config_path: Path) -> str:
@@ -443,7 +499,16 @@ class DesktopApi:
         self._launch_mode_selector = launch_mode_selector
 
     def get_launch_context(self) -> dict[str, Any]:
-        return asdict(self._context_getter())
+        payload = asdict(self._context_getter())
+        data_dir = str(payload.get("data_dir") or "").strip()
+        if data_dir:
+            cfg = Path(data_dir) / "config.json"
+            worker_browser = _load_worker_launch_browser_preference(cfg)
+            payload["worker_launch_browser"] = worker_browser
+            base = str(payload.get("base_url") or "").rstrip("/")
+            if base:
+                payload["browser_worker_url"] = base + _classic_browser_worker_path_for_preference(worker_browser)
+        return payload
 
     def open_external_url(self, url: str) -> bool:
         return bool(self._external_url_opener(str(url or "").strip()))
@@ -577,12 +642,16 @@ class DesktopLauncher:
 
     def _build_context(self) -> LaunchContext:
         base_url = f"http://{APP_HOST}:{APP_PORT}"
+        cfg_path = self._paths.data_dir / "config.json"
+        worker_browser = _load_worker_launch_browser_preference(cfg_path)
+        browser_worker_path = _classic_browser_worker_path_for_preference(worker_browser)
         return LaunchContext(
             desktop_mode=True,
             base_url=base_url,
             dashboard_url=f"{base_url}/?desktop=1",
             overlay_url=f"{base_url}/overlay",
-            browser_worker_url=f"{base_url}/google-asr",
+            browser_worker_url=f"{base_url}{browser_worker_path}",
+            worker_launch_browser=worker_browser,
             startup_mode=_load_saved_asr_mode(self._paths.data_dir / "config.json"),
             install_profile=_read_install_profile(self._paths.install_profile_file),
             remote_role="disabled",
@@ -721,7 +790,8 @@ class DesktopLauncher:
         )
         while not self._launch_option_event.wait(timeout=0.2):
             if self._shutdown_started.is_set():
-                raise RuntimeError("Desktop launcher was closed before the startup mode was selected.")
+                self._write_log("startup mode selection cancelled: desktop window closed before a choice was made")
+                raise LaunchSelectionCancelled()
         chosen = self._selected_launch_mode() or selected
         if chosen == LAUNCH_OPTION_BROWSER:
             fallback_install_profile = saved_profile or detected_profile
@@ -811,7 +881,7 @@ class DesktopLauncher:
             return False
         if self._is_windowsapps_alias(resolved):
             return False
-        return resolved.name.lower() in {"chrome.exe", "msedge.exe", "chromium.exe"}
+        return resolved.name.lower() == "chrome.exe"
 
     def _resolve_browser_from_app_paths(self, executable_name: str) -> Path | None:
         subkey = rf"Software\Microsoft\Windows\CurrentVersion\App Paths\{executable_name}"
@@ -839,8 +909,11 @@ class DesktopLauncher:
                 )
         return None
 
-    def _find_chromium_browser(self) -> Path | None:
-        candidate_names = ("chrome.exe", "chromium.exe", "msedge.exe")
+    def _find_chromium_browser(self, launch_preference: str | None = None) -> Path | None:
+        preference = str(launch_preference or "").strip().lower() or _load_worker_launch_browser_preference(
+            self._paths.data_dir / "config.json"
+        )
+        candidate_names = ordered_browser_executable_names(preference)
         seen: set[str] = set()
         for candidate_name in candidate_names:
             registry_path = self._resolve_browser_from_app_paths(candidate_name)
@@ -870,11 +943,7 @@ class DesktopLauncher:
             os.environ.get("ProgramFiles", ""),
             os.environ.get("ProgramFiles(x86)", ""),
         ]
-        relative_candidates = (
-            ("Google", "Chrome", "Application", "chrome.exe"),
-            ("Chromium", "Application", "chrome.exe"),
-            ("Microsoft", "Edge", "Application", "msedge.exe"),
-        )
+        relative_candidates = _filesystem_relative_candidates_for_exes(candidate_names)
         for root in roots:
             if not root:
                 continue
@@ -890,51 +959,103 @@ class DesktopLauncher:
     def _is_browser_worker_url(self, normalized_url: str) -> bool:
         try:
             path = urlparse(normalized_url).path.rstrip("/").lower()
-            return path in {"/google-asr", "/google-asr-experimental"}
+            return path in _BROWSER_WORKER_PATHS
         except Exception:
             return False
 
+    def _browser_worker_uses_isolated_profile(self, _browser_path: Path) -> bool:
+        """Browser Speech worker always uses an isolated Chromium profile directory (Chrome only)."""
+        return True
+
+    def _browser_worker_profile_dir(self, normalized_url: str, browser_path: Path) -> Path:
+        """Isolated Chromium profile root for the external worker window.
+
+        Classic vs experimental use different directories (mode switch safety).
+        """
+        try:
+            path = urlparse(normalized_url).path.rstrip("/").lower()
+        except Exception:
+            path = ""
+        variant = "experimental" if path in _BROWSER_WORKER_EXPERIMENTAL_PATHS else "classic"
+        engine = (browser_path.stem or "chromium").lower()
+        safe_engine = "".join(ch for ch in engine if ch.isalnum() or ch in "-_") or "chromium"
+        return self._paths.runtime_root / f"browser-worker-profile-{variant}-{safe_engine}"
+
     def _open_browser_worker_window(self, normalized_url: str) -> bool:
         self._browser_worker_last_error = None
-        browser_path = self._find_chromium_browser()
+        preference = _load_worker_launch_browser_preference(self._paths.data_dir / "config.json")
+        browser_path = self._find_chromium_browser(preference)
         if browser_path is None:
             self._set_browser_worker_error(
-                "Could not find a usable Chrome/Chromium/Edge executable for Browser Speech worker launch."
+                "Could not find a usable Google Chrome executable for Browser Speech worker launch."
             )
             _show_error_dialog(
                 f"{APP_NAME} Browser Speech Error",
-                "Could not find Chrome, Chromium, or Microsoft Edge for Browser Speech.\n\n"
+                "Could not find Google Chrome for Browser Speech.\n\n"
                 f"See launcher log:\n{self._log_path}",
             )
             return False
-        isolated_profile_dir = self._paths.runtime_root / "browser-worker-profile"
-        try:
-            isolated_profile_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            self._set_browser_worker_error(
-                f"Failed to prepare browser worker profile directory '{isolated_profile_dir}': {type(exc).__name__}: {exc}"
-            )
-            return False
+        use_isolated_profile = self._browser_worker_uses_isolated_profile(browser_path)
+        isolated_profile_dir: Path | None = None
+        if use_isolated_profile:
+            isolated_profile_dir = self._browser_worker_profile_dir(normalized_url, browser_path)
+            try:
+                isolated_profile_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                self._set_browser_worker_error(
+                    f"Failed to prepare browser worker profile directory '{isolated_profile_dir}': {type(exc).__name__}: {exc}"
+                )
+                return False
+        # Chrome feature gates that have historically interfered with Web Speech stability
+        # when the worker window is partially covered (OBS preview, dashboard on top),
+        # the OS is throttling background work, or Chrome attempts to suspend the tab.
+        # Keep this list audited; removing entries usually re-introduces "Web Speech goes
+        # quiet when OBS covers the window" or "tab discarded after a few minutes" bugs.
+        disabled_chrome_features = (
+            "CalculateNativeWinOcclusion",
+            "HighEfficiencyModeAvailable",
+            "HeuristicMemorySaver",
+            "IntensiveWakeUpThrottling",
+            "GlobalMediaControls",
+        )
         args = [
             str(browser_path),
             "--new-window",
             "--no-first-run",
+            "--no-default-browser-check",
             "--disable-default-apps",
-            f"--user-data-dir={isolated_profile_dir}",
-            "--disable-session-crashed-bubble",
-            "--window-size=980,860",
-            normalized_url,
         ]
+        if use_isolated_profile and isolated_profile_dir is not None:
+            args.append(f"--user-data-dir={isolated_profile_dir}")
+        args.extend(
+            [
+                "--disable-session-crashed-bubble",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-renderer-backgrounding",
+                "--disable-background-timer-throttling",
+                "--disable-features=" + ",".join(disabled_chrome_features),
+                "--noerrdialogs",
+                "--window-size=980,860",
+                normalized_url,
+            ]
+        )
         self._write_log(f"[browser-worker] launch args: {args}")
+        creation_flags = (
+            getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "HIGH_PRIORITY_CLASS", 0x00000080)
+        )
         try:
-            subprocess.Popen(
+            popen = subprocess.Popen(
                 args,
                 cwd=str(browser_path.parent),
-                creationflags=getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+                creationflags=creation_flags,
             )
             self._write_log(
-                f"[browser-worker] launched isolated worker window with address bar via {browser_path}; profile={isolated_profile_dir}"
+                f"[browser-worker] launched isolated worker window with address bar via {browser_path}; "
+                f"profile={isolated_profile_dir}; pid={popen.pid}; priority=HIGH_PRIORITY_CLASS"
             )
+            self._opt_out_chrome_power_throttling(popen.pid)
             return True
         except Exception as exc:
             self._set_browser_worker_error(
@@ -942,11 +1063,88 @@ class DesktopLauncher:
             )
             _show_error_dialog(
                 f"{APP_NAME} Browser Speech Error",
-                "Browser Speech could not open the dedicated Chrome/Chromium worker window.\n\n"
+                "Browser Speech could not open the dedicated Chrome worker window.\n\n"
                 f"Reason: {type(exc).__name__}: {exc}\n\n"
                 f"See launcher log:\n{self._log_path}",
             )
             return False
+
+    def _opt_out_chrome_power_throttling(self, pid: int) -> None:
+        """Best-effort: opt the Chrome worker process out of Windows 11 EcoQoS / Efficiency Mode.
+
+        Without this, on Windows 11 the OS can place the process into Efficiency Mode when the
+        window is in the background or partially covered, which throttles JS timers and audio
+        callbacks and causes the Web Speech worker to silently stop emitting partials.
+
+        Uses SetProcessInformation with ProcessPowerThrottling (Win32 API, since Win 10 1709).
+        Documented as the official mechanism for processes that must keep full execution speed
+        regardless of foreground state.
+        """
+        if os.name != "nt":
+            return
+        if not pid:
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            PROCESS_SET_INFORMATION = 0x0200
+            ProcessPowerThrottling = 4  # PROCESS_INFORMATION_CLASS enumeration value
+            PROCESS_POWER_THROTTLING_CURRENT_VERSION = 1
+            PROCESS_POWER_THROTTLING_EXECUTION_SPEED = 0x1
+
+            class PROCESS_POWER_THROTTLING_STATE(ctypes.Structure):
+                _fields_ = [
+                    ("Version", wintypes.ULONG),
+                    ("ControlMask", wintypes.ULONG),
+                    ("StateMask", wintypes.ULONG),
+                ]
+
+            kernel32 = ctypes.windll.kernel32
+            kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+            kernel32.SetProcessInformation.argtypes = [
+                wintypes.HANDLE,
+                ctypes.c_int,
+                ctypes.c_void_p,
+                wintypes.DWORD,
+            ]
+            kernel32.SetProcessInformation.restype = wintypes.BOOL
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+
+            handle = kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, int(pid))
+            if not handle:
+                self._write_log(
+                    f"[browser-worker] power-throttling opt-out skipped: could not open process pid={pid}"
+                )
+                return
+            try:
+                state = PROCESS_POWER_THROTTLING_STATE()
+                state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION
+                state.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED
+                state.StateMask = 0  # 0 = OPT OUT (do NOT throttle execution speed)
+                ok = kernel32.SetProcessInformation(
+                    handle,
+                    ProcessPowerThrottling,
+                    ctypes.byref(state),
+                    ctypes.sizeof(state),
+                )
+                if ok:
+                    self._write_log(
+                        f"[browser-worker] power-throttling opt-out applied for pid={pid} (Windows EcoQoS disabled)"
+                    )
+                else:
+                    last_err = ctypes.get_last_error() if hasattr(ctypes, "get_last_error") else None
+                    self._write_log(
+                        f"[browser-worker] power-throttling opt-out call returned 0 for pid={pid} (last_error={last_err})"
+                    )
+            finally:
+                kernel32.CloseHandle(handle)
+        except Exception as exc:
+            self._write_log(
+                f"[browser-worker] power-throttling opt-out failed for pid={pid}: {type(exc).__name__}: {exc}"
+            )
 
     def _is_noise_backend_line(self, line: str) -> bool:
         normalized = str(line or "")
@@ -1077,6 +1275,7 @@ class DesktopLauncher:
             self._context = LaunchContext(
                 **{
                     **asdict(self._context),
+                    "worker_launch_browser": _load_worker_launch_browser_preference(self._paths.data_dir / "config.json"),
                     "startup_mode": startup_mode,
                     "install_profile": install_profile,
                     "remote_role": remote_role,
@@ -1108,6 +1307,10 @@ class DesktopLauncher:
             self._publish_window_log(window, "health ready; loading dashboard window")
             self._publish_window_status(window, "Backend ready. Loading dashboard...")
             window.load_url(self._context.dashboard_url)
+        except LaunchSelectionCancelled:
+            self._startup_error_message = None
+            self._write_log("bootstrap ended: launch selection cancelled (window closed before startup mode)")
+            return
         except Exception as exc:
             details = "".join(traceback.format_exception_only(type(exc), exc)).strip()
             self._startup_error_message = details or str(exc)

@@ -1,5 +1,5 @@
 import { subscribe } from "../core/store.js";
-import { clone, getCurrentLocale } from "../dashboard/helpers.js";
+import { clone, getCurrentLocale, t } from "../dashboard/helpers.js";
 import { applyUiThemeFromConfigPayload } from "../ui-theme.js";
 
 const FALLBACK_LINE_SLOTS = [
@@ -65,20 +65,18 @@ function setSelectOptions(select, options) {
 }
 
 function styleSlotLabel(slotName) {
-  const normalized = String(slotName || "").toLowerCase();
+  const normalized = String(slotName || "").trim().toLowerCase();
   if (normalized === "source") {
-    return getCurrentLocale() === "ru" ? "Источник" : "Source";
+    return t("common.source");
   }
-  if (normalized.startsWith("translation_")) {
-    const index = Number.parseInt(normalized.split("_")[1] || "1", 10);
-    const safeIndex = Number.isFinite(index) ? index : 1;
-    return getCurrentLocale() === "ru" ? `Перевод ${safeIndex}` : `Translation ${safeIndex}`;
+  if (/^translation_[1-5]$/.test(normalized)) {
+    return t(`obs.output.${normalized}`);
   }
   return slotName;
 }
 
 function inheritLabel() {
-  return getCurrentLocale() === "ru" ? "(наследовать базовый стиль)" : "(inherit base style)";
+  return t("style.slots.inherit_base");
 }
 
 function normalizeOverrideFieldValue(value) {
@@ -89,6 +87,10 @@ function normalizeOverrideFieldValue(value) {
     return "";
   }
   return String(value);
+}
+
+function isStyleNumberInput(element) {
+  return Boolean(element && element.type === "number");
 }
 
 export function mountStyleEditorPanel(root, { store, actions, logger }) {
@@ -229,7 +231,9 @@ export function mountStyleEditorPanel(root, { store, actions, logger }) {
       return;
     }
     [...container.querySelectorAll("button[data-slot]")].forEach((button) => {
-      button.classList.toggle("active", button.dataset.slot === activeSlot);
+      const slotName = button.dataset.slot || "";
+      button.textContent = styleSlotLabel(slotName);
+      button.classList.toggle("active", slotName === activeSlot);
     });
   }
 
@@ -343,6 +347,9 @@ export function mountStyleEditorPanel(root, { store, actions, logger }) {
       if (!element) {
         return;
       }
+      if (isStyleNumberInput(element) && document.activeElement === element) {
+        return;
+      }
       element.value = String(style.base?.[key] ?? "");
     });
 
@@ -378,6 +385,9 @@ export function mountStyleEditorPanel(root, { store, actions, logger }) {
       if (!element) {
         return;
       }
+      if (isStyleNumberInput(element) && document.activeElement === element) {
+        return;
+      }
       const raw = slotStyle?.[key];
       element.value = normalizeOverrideFieldValue(raw);
       element.disabled = !slotEnabled;
@@ -396,15 +406,22 @@ export function mountStyleEditorPanel(root, { store, actions, logger }) {
     if (!element) {
       return;
     }
-    element.addEventListener("input", () => {
+    const applyFromControl = () => {
       updateStyle((style) => {
         style.base[key] = element.value;
       });
-    });
+    };
+    if (isStyleNumberInput(element)) {
+      element.addEventListener("change", () => {
+        applyFromControl();
+        logger("[subtitle-style] updated locally");
+      });
+      element.addEventListener("blur", applyFromControl);
+      return;
+    }
+    element.addEventListener("input", applyFromControl);
     element.addEventListener("change", () => {
-      updateStyle((style) => {
-        style.base[key] = element.value;
-      });
+      applyFromControl();
       logger("[subtitle-style] updated locally");
     });
   });
@@ -458,6 +475,14 @@ export function mountStyleEditorPanel(root, { store, actions, logger }) {
         };
       });
     };
+    if (isStyleNumberInput(element)) {
+      element.addEventListener("change", () => {
+        apply();
+        logger("[subtitle-style] slot updated locally");
+      });
+      element.addEventListener("blur", apply);
+      return;
+    }
     element.addEventListener("input", apply);
     element.addEventListener("change", () => {
       apply();
@@ -558,5 +583,13 @@ export function mountStyleEditorPanel(root, { store, actions, logger }) {
 
   render(store.getState());
   const unsubscribe = subscribe(render);
-  return () => unsubscribe();
+  const onLocaleChanged = () => {
+    lastFontCatalogSignature = "";
+    render(store.getState());
+  };
+  window.addEventListener("sst:locale-changed", onLocaleChanged);
+  return () => {
+    window.removeEventListener("sst:locale-changed", onLocaleChanged);
+    unsubscribe();
+  };
 }

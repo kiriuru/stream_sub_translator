@@ -233,6 +233,8 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
 
   const elements = {
     enabled: root.querySelector("#translation-enabled"),
+    cacheEnabled: root.querySelector("#translation-cache-enabled"),
+    cachePersist: root.querySelector("#translation-cache-persist"),
     defaultProvider: root.querySelector("#translation-provider"),
     settingsProvider: root.querySelector("#translation-settings-provider"),
     settingsTitle: root.querySelector("#translation-provider-settings-title"),
@@ -561,6 +563,15 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
     if (elements.enabled) {
       elements.enabled.checked = Boolean(translation.enabled);
     }
+    const cacheConfig = (translation.cache && typeof translation.cache === "object") ? translation.cache : {};
+    if (elements.cacheEnabled) {
+      elements.cacheEnabled.checked = cacheConfig.enabled !== false;
+    }
+    if (elements.cachePersist) {
+      const cacheEnabled = cacheConfig.enabled !== false;
+      elements.cachePersist.checked = cacheConfig.persist !== false;
+      elements.cachePersist.disabled = !cacheEnabled;
+    }
     if (elements.defaultProvider) {
       elements.defaultProvider.value = defaultProvider;
     }
@@ -745,6 +756,29 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
       draft.translation.enabled = Boolean(elements.enabled.checked);
     });
     logger(`[translation] ${elements.enabled.checked ? "enabled" : "disabled"}`);
+  });
+  elements.cacheEnabled?.addEventListener("change", () => {
+    const nextEnabled = Boolean(elements.cacheEnabled.checked);
+    actions.mutateConfig((draft) => {
+      if (!draft.translation.cache || typeof draft.translation.cache !== "object") {
+        draft.translation.cache = { enabled: true, persist: true, max_entries: 5000 };
+      }
+      draft.translation.cache.enabled = nextEnabled;
+    });
+    if (elements.cachePersist) {
+      elements.cachePersist.disabled = !nextEnabled;
+    }
+    logger(`[translation] cache ${nextEnabled ? "enabled" : "disabled"}`);
+  });
+  elements.cachePersist?.addEventListener("change", () => {
+    const nextPersist = Boolean(elements.cachePersist.checked);
+    actions.mutateConfig((draft) => {
+      if (!draft.translation.cache || typeof draft.translation.cache !== "object") {
+        draft.translation.cache = { enabled: true, persist: true, max_entries: 5000 };
+      }
+      draft.translation.cache.persist = nextPersist;
+    });
+    logger(`[translation] cache persistence ${nextPersist ? "enabled" : "disabled"}`);
   });
   elements.defaultProvider?.addEventListener("change", () => {
     actions.mutateConfig((draft) => {

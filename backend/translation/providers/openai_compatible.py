@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
-
 from backend.translation.base import (
     BaseTranslationProvider,
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
     PROVIDER_GROUP_STABLE,
     TranslationProviderError,
     TranslationProviderInfo,
@@ -15,10 +14,21 @@ from backend.translation.base import (
 DEFAULT_SUBTITLE_TRANSLATION_PROMPT = (
     "You are a subtitle translator for livestream captions. "
     "Translate only the user subtitle text into the requested target language. "
-    "Do not explain anything. Do not add notes, prefixes, or assistant-style chatter. "
+    "Output only the translated subtitle text. "
+    "Do not explain anything. Do not add notes, prefixes, quotes, brackets, or assistant-style chatter. "
+    "Do not repeat the source text. Do not include the target language name. "
     "Keep the output concise, readable, and subtitle-friendly. "
     "Preserve names, game terms, UI labels, and obvious proper nouns when appropriate."
 )
+
+_LLM_BASE_MAX_TOKENS = 96
+_LLM_TOKENS_PER_INPUT_CHAR = 6
+_LLM_MAX_TOKENS_CAP = 1024
+
+
+def _estimate_llm_max_tokens(text: str) -> int:
+    estimated = _LLM_BASE_MAX_TOKENS + len(text) * _LLM_TOKENS_PER_INPUT_CHAR
+    return max(_LLM_BASE_MAX_TOKENS, min(_LLM_MAX_TOKENS_CAP, estimated))
 
 
 class OpenAICompatibleChatProvider(BaseTranslationProvider):
@@ -31,6 +41,7 @@ class OpenAICompatibleChatProvider(BaseTranslationProvider):
         requires_api_key: bool,
         local_provider: bool = False,
     ) -> None:
+        super().__init__()
         self.info = TranslationProviderInfo(
             name=name,
             group=group,
@@ -79,6 +90,7 @@ class OpenAICompatibleChatProvider(BaseTranslationProvider):
         source_lang: str,
         target_lang: str,
         provider_settings: dict[str, str],
+        timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
     ) -> tuple[str, dict[str, Any]]:
         base_url = provider_settings.get("base_url", "").strip() or self.default_base_url
         api_key = provider_settings.get("api_key", "").strip()
@@ -96,10 +108,11 @@ class OpenAICompatibleChatProvider(BaseTranslationProvider):
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
-        payload = {
+        payload: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "temperature": 0.2,
+            "max_tokens": _estimate_llm_max_tokens(text),
         }
 
         diagnostics = self.diagnostics(provider_settings)
@@ -108,18 +121,18 @@ class OpenAICompatibleChatProvider(BaseTranslationProvider):
                 "provider_endpoint": base_url.rstrip("/"),
                 "model": model,
                 "used_default_prompt": used_default_prompt,
+                "max_tokens_cap": payload["max_tokens"],
             }
         )
 
-        async with httpx.AsyncClient() as client:
-            data = await self._get_json(
-                client,
-                url=f"{base_url.rstrip('/')}/chat/completions",
-                method="POST",
-                json=payload,
-                headers=headers,
-                error_prefix=f"{self.info.name} request failed",
-            )
+        data = await self._request_json(
+            url=f"{base_url.rstrip('/')}/chat/completions",
+            method="POST",
+            json=payload,
+            headers=headers,
+            timeout=timeout,
+            error_prefix=f"{self.info.name} request failed",
+        )
 
         choices = data.get("choices", [])
         message = choices[0].get("message", {}) if choices else {}

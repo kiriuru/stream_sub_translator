@@ -27,7 +27,8 @@ class BrowserAsrGateway:
     _NOISY_ERROR_TYPES = {"no-speech"}
     _ROUTINE_LOG_SAMPLE_EVERY = 25
     _ROUTINE_LOG_VERBOSE_LIMIT = 3
-    _STATUS_HEARTBEAT_INTERVAL_MS = 5000
+    # Structured runtime log: avoid writing on every worker status tick (can be sub-second).
+    _STATUS_HEARTBEAT_INTERVAL_MS = 15000
 
     def __init__(self, *, structured_logger: StructuredRuntimeLogger | None = None) -> None:
         self._state = BrowserAsrDiagnostics()
@@ -97,6 +98,7 @@ class BrowserAsrGateway:
         )
 
     def note_partial(self, *, text_len: int | None = None, source_lang: str | None = None, sequence: int | None = None) -> None:
+        _ = (text_len, source_lang, sequence)
         self._state = self._state.model_copy(
             update={
                 "last_partial_at_utc": _utc_now(),
@@ -104,14 +106,8 @@ class BrowserAsrGateway:
                 "browser_session_age_ms": self._state.browser_session_age_ms,
             }
         )
-        self._log_event(
-            "browser_external_partial",
-            worker_connected=self._state.worker_connected,
-            sequence=sequence,
-            text_len=text_len,
-            source_lang=source_lang,
-            is_final=False,
-        )
+        # Do not log each partial to runtime-events.jsonl — streaming partials can generate
+        # very high line rates and megabytes per hour. Timestamps above feed runtime/diagnostics.
 
     def note_final(self, *, text_len: int | None = None, source_lang: str | None = None, sequence: int | None = None) -> None:
         self._state = self._state.model_copy(
@@ -235,82 +231,15 @@ class BrowserAsrGateway:
         if updates:
             self._state = self._state.model_copy(update=updates)
         reason = self._state.last_status_reason
-        status_payload = self._status_payload(reason)
         mapped_event = self._map_reason_to_event(reason)
         if self._should_log_status_snapshot(previous_state=previous_state, reason=reason, mapped_event=mapped_event):
-            self._log_event("browser_worker_status", **status_payload)
+            self._log_event("browser_worker_status", **self._structured_status_log_summary(reason))
             self._mark_status_activity()
         elif self._should_log_status_heartbeat():
             self._log_event("browser_worker_heartbeat", **self._heartbeat_payload())
             self._mark_status_activity()
-        if mapped_event is not None:
-            event_payload = {
-                "worker_connected": self._state.worker_connected,
-                "browser_mode": self._state.browser_mode,
-                "experimental": self._state.experimental,
-                "desired_running": self._state.desired_running,
-                "recognition_state": self._state.recognition_state,
-                "supervisor_state": self._state.supervisor_state,
-                "provider_name": self._state.provider_name,
-                "start_mode": self._state.start_mode,
-                "visibility_state": self._state.visibility_state,
-                "session_id": self._state.session_id,
-                "client_segment_id": self._state.client_segment_id,
-                "generation_id": self._state.generation_id,
-                "active_recognition": self._state.active_recognition,
-                "active_media_stream": self._state.active_media_stream,
-                "pending_start": self._state.pending_start,
-                "effective_continuous_mode": self._state.effective_continuous_mode,
-                "recognition_continuous": self._state.recognition_continuous,
-                "last_result_index": self._state.last_result_index,
-                "last_result_at_ms": self._state.last_result_at_ms,
-                "last_session_started_at_ms": self._state.last_session_started_at_ms,
-                "last_session_ended_at_ms": self._state.last_session_ended_at_ms,
-                "browser_session_age_ms": self._state.browser_session_age_ms,
-                "browser_cycle_pending": self._state.browser_cycle_pending,
-                "browser_cycle_count": self._state.browser_cycle_count,
-                "browser_minimum_reconnect_suppressed_count": self._state.browser_minimum_reconnect_suppressed_count,
-                "browser_forced_final_on_interruption_count": self._state.browser_forced_final_on_interruption_count,
-                "rearm_count": self._state.rearm_count,
-                "watchdog_rearm_count": self._state.watchdog_rearm_count,
-                "rearm_delay_ms": self._state.last_rearm_delay_ms,
-                "no_speech_count": self._state.no_speech_count,
-                "network_error_count": self._state.network_error_count,
-                "forced_final": self._state.forced_final,
-                "duplicate_partial_suppressed": self._state.duplicate_partial_suppressed,
-                "duplicate_final_suppressed": self._state.duplicate_final_suppressed,
-                "late_forced_final_suppressed": self._state.late_forced_final_suppressed,
-                "stopping_since_ms": self._state.stopping_since_ms,
-                "stale_worker_events_ignored": self._state.stale_worker_events_ignored,
-                "mic_track_ready_state": self._state.mic_track_ready_state,
-                "mic_track_muted": self._state.mic_track_muted,
-                "mic_rms": self._state.mic_rms,
-                "mic_active_recent_ms": self._state.mic_active_recent_ms,
-                "last_mic_activity_at": self._state.last_mic_activity_at,
-                "get_user_media_count": self._state.get_user_media_count,
-                "get_user_media_last_error": self._state.get_user_media_last_error,
-                "mic_stream_active": self._state.mic_stream_active,
-                "media_tracks_stopped_count": self._state.media_tracks_stopped_count,
-                "media_track_leak_guard_count": self._state.media_track_leak_guard_count,
-                "audio_track_enabled": self._state.audio_track_enabled,
-                "audio_track_live": self._state.audio_track_live,
-                "audio_track_kind": self._state.audio_track_kind,
-                "audio_track_ready_state": self._state.audio_track_ready_state,
-                "audio_track_muted": self._state.audio_track_muted,
-                "audio_track_reused": self._state.audio_track_reused,
-                "audio_track_reopen_count": self._state.audio_track_reopen_count,
-                "audio_track_start_attempts": self._state.audio_track_start_attempts,
-                "audio_track_start_failures": self._state.audio_track_start_failures,
-                "fallback_to_default_start": self._state.fallback_to_default_start,
-                "fallback_used": self._state.fallback_used,
-                "last_start_error": self._state.last_start_error,
-                "last_audio_track_error": self._state.last_audio_track_error,
-                "error": self._state.last_error,
-                "error_type": self._state.error_type,
-                "degraded_reason": self._state.degraded_reason,
-            }
-            if self._should_log_mapped_event(mapped_event):
-                self._log_event(mapped_event, **event_payload)
+        if mapped_event is not None and self._should_log_mapped_event(mapped_event):
+            self._log_event(mapped_event, **self._structured_mapped_event_log_summary())
         if self._state.last_error and (
             reason in {"recognition-error", "terminal-error", "microphone-permission-failed"}
             or previous_state.last_error != self._state.last_error
@@ -342,6 +271,45 @@ class BrowserAsrGateway:
     def diagnostics(self) -> BrowserAsrDiagnostics:
         return self._state.model_copy()
 
+    def _structured_status_log_summary(self, reason: str | None) -> dict[str, Any]:
+        """Small payload for runtime-events.jsonl; full state remains in diagnostics / runtime API."""
+        s = self._state
+        return {
+            "reason": reason,
+            "worker_connected": s.worker_connected,
+            "browser_mode": s.browser_mode,
+            "experimental": s.experimental,
+            "desired_running": s.desired_running,
+            "recognition_running": s.recognition_running,
+            "recognition_state": s.recognition_state,
+            "supervisor_state": s.supervisor_state,
+            "websocket_ready": s.websocket_ready,
+            "provider_name": s.provider_name,
+            "start_mode": s.start_mode,
+            "generation_id": s.generation_id,
+            "session_id": s.session_id,
+            "client_segment_id": s.client_segment_id,
+            "visibility_state": s.visibility_state,
+            "rearm_count": s.rearm_count,
+            "watchdog_rearm_count": s.watchdog_rearm_count,
+            "error_type": s.error_type,
+            "last_error": s.last_error,
+            "degraded_reason": s.degraded_reason,
+        }
+
+    def _structured_mapped_event_log_summary(self) -> dict[str, Any]:
+        s = self._state
+        return {
+            "recognition_state": s.recognition_state,
+            "supervisor_state": s.supervisor_state,
+            "generation_id": s.generation_id,
+            "session_id": s.session_id,
+            "client_segment_id": s.client_segment_id,
+            "rearm_count": s.rearm_count,
+            "error_type": s.error_type,
+            "visibility_state": s.visibility_state,
+        }
+
     def _map_reason_to_event(self, reason: str | None) -> str | None:
         mapping = {
             "start-requested": "browser_recognition_start_requested",
@@ -371,79 +339,6 @@ class BrowserAsrGateway:
         }
         normalized = str(reason or "").strip().lower()
         return mapping.get(normalized)
-
-    def _status_payload(self, reason: str | None) -> dict[str, Any]:
-        return {
-            "worker_connected": self._state.worker_connected,
-            "browser_mode": self._state.browser_mode,
-            "experimental": self._state.experimental,
-            "desired_running": self._state.desired_running,
-            "recognition_running": self._state.recognition_running,
-            "recognition_state": self._state.recognition_state,
-            "supervisor_state": self._state.supervisor_state,
-            "provider_name": self._state.provider_name,
-            "websocket_ready": self._state.websocket_ready,
-            "start_mode": self._state.start_mode,
-            "session_id": self._state.session_id,
-            "client_segment_id": self._state.client_segment_id,
-            "generation_id": self._state.generation_id,
-            "active_recognition": self._state.active_recognition,
-            "active_media_stream": self._state.active_media_stream,
-            "pending_start": self._state.pending_start,
-            "effective_continuous_mode": self._state.effective_continuous_mode,
-            "recognition_continuous": self._state.recognition_continuous,
-            "forced_final": self._state.forced_final,
-            "last_result_index": self._state.last_result_index,
-            "last_result_at_ms": self._state.last_result_at_ms,
-            "last_session_started_at_ms": self._state.last_session_started_at_ms,
-            "last_session_ended_at_ms": self._state.last_session_ended_at_ms,
-            "browser_session_age_ms": self._state.browser_session_age_ms,
-            "browser_cycle_pending": self._state.browser_cycle_pending,
-            "browser_cycle_count": self._state.browser_cycle_count,
-            "browser_minimum_reconnect_suppressed_count": self._state.browser_minimum_reconnect_suppressed_count,
-            "browser_forced_final_on_interruption_count": self._state.browser_forced_final_on_interruption_count,
-            "audio_track_enabled": self._state.audio_track_enabled,
-            "audio_track_live": self._state.audio_track_live,
-            "audio_track_kind": self._state.audio_track_kind,
-            "audio_track_ready_state": self._state.audio_track_ready_state,
-            "audio_track_muted": self._state.audio_track_muted,
-            "audio_track_reused": self._state.audio_track_reused,
-            "audio_track_reopen_count": self._state.audio_track_reopen_count,
-            "audio_track_start_attempts": self._state.audio_track_start_attempts,
-            "audio_track_start_failures": self._state.audio_track_start_failures,
-            "fallback_to_default_start": self._state.fallback_to_default_start,
-            "fallback_used": self._state.fallback_used,
-            "last_start_error": self._state.last_start_error,
-            "last_audio_track_error": self._state.last_audio_track_error,
-            "visibility_state": self._state.visibility_state,
-            "rearm_count": self._state.rearm_count,
-            "watchdog_rearm_count": self._state.watchdog_rearm_count,
-            "rearm_delay_ms": self._state.last_rearm_delay_ms,
-            "no_speech_count": self._state.no_speech_count,
-            "network_error_count": self._state.network_error_count,
-            "duplicate_partial_suppressed": self._state.duplicate_partial_suppressed,
-            "duplicate_final_suppressed": self._state.duplicate_final_suppressed,
-            "late_forced_final_suppressed": self._state.late_forced_final_suppressed,
-            "mic_track_ready_state": self._state.mic_track_ready_state,
-            "mic_track_muted": self._state.mic_track_muted,
-            "mic_rms": self._state.mic_rms,
-            "mic_active_recent_ms": self._state.mic_active_recent_ms,
-            "last_mic_activity_at": self._state.last_mic_activity_at,
-            "get_user_media_count": self._state.get_user_media_count,
-            "get_user_media_last_error": self._state.get_user_media_last_error,
-            "mic_stream_active": self._state.mic_stream_active,
-            "media_tracks_stopped_count": self._state.media_tracks_stopped_count,
-            "media_track_leak_guard_count": self._state.media_track_leak_guard_count,
-            "stopping_since_ms": self._state.stopping_since_ms,
-            "last_partial_age_ms": self._state.last_partial_age_ms,
-            "last_final_age_ms": self._state.last_final_age_ms,
-            "error": self._state.last_error,
-            "error_type": self._state.error_type,
-            "reason": reason,
-            "degraded_reason": self._state.degraded_reason,
-            "last_seen_at_ms": self._state.last_seen_at_ms,
-            "stale_worker_events_ignored": self._state.stale_worker_events_ignored,
-        }
 
     def _should_log_status_snapshot(
         self,

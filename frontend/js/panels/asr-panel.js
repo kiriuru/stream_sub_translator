@@ -12,6 +12,7 @@ import {
   getSimpleTuningLabel,
   getSimpleTuningOption,
   isBrowserRecognitionMode,
+  parseSecondsToMs,
   setElementVisibility,
   t,
 } from "../dashboard/helpers.js";
@@ -23,6 +24,9 @@ export function mountAsrPanel(root, { store, actions, logger }) {
     modeSelect: root.querySelector("#recognition-mode-select"),
     languageRow: root.querySelector("#recognition-language-row"),
     languageSelect: root.querySelector("#recognition-language-select"),
+    workerBrowserRow: root.querySelector("#recognition-worker-browser-row"),
+    workerBrowserSelect: root.querySelector("#recognition-worker-browser-select"),
+    workerBrowserWebNote: root.querySelector("#recognition-worker-browser-web-note"),
     modeHint: root.querySelector("#recognition-mode-hint"),
     localAsrProviderRow: root.querySelector("#local-asr-provider-row"),
     localAsrProviderSelect: root.querySelector("#local-asr-provider-select"),
@@ -58,15 +62,21 @@ export function mountAsrPanel(root, { store, actions, logger }) {
   };
 
   function fillRecognitionLanguages() {
-    if (!elements.languageSelect || elements.languageSelect.options.length) {
+    if (!elements.languageSelect) {
       return;
     }
+    const previous = String(elements.languageSelect.value || "");
+    elements.languageSelect.innerHTML = "";
     BROWSER_RECOGNITION_LANGUAGES.forEach((item) => {
       const option = document.createElement("option");
       option.value = item.code;
       option.textContent = getRecognitionLanguageLabel(item.code);
       elements.languageSelect.appendChild(option);
     });
+    const codes = BROWSER_RECOGNITION_LANGUAGES.map((item) => item.code);
+    if (previous && codes.includes(previous)) {
+      elements.languageSelect.value = previous;
+    }
   }
 
   function mutateRealtimeFromControls() {
@@ -89,8 +99,16 @@ export function mountAsrPanel(root, { store, actions, logger }) {
       realtime.min_rms_for_recognition = Number(elements.rtMinRms?.value || 0.0018);
       realtime.min_voiced_ratio = Number(elements.rtMinVoicedRatio?.value || 0);
       realtime.first_partial_min_speech_ms = Number(elements.rtFirstPartialMinSpeech?.value || realtime.min_speech_ms);
-      lifecycle.completed_source_ttl_ms = Math.round(Number(elements.subtitleCompletedSourceTtl?.value || 4.5) * 1000);
-      lifecycle.completed_translation_ttl_ms = Math.round(Number(elements.subtitleCompletedTranslationTtl?.value || 4.5) * 1000);
+      lifecycle.completed_source_ttl_ms = parseSecondsToMs(
+        elements.subtitleCompletedSourceTtl?.value,
+        4500,
+        500
+      );
+      lifecycle.completed_translation_ttl_ms = parseSecondsToMs(
+        elements.subtitleCompletedTranslationTtl?.value,
+        4500,
+        500
+      );
       lifecycle.sync_source_and_translation_expiry = Boolean(elements.subtitleSyncExpiry?.checked);
       lifecycle.allow_early_replace_on_next_final = Boolean(elements.subtitleAllowEarlyReplace?.checked);
       lifecycle.pause_to_finalize_ms = realtime.finalization_hold_ms;
@@ -138,7 +156,18 @@ export function mountAsrPanel(root, { store, actions, logger }) {
     if (elements.languageSelect) {
       elements.languageSelect.value = config.asr?.browser?.recognition_language || "ru-RU";
     }
+    if (elements.workerBrowserSelect) {
+      const wb = String(config.asr?.browser?.worker_launch_browser || "auto").toLowerCase();
+      const allowed = ["auto", "google_chrome"];
+      elements.workerBrowserSelect.value = allowed.includes(wb) ? wb : "auto";
+    }
+    const launcherPicksWorkerBrowser = Boolean(window.DesktopBridge?.controlsWorkerBrowserLaunch?.());
     setElementVisibility(elements.languageRow, browserMode);
+    setElementVisibility(elements.workerBrowserRow, browserMode && launcherPicksWorkerBrowser);
+    setElementVisibility(elements.workerBrowserWebNote, browserMode && !launcherPicksWorkerBrowser);
+    if (elements.workerBrowserWebNote) {
+      elements.workerBrowserWebNote.textContent = t("overview.recognition.worker_browser.web_hint");
+    }
     setElementVisibility(elements.localAsrProviderRow, !browserMode);
     if (elements.localAsrProviderSelect) {
       elements.localAsrProviderSelect.value = localProvider;
@@ -169,9 +198,7 @@ export function mountAsrPanel(root, { store, actions, logger }) {
       const selected = elements.audioInputSelect.selectedOptions?.[0];
       if (elements.audioInputMeta) {
         elements.audioInputMeta.textContent = browserMode
-          ? (getCurrentLocale() === "ru"
-              ? "В Browser Speech микрофон выбирается через значок разрешений в адресной строке браузера."
-              : "In Browser Speech mode, switch microphone using the browser permission icon in the address bar.")
+          ? t("overview.recognition.browser_mic_note")
           : selected?.dataset.meta || (getCurrentLocale() === "ru" ? "Устройство не выбрано." : "No device selected.");
       }
     }
@@ -255,6 +282,17 @@ export function mountAsrPanel(root, { store, actions, logger }) {
     });
     logger(`[asr] browser recognition language -> ${elements.languageSelect.value}`);
   });
+  elements.workerBrowserSelect?.addEventListener("change", () => {
+    const value = elements.workerBrowserSelect.value || "auto";
+    actions.mutateConfig((draft) => {
+      draft.asr.browser.worker_launch_browser = value;
+    });
+    const label =
+      getCurrentLocale() === "ru"
+        ? "[asr] окно Web Speech: при следующем открытии worker будет использован выбранный браузер (desktop)"
+        : "[asr] Web Speech worker will use the selected browser on next open (desktop)";
+    logger(label);
+  });
   elements.localAsrProviderSelect?.addEventListener("change", () => {
     actions.mutateConfig((draft) => {
       const nextProvider = elements.localAsrProviderSelect.value || "official_eu_parakeet_low_latency";
@@ -309,5 +347,18 @@ export function mountAsrPanel(root, { store, actions, logger }) {
 
   render(store.getState());
   const unsubscribe = subscribe(render);
-  return () => unsubscribe();
+  const onLocaleChanged = () => {
+    fillRecognitionLanguages();
+    render(store.getState());
+  };
+  window.addEventListener("sst:locale-changed", onLocaleChanged);
+  const onDesktopContext = () => {
+    render(store.getState());
+  };
+  window.addEventListener("sst:desktop-context", onDesktopContext);
+  return () => {
+    window.removeEventListener("sst:locale-changed", onLocaleChanged);
+    window.removeEventListener("sst:desktop-context", onDesktopContext);
+    unsubscribe();
+  };
 }

@@ -149,14 +149,14 @@ class BootstrapUi:
         """
         Blocking prompt on the UI thread.
 
-        Returns: "continue" or "download"
+        Returns: "skip" (continue startup) or "download" (abort startup; caller opens release URL).
         """
         window = self._window
         if window is None:
-            return "continue"
+            return "skip"
 
         choice_event = threading.Event()
-        choice_holder: dict[str, str] = {"choice": "continue"}
+        choice_holder: dict[str, str] = {"choice": "skip"}
 
         def show_dialog() -> None:
             try:
@@ -165,7 +165,7 @@ class BootstrapUi:
 
                 dialog = tk.Toplevel(window)
                 dialog.title("Update available")
-                dialog.geometry("520x220")
+                dialog.geometry("520x240")
                 dialog.resizable(False, False)
                 dialog.configure(bg="#09111b")
                 dialog.attributes("-topmost", True)
@@ -184,7 +184,10 @@ class BootstrapUi:
                 ).pack(anchor="w", pady=(14, 6))
                 ttk.Label(
                     frame,
-                    text="You can continue launching now, or open the download page for the latest release.",
+                    text=(
+                        "Skip — continue starting this version.\n"
+                        "Download — stop startup and open the release page in your browser."
+                    ),
                     wraplength=460,
                     justify="left",
                 ).pack(anchor="w")
@@ -201,23 +204,20 @@ class BootstrapUi:
                     dialog.destroy()
                     choice_event.set()
 
-                ttk.Button(actions, text="Continue", command=lambda: pick("continue")).pack(side="left")
+                ttk.Button(actions, text="Skip", command=lambda: pick("skip")).pack(side="left")
                 ttk.Button(actions, text="Download", command=lambda: pick("download")).pack(side="left", padx=(10, 0))
-                ttk.Button(actions, text="Copy link", command=lambda: window.clipboard_append(release_url)).pack(
-                    side="right"
-                )
 
-                dialog.protocol("WM_DELETE_WINDOW", lambda: None)
+                dialog.protocol("WM_DELETE_WINDOW", lambda: pick("skip"))
             except Exception:
                 choice_event.set()
 
         try:
             window.after(0, show_dialog)
         except Exception:
-            return "continue"
+            return "skip"
 
         choice_event.wait(timeout=120)
-        return choice_holder.get("choice", "continue")
+        return choice_holder.get("choice", "skip")
 
 
 class BootstrapLauncher:
@@ -322,19 +322,21 @@ class BootstrapLauncher:
                 best_url = str(item.get("html_url", "") or "").strip() or None
         return best_version, best_url
 
-    def _maybe_prompt_update(self, manifest: PayloadManifest) -> None:
+    def _maybe_prompt_update(self, manifest: PayloadManifest) -> bool:
         """
-        Silent by default: prompts only when an update is available.
+        Silent when no newer release.
+
+        Returns True to continue bootstrap, False when the user chose Download (startup aborted).
         """
         # This is a bootstrap launcher for a major desktop revamp: only show update prompts
         # when the remote version is newer than the currently embedded runtime version.
         current = str(manifest.app_version or "").strip()
         if not current:
-            return
+            return True
         self._status("Checking for updates...", f"GitHub Releases: {GITHUB_RELEASES_REPO}")
         latest, url = self._fetch_latest_release()
         if not latest or not is_remote_version_newer(current, latest):
-            return
+            return True
         release_url = url or f"https://github.com/{GITHUB_RELEASES_REPO}/releases/tag/v{latest}"
         self._log(f"update available: current={current} latest={latest} url={release_url}")
         choice = self._ui.prompt_update_available(
@@ -347,6 +349,9 @@ class BootstrapLauncher:
                 os.startfile(release_url)  # type: ignore[attr-defined]
             except Exception:
                 pass
+            self._log("update prompt: user chose Download; aborting startup")
+            return False
+        return True
 
     def _ensure_portable_layout(self) -> None:
         self._status("Checking portable folder write access...", str(self._paths.exe_dir))
@@ -412,7 +417,13 @@ class BootstrapLauncher:
             self._ensure_portable_layout()
             if not args.no_start:
                 # If up-to-date, this stays silent and proceeds.
-                self._maybe_prompt_update(manifest)
+                if not self._maybe_prompt_update(manifest):
+                    self._status(
+                        "Startup cancelled.",
+                        "The release page was opened in your browser. Close it when done, then run the launcher again.",
+                    )
+                    time.sleep(0.8)
+                    return 0
             self._poll_ui_actions(args)
             verified, mismatches = self._verify_runtime(manifest)
             self._poll_ui_actions(args)

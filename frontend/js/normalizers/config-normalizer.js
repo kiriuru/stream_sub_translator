@@ -286,6 +286,16 @@ export function normalizeConfigShape(config) {
   }
   normalized.asr.browser.recognition_language =
     String(normalized.asr.browser.recognition_language || "ru-RU").trim() || "ru-RU";
+  let launchBrowser = String(normalized.asr.browser.worker_launch_browser || "auto").trim().toLowerCase();
+  if (launchBrowser === "chromium") {
+    launchBrowser = "auto";
+  }
+  if (launchBrowser === "microsoft_edge") {
+    launchBrowser = "google_chrome";
+  }
+  normalized.asr.browser.worker_launch_browser = ["auto", "google_chrome"].includes(launchBrowser)
+    ? launchBrowser
+    : "auto";
   normalized.asr.browser.interim_results = normalized.asr.browser.interim_results !== false;
   normalized.asr.browser.continuous_results = normalized.asr.browser.continuous_results === true;
   normalized.asr.browser.force_finalization_enabled = normalized.asr.browser.force_finalization_enabled !== false;
@@ -506,6 +516,14 @@ export function normalizeConfigShape(config) {
     translation.target_languages
   );
   translation.target_languages = buildCompatTargetLanguages(translation.lines);
+
+  if (!translation.cache || typeof translation.cache !== "object") {
+    translation.cache = {};
+  }
+  translation.cache.enabled = translation.cache.enabled !== false;
+  translation.cache.persist = translation.cache.persist !== false;
+  const rawMaxEntries = parseIntegerOr(translation.cache.max_entries, 5000);
+  translation.cache.max_entries = Math.max(0, Math.min(50000, rawMaxEntries));
 
   normalized.targets = [...translation.target_languages];
 

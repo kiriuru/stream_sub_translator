@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
-
 from backend.translation.base import (
     BaseTranslationProvider,
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
     PROVIDER_GROUP_EXPERIMENTAL,
     TranslationProviderError,
     TranslationProviderInfo,
@@ -26,6 +25,7 @@ class PublicLibreTranslateMirrorProvider(BaseTranslationProvider):
         source_lang: str,
         target_lang: str,
         provider_settings: dict[str, str],
+        timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
     ) -> tuple[str, dict[str, Any]]:
         api_url = provider_settings.get("api_url", "").strip() or "https://translate.fedilab.app/translate"
         payload = {
@@ -34,14 +34,13 @@ class PublicLibreTranslateMirrorProvider(BaseTranslationProvider):
             "target": target_lang,
             "format": "text",
         }
-        async with httpx.AsyncClient() as client:
-            data = await self._get_json(
-                client,
-                url=api_url,
-                method="POST",
-                json=payload,
-                error_prefix="Public LibreTranslate mirror request failed",
-            )
+        data = await self._request_json(
+            url=api_url,
+            method="POST",
+            json=payload,
+            timeout=timeout,
+            error_prefix="Public LibreTranslate mirror request failed",
+        )
         translated = data.get("translatedText") or data.get("translation")
         if not translated:
             raise TranslationProviderError("Public LibreTranslate mirror returned an empty translation.")

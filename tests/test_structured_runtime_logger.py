@@ -74,6 +74,23 @@ class StructuredRuntimeLoggerTests(unittest.TestCase):
             with patch.object(Path, "open", side_effect=OSError("disk unavailable")):
                 logger.log("runtime_metrics", "metrics_snapshot", payload={"ok": True})
 
+    def test_compacts_long_payload_strings_in_runtime_events(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            logger = StructuredRuntimeLogger(Path(temp_dir))
+            long_msg = "e" * 400
+            logger.log(
+                "browser_recognition",
+                "browser_error",
+                source="browser_asr_gateway",
+                payload={"error": long_msg, "code": 42},
+            )
+            log_path = Path(temp_dir) / "runtime-events.jsonl"
+            record = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+            err = str(record.get("error", ""))
+            self.assertLess(len(err), 300)
+            self.assertTrue(err.endswith("…"))
+            self.assertEqual(record.get("code"), 42)
+
     def test_experimental_browser_channel_is_recorded_in_runtime_events(self) -> None:
         with TemporaryDirectory() as temp_dir:
             logger = StructuredRuntimeLogger(Path(temp_dir))

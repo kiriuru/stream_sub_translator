@@ -4,6 +4,8 @@ import json
 import socket
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -108,6 +110,33 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(launcher._selected_launch_mode(), "remote_worker")
         self.assertFalse(launcher._set_launch_option("not-a-mode"))
 
+    def test_wait_for_launch_option_selection_cancelled_when_window_shutdown(self) -> None:
+        launcher = self._launcher()
+        window = _FakeWindow()
+
+        def close_soon() -> None:
+            time.sleep(0.15)
+            launcher.shutdown()
+
+        threading.Thread(target=close_soon, daemon=True).start()
+        with self.assertRaises(launcher_module.LaunchSelectionCancelled):
+            with mock.patch("desktop.launcher.auto_detect_install_profile", return_value="cpu"):
+                launcher._wait_for_launch_option_selection(window)
+
+    def test_bootstrap_launch_selection_cancelled_skips_error_dialog(self) -> None:
+        launcher = self._launcher()
+        window = _FakeWindow()
+        with mock.patch("desktop.launcher._is_port_in_use", return_value=False):
+            with mock.patch.object(
+                launcher,
+                "_wait_for_launch_option_selection",
+                side_effect=launcher_module.LaunchSelectionCancelled,
+            ):
+                with mock.patch("desktop.launcher._show_error_dialog") as dialog_mock:
+                    launcher.bootstrap(window)
+        self.assertIsNone(launcher._startup_error_message)
+        dialog_mock.assert_not_called()
+
     def test_apply_startup_mode_to_config_persists_remote_worker_state(self) -> None:
         launcher = self._launcher()
 
@@ -132,19 +161,53 @@ class LauncherTests(unittest.TestCase):
 
         with (
             mock.patch.object(launcher, "_find_chromium_browser", return_value=browser_path),
+            mock.patch.object(launcher, "_opt_out_chrome_power_throttling") as opt_out_mock,
             mock.patch("desktop.launcher.subprocess.Popen") as popen_mock,
         ):
+            popen_mock.return_value = SimpleNamespace(pid=4242)
             launched = launcher._open_browser_worker_window("http://127.0.0.1:8765/google-asr")
 
         self.assertTrue(launched)
         args = popen_mock.call_args.args[0]
         self.assertIn("--new-window", args)
         self.assertIn("--no-first-run", args)
+        self.assertIn("--no-default-browser-check", args)
         self.assertIn("--disable-default-apps", args)
+        self.assertNotIn("--disable-extensions", args)
+        self.assertNotIn("--disable-sync", args)
+        self.assertNotIn("--allow-browser-signin=false", args)
         self.assertIn("--window-size=980,860", args)
+        self.assertIn("--disable-backgrounding-occluded-windows", args)
+        self.assertIn("--disable-renderer-backgrounding", args)
+        self.assertIn("--disable-background-timer-throttling", args)
+        self.assertIn("--noerrdialogs", args)
         self.assertIn("http://127.0.0.1:8765/google-asr", args)
-        self.assertTrue(any(str(item).startswith("--user-data-dir=") for item in args))
+        self.assertIn("--user-data-dir=" + str(self.paths.runtime_root / "browser-worker-profile-classic-chrome"), args)
         self.assertNotIn("--app=http://127.0.0.1:8765/google-asr", args)
+        # Confirm Chrome feature disables for occlusion/efficiency/throttling are present
+        disable_features_arg = next(
+            (arg for arg in args if isinstance(arg, str) and arg.startswith("--disable-features=")),
+            None,
+        )
+        self.assertIsNotNone(disable_features_arg, "expected a --disable-features= argument")
+        features_csv = disable_features_arg.split("=", 1)[1]
+        feature_list = set(features_csv.split(","))
+        for feature in (
+            "CalculateNativeWinOcclusion",
+            "HighEfficiencyModeAvailable",
+            "HeuristicMemorySaver",
+            "IntensiveWakeUpThrottling",
+            "GlobalMediaControls",
+        ):
+            self.assertIn(feature, feature_list, f"missing --disable-features entry: {feature}")
+        # Confirm HIGH_PRIORITY_CLASS is set on the Popen creationflags
+        creation_flags = popen_mock.call_args.kwargs.get("creationflags", 0)
+        self.assertTrue(
+            creation_flags & 0x00000080,
+            f"expected HIGH_PRIORITY_CLASS bit (0x80) in creationflags, got {creation_flags:#x}",
+        )
+        # Confirm we also try to opt out of Windows 11 EcoQoS / Efficiency Mode
+        opt_out_mock.assert_called_once_with(4242)
 
     def test_browser_worker_experimental_window_keeps_address_bar(self) -> None:
         launcher = self._launcher()
@@ -153,19 +216,40 @@ class LauncherTests(unittest.TestCase):
 
         with (
             mock.patch.object(launcher, "_find_chromium_browser", return_value=browser_path),
+            mock.patch.object(launcher, "_opt_out_chrome_power_throttling") as opt_out_mock,
             mock.patch("desktop.launcher.subprocess.Popen") as popen_mock,
         ):
+            popen_mock.return_value = SimpleNamespace(pid=4343)
             launched = launcher._open_external_url("http://127.0.0.1:8765/google-asr-experimental")
 
         self.assertTrue(launched)
         args = popen_mock.call_args.args[0]
         self.assertIn("--new-window", args)
         self.assertIn("--no-first-run", args)
+        self.assertIn("--no-default-browser-check", args)
         self.assertIn("--disable-default-apps", args)
+        self.assertNotIn("--disable-extensions", args)
+        self.assertNotIn("--disable-sync", args)
+        self.assertNotIn("--allow-browser-signin=false", args)
         self.assertIn("--window-size=980,860", args)
+        self.assertIn("--disable-backgrounding-occluded-windows", args)
+        self.assertIn("--disable-renderer-backgrounding", args)
+        self.assertIn("--disable-background-timer-throttling", args)
+        self.assertIn("--noerrdialogs", args)
         self.assertIn("http://127.0.0.1:8765/google-asr-experimental", args)
-        self.assertTrue(any(str(item).startswith("--user-data-dir=") for item in args))
+        self.assertIn(
+            "--user-data-dir=" + str(self.paths.runtime_root / "browser-worker-profile-experimental-chrome"),
+            args,
+        )
         self.assertFalse(any(str(item).startswith("--app=") for item in args))
+        creation_flags = popen_mock.call_args.kwargs.get("creationflags", 0)
+        self.assertTrue(creation_flags & 0x00000080)
+        opt_out_mock.assert_called_once_with(4343)
+
+    def test_opt_out_chrome_power_throttling_is_best_effort_no_op_on_invalid_pid(self) -> None:
+        launcher = self._launcher()
+        # Should not raise even with bogus pid; this is a Windows-only best-effort path.
+        launcher._opt_out_chrome_power_throttling(0)
 
     def test_launcher_migrates_legacy_root_logs(self) -> None:
         legacy_logs_dir = self.root / "user-data" / "logs"
@@ -176,6 +260,42 @@ class LauncherTests(unittest.TestCase):
 
         self.assertTrue((launcher._paths.logs_dir / "desktop-launcher.log").exists())
         self.assertFalse(legacy_logs_dir.exists())
+
+
+class LauncherBrowserPreferenceTests(unittest.TestCase):
+    def test_ordered_browser_executable_names_returns_chrome_only(self) -> None:
+        self.assertEqual(launcher_module.ordered_browser_executable_names("auto"), ("chrome.exe",))
+        self.assertEqual(launcher_module.ordered_browser_executable_names("google_chrome"), ("chrome.exe",))
+
+    def test_load_worker_launch_browser_preference_maps_legacy_microsoft_edge(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg = root / "config.json"
+            cfg.write_text(
+                json.dumps({"asr": {"browser": {"worker_launch_browser": "microsoft_edge"}}}),
+                encoding="utf-8",
+            )
+            self.assertEqual(launcher_module._load_worker_launch_browser_preference(cfg), "google_chrome")
+
+    def test_load_worker_launch_browser_preference_invalid_falls_back(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg = root / "config.json"
+            cfg.write_text(
+                json.dumps({"asr": {"browser": {"worker_launch_browser": "nope"}}}),
+                encoding="utf-8",
+            )
+            self.assertEqual(launcher_module._load_worker_launch_browser_preference(cfg), "auto")
+
+    def test_load_worker_launch_browser_preference_chromium_maps_to_auto(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg = root / "config.json"
+            cfg.write_text(
+                json.dumps({"asr": {"browser": {"worker_launch_browser": "chromium"}}}),
+                encoding="utf-8",
+            )
+            self.assertEqual(launcher_module._load_worker_launch_browser_preference(cfg), "auto")
 
 
 if __name__ == "__main__":

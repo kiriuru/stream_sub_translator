@@ -28,6 +28,15 @@
           "title": "Recognition Language",
           "type": "string"
         },
+        "worker_launch_browser": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "google_chrome"
+          ],
+          "title": "Worker Launch Browser",
+          "type": "string"
+        },
         "interim_results": {
           "default": true,
           "title": "Interim Results",
@@ -79,7 +88,7 @@
           "type": "integer"
         },
         "max_browser_session_age_ms": {
-          "default": 240000,
+          "default": 180000,
           "title": "Max Browser Session Age Ms",
           "type": "integer"
         },
@@ -160,6 +169,21 @@
           "title": "Prefer Gpu",
           "type": "boolean"
         },
+        "model_load_mode": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "local_nemo",
+            "from_pretrained"
+          ],
+          "title": "Model Load Mode",
+          "type": "string"
+        },
+        "model_revision": {
+          "default": "",
+          "title": "Model Revision",
+          "type": "string"
+        },
         "rnnoise_enabled": {
           "default": false,
           "title": "Rnnoise Enabled",
@@ -182,6 +206,17 @@
     },
     "AsrRealtimeConfig": {
       "properties": {
+        "latency_preset": {
+          "default": "balanced",
+          "enum": [
+            "ultra_low_latency",
+            "balanced",
+            "quality",
+            "custom"
+          ],
+          "title": "Latency Preset",
+          "type": "string"
+        },
         "vad_mode": {
           "default": 3,
           "title": "Vad Mode",
@@ -718,6 +753,27 @@
       "title": "SubtitleOutputConfig",
       "type": "object"
     },
+    "TranslationCacheConfig": {
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "persist": {
+          "default": true,
+          "title": "Persist",
+          "type": "boolean"
+        },
+        "max_entries": {
+          "default": 5000,
+          "title": "Max Entries",
+          "type": "integer"
+        }
+      },
+      "title": "TranslationCacheConfig",
+      "type": "object"
+    },
     "TranslationConfig": {
       "properties": {
         "enabled": {
@@ -776,6 +832,17 @@
           },
           "title": "Lines",
           "type": "array"
+        },
+        "cache": {
+          "$ref": "#/$defs/TranslationCacheConfig"
+        },
+        "provider_limits": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Provider Limits",
+          "type": "object"
         }
       },
       "title": "TranslationConfig",
@@ -892,9 +959,42 @@
           ],
           "title": "Language",
           "type": "string"
+        },
+        "theme": {
+          "default": "dark",
+          "enum": [
+            "dark",
+            "light"
+          ],
+          "title": "Theme",
+          "type": "string"
+        },
+        "palette": {
+          "$ref": "#/$defs/UiPaletteConfig"
         }
       },
       "title": "UiConfig",
+      "type": "object"
+    },
+    "UiPaletteConfig": {
+      "properties": {
+        "accent": {
+          "default": "#6cc7ff",
+          "title": "Accent",
+          "type": "string"
+        },
+        "accent_secondary": {
+          "default": "#ff6ce6",
+          "title": "Accent Secondary",
+          "type": "string"
+        },
+        "accent_tertiary": {
+          "default": "#7ce3ad",
+          "title": "Accent Tertiary",
+          "type": "string"
+        }
+      },
+      "title": "UiPaletteConfig",
       "type": "object"
     },
     "UpdatesConfig": {

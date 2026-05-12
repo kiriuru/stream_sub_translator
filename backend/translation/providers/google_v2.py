@@ -5,10 +5,9 @@ import logging
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-import httpx
-
 from backend.translation.base import (
     BaseTranslationProvider,
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
     PROVIDER_GROUP_STABLE,
     TranslationProviderError,
     TranslationProviderInfo,
@@ -63,6 +62,7 @@ class GoogleTranslateV2Provider(BaseTranslationProvider):
         source_lang: str,
         target_lang: str,
         provider_settings: dict[str, str],
+        timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
     ) -> tuple[str, dict[str, Any]]:
         raw_api_key = str(provider_settings.get("api_key", ""))
         api_key, key_diagnostics = self._normalize_google_api_key(raw_api_key)
@@ -85,30 +85,29 @@ class GoogleTranslateV2Provider(BaseTranslationProvider):
             }
         )
 
-        async with httpx.AsyncClient() as client:
-            try:
-                payload = await self._get_json(
-                    client,
-                    url=endpoint,
-                    method="POST",
-                    params=params,
-                    data=data,
-                    error_prefix="Google Translate v2 request failed",
-                )
-            except TranslationProviderError as exc:
-                debug_message = (
-                    f"{exc} | provider=google_translate_v2"
-                    f" | endpoint={endpoint}"
-                    f" | api_key_present={key_diagnostics['api_key_present']}"
-                    f" | api_key_length={key_diagnostics['api_key_length']}"
-                    f" | api_key_preview={key_diagnostics['api_key_masked_preview']}"
-                    f" | trim_changed={key_diagnostics['api_key_trimmed_changed']}"
-                    f" | sanitized_changed={key_diagnostics['api_key_sanitized_changed']}"
-                    f" | extracted_from_query={key_diagnostics['api_key_extracted_from_query']}"
-                    f" | removed_trailing_query={key_diagnostics['api_key_removed_trailing_query']}"
-                )
-                logger.warning(debug_message)
-                raise TranslationProviderError(debug_message, retryable=exc.retryable) from exc
+        try:
+            payload = await self._request_json(
+                url=endpoint,
+                method="POST",
+                params=params,
+                data=data,
+                timeout=timeout,
+                error_prefix="Google Translate v2 request failed",
+            )
+        except TranslationProviderError as exc:
+            debug_message = (
+                f"{exc} | provider=google_translate_v2"
+                f" | endpoint={endpoint}"
+                f" | api_key_present={key_diagnostics['api_key_present']}"
+                f" | api_key_length={key_diagnostics['api_key_length']}"
+                f" | api_key_preview={key_diagnostics['api_key_masked_preview']}"
+                f" | trim_changed={key_diagnostics['api_key_trimmed_changed']}"
+                f" | sanitized_changed={key_diagnostics['api_key_sanitized_changed']}"
+                f" | extracted_from_query={key_diagnostics['api_key_extracted_from_query']}"
+                f" | removed_trailing_query={key_diagnostics['api_key_removed_trailing_query']}"
+            )
+            logger.warning(debug_message)
+            raise TranslationProviderError(debug_message, retryable=exc.retryable) from exc
 
         translated = payload.get("data", {}).get("translations", [{}])[0].get("translatedText")
         if not translated:

@@ -99,12 +99,12 @@ export function getProviderMeta(providerName) {
 
 export function getRecognitionModeLabel(mode) {
   if (mode === "browser_google") {
-    return getCurrentLocale() === "ru" ? "Браузерное распознавание" : "Browser Speech";
+    return t("overview.recognition.mode.browser_google");
   }
   if (mode === "browser_google_experimental") {
-    return getCurrentLocale() === "ru" ? "Браузерное (Experimental)" : "Browser Speech (Experimental)";
+    return t("overview.recognition.mode.browser_google_experimental");
   }
-  return getCurrentLocale() === "ru" ? "Локальный Parakeet" : "Local Parakeet";
+  return t("overview.recognition.mode.local");
 }
 
 export function isBrowserRecognitionMode(mode) {

@@ -15,6 +15,10 @@ LINE_SLOT_NAMES: tuple[str, ...] = (
 
 TRANSLATION_LINE_SLOT_NAMES: tuple[str, ...] = LINE_SLOT_NAMES[1:]
 
+SUBTITLE_EFFECT_IDS: frozenset[str] = frozenset(
+    {"none", "fade", "subtle_pop", "slide_up", "zoom_in", "blur_in", "glow"}
+)
+
 _BASE_STYLE_DEFAULTS: dict[str, Any] = {
     "font_family": '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
     "font_size_px": 30,
@@ -313,8 +317,8 @@ def _normalize_base_style(payload: Any) -> dict[str, Any]:
     if text_align not in {"left", "center", "right"}:
         text_align = defaults["text_align"]
     effect = str(current.get("effect", defaults["effect"])).strip().lower()
-    if effect not in {"none", "fade", "subtle_pop"}:
-        effect = defaults["effect"]
+    if effect not in SUBTITLE_EFFECT_IDS:
+        effect = str(defaults["effect"])
 
     return {
         "font_family": str(current.get("font_family", defaults["font_family"]) or defaults["font_family"]),

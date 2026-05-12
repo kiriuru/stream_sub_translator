@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
-
 from backend.translation.base import (
     BaseTranslationProvider,
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
     PROVIDER_GROUP_STABLE,
     TranslationProviderError,
     TranslationProviderInfo,
@@ -26,6 +25,7 @@ class AzureTranslatorProvider(BaseTranslationProvider):
         source_lang: str,
         target_lang: str,
         provider_settings: dict[str, str],
+        timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
     ) -> tuple[str, dict[str, Any]]:
         api_key = provider_settings.get("api_key", "").strip()
         endpoint = provider_settings.get("endpoint", "").strip() or "https://api.cognitive.microsofttranslator.com"
@@ -50,16 +50,15 @@ class AzureTranslatorProvider(BaseTranslationProvider):
         if region:
             headers["Ocp-Apim-Subscription-Region"] = region
 
-        async with httpx.AsyncClient() as client:
-            payload = await self._get_json(
-                client,
-                url=f"{endpoint.rstrip('/')}/translate",
-                method="POST",
-                params=params,
-                json=[{"Text": text}],
-                headers=headers,
-                error_prefix="Azure Translator request failed",
-            )
+        payload = await self._request_json(
+            url=f"{endpoint.rstrip('/')}/translate",
+            method="POST",
+            params=params,
+            json=[{"Text": text}],
+            headers=headers,
+            timeout=timeout,
+            error_prefix="Azure Translator request failed",
+        )
 
         translations = payload[0].get("translations", []) if isinstance(payload, list) and payload else []
         translated = translations[0].get("text") if translations else None

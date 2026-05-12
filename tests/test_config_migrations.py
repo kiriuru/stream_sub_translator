@@ -241,6 +241,17 @@ class ConfigMigrationTests(unittest.TestCase):
         self.assertEqual(saved["overlay"]["preset"], "stacked")
         self.assertTrue(saved["overlay"]["compact"])
 
+    def test_worker_launch_browser_legacy_microsoft_edge_maps_to_google_chrome(self) -> None:
+        saved = self.manager.save({"asr": {"browser": {"worker_launch_browser": "microsoft_edge"}}})
+        self.assertEqual(saved["asr"]["browser"]["worker_launch_browser"], "google_chrome")
+
+        saved_invalid = self.manager.save({"asr": {"browser": {"worker_launch_browser": "safari"}}})
+        self.assertEqual(saved_invalid["asr"]["browser"]["worker_launch_browser"], "auto")
+
+    def test_worker_launch_browser_chromium_maps_to_auto(self) -> None:
+        saved = self.manager.save({"asr": {"browser": {"worker_launch_browser": "chromium"}}})
+        self.assertEqual(saved["asr"]["browser"]["worker_launch_browser"], "auto")
+
 
 if __name__ == "__main__":
     unittest.main()
