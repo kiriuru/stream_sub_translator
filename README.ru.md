@@ -596,7 +596,7 @@ Build output:
 
 Результат:
 
-- `286 tests`
+- `283 tests`
 - `OK`
 - release artifacts обновлены:
   - `dist\Stream Subtitle Translator\Stream Subtitle Translator.exe`

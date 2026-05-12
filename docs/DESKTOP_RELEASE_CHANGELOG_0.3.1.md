@@ -22,7 +22,7 @@
 
 - `python -m compileall backend desktop tests`
 - `.\\.venv\\Scripts\\python.exe -m unittest discover -s tests -p "test_*.py"`
-- `286 tests`, `OK`
+- `283 tests`, `OK`
 
 ## English
 
@@ -46,4 +46,4 @@
 
 - `python -m compileall backend desktop tests`
 - `.\\.venv\\Scripts\\python.exe -m unittest discover -s tests -p "test_*.py"`
-- `286 tests`, `OK`
+- `283 tests`, `OK`

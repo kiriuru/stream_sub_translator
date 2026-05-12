@@ -581,7 +581,7 @@ The current `0.3.1` verification run used:
 
 Result:
 
-- `286 tests`
+- `283 tests`
 - `OK`
 - release artifacts refreshed:
   - `dist\Stream Subtitle Translator\Stream Subtitle Translator.exe`

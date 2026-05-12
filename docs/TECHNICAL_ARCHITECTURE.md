@@ -144,7 +144,7 @@ stream-sub-translator/
 │   ├── bootstrap_payload.py
 │   ├── build_bootstrap_payload.py
 │   └── assets/
-├── tests/                        # unittest suite (286 тестов)
+├── tests/                        # unittest suite (283 теста)
 ├── docs/                         # CHANGELOG, TECHNICAL_ARCHITECTURE, release notes
 ├── start.bat, start-remote-*.bat
 ├── build-desktop.bat, build-bootstrap-launcher.bat, publish-desktop-releases.ps1
@@ -823,7 +823,7 @@ Remote-режим подключается только явным выборо�
 
 Текущий результат для `0.3.1`:
 
-- `286 tests`
+- `283 tests`
 - `OK`
 
 Расширенная команда верификации перед релизом:
