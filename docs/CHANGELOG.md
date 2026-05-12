@@ -10,130 +10,67 @@
 
 ## 0.3.1
 
-Релиз `0.3.1` фиксирует все post-`0.3.0` доработки в `main` и поднимает `PROJECT_VERSION` до `0.3.1`. Это в первую очередь релиз стабилизации рантайма, переноса перевода в выделенный пакет, более жёсткой защиты Web Speech на Windows 11 и доработки UX дашборда. Базовый local-first продукт и контракты `/api`/WebSocket не меняются.
+Релиз `0.3.1` — это стабилизация поверх уже выпущенного `0.3.0`. Архитектурные изменения (`RuntimeOrchestrator` → контроллеры, разделение `SubtitleRouter`, пакет `backend/translation/` с пакетом `providers/`, `cache_manager`, `atomic_io`, `ConfigStateService`, `POST /api/updates/check`, OpenAI helper endpoints, карточки `translation_1..translation_5`, тема/палитра UI, вкладка Help, supervisor Web Speech, запуск worker'а Google Chrome в отдельном окне с изолированным профилем) **уже входили в `0.3.0`** и здесь не дублируются. Базовый local-first продукт и публичные `/api`/WebSocket-контракты не меняются.
 
 ### Версия и идентификация
+
 - `backend/versioning.py`: `PROJECT_VERSION = "0.3.1"`, источник правды для `GET /api/version` и `POST /api/updates/check`.
 - bootstrap-лаунчер и desktop-shell поднимают эту же версию.
 
-### Стабилизация рантайма (RuntimeOrchestrator → контроллеры)
+### Bootstrap-лаунчер
 
-`RuntimeOrchestrator` (`backend/core/runtime_orchestrator.py`) стал фасадом над набором явных контроллеров в `backend/core/runtime/`, без изменения формы payload статуса или WebSocket-контракта:
+- В репозитории впервые отслеживаются `desktop/bootstrap_launcher.py` и `desktop/bootstrap_payload.py` (раньше существовали локально, но не были зафиксированы в git).
+- Проверка обновлений в bootstrap игнорирует `v2.x` теги, когда встроенная версия — `0.x`: старые `v2.8.x` релизы больше не показываются как «новее `0.3.x`». Регрессия — `tests/test_bootstrap_release_tag_filter.py`.
 
-- `RuntimeStateController` — coalescing и упорядочивание broadcast статуса рантайма;
-- `AsrModeController` — разрешение и фиксация режима/провайдера ASR на сессию;
-- `TranslationRuntimeController` — жизненный цикл `TranslationEngine` + `TranslationDispatcher`;
-- `SubtitlePresentationController` — обёртка над `SubtitleRouter`;
-- `OutputFanoutController` — fanout публикации в WebSocket дашборда и OBS;
-- `TranscriptController` — оркестрация конвейера partial/final транскриптов;
-- `RuntimeLifecycleCoordinator` — детерминированный порядок start/stop;
-- `RuntimeMetricsController` — учёт метрик рантайма;
-- `RuntimeSessionController` — идентичность сессии, метки времени, sequence/generation, записи экспорта;
-- `SegmentStateController` — счётчик сегментов, активный сегмент, partial coalescing;
-- `BrowserWorkerStateController` — состояние подключения/сессии/generation/signature браузерного worker-а;
-- `RuntimeResetController`, `RuntimeStartStateController`, `RuntimeStopStateController`, `RuntimeExportController` — узкие вспомогательные шаги жизненного цикла;
-- `SpeechSourceFactory` + явные источники речи `BrowserSpeechSource`, `LocalParakeetSpeechSource`, `RemoteControllerSpeechSource`, `RemoteWorkerSpeechSource`;
-- `AudioCaptureController`, `ProcessingTasksController`, `SpeechSourceStateController`, `RemoteAudioStateController` — узкие контроллеры захвата/тасков.
+### Web Speech: дополнительная защита Windows-окна Chrome worker'а
 
-Дополнительно:
+Поверх изоляции профиля и запуска в отдельном окне Google Chrome, которые уже были в `0.3.0`:
 
-- `TranslationDispatcher` стал перезапускаемым: `stop()` больше не «ломает» диспетчер для следующих сессий; `start()` сбрасывает внутреннее состояние остановки.
-- очередь перевода: ограничение параллелизма по провайдеру и базовый rate limiting (защита от «пачек» при сохранении параллелизма по целевым языкам).
-- проверки готовности локальных endpoint-ов кэшируются с фоновым обновлением, чтобы не блокировать горячие пути повторными пробами.
+- worker-окно Chrome запускается с `HIGH_PRIORITY_CLASS`;
+- на Windows 10/11 worker-процесс делает opt-out из EcoQoS / Efficiency Mode через `SetProcessInformation` + `ProcessPowerThrottling`;
+- Chrome feature gates `CalculateNativeWinOcclusion`, `HighEfficiencyModeAvailable`, `HeuristicMemorySaver`, `IntensiveWakeUpThrottling`, `GlobalMediaControls` отключаются, чтобы Web Speech не «засыпал» при перекрытии окна.
 
-### Разделение SubtitleRouter
+### Web Speech: защита распознавания внутри worker'а
 
-`backend/core/subtitle_router.py` разделён на:
+`frontend/js/browser-asr-session-manager.js`:
 
-- `subtitle_lifecycle_core.py` — конечный автомат жизненного цикла, TTL/релевантность, promotion/expiry;
-- `subtitle_presentation.py` — сборка payload, порядок, слоты стилей, слияние partial и финала;
-- `subtitle_router.py` — фасад публикации в overlay/WS, связывает core+presentation и хранит shim совместимости для старых импортов.
+- `navigator.wakeLock.request("screen")` пока распознавание активно и окно видимо; lock автоматически переснимается после visibility-flip и отпускается на Stop;
+- network preflight: после трёх ошибок `network` за ~12 c worker пробует `https://www.google.com/generate_204`; при провале supervisor уходит в терминальный `recognition_network_unreachable` вместо бесконечного цикла рестартов;
+- health-сигнал `voice_below_recognition_threshold` (RMS ≥ 0.025, накопленные `no-speech`, тишина распознавания ≥ 8 c);
+- ранняя контролируемая ротация сессии: `asr.browser.max_browser_session_age_ms` по умолчанию `180000` мс (раньше `240000`), окно `prepare_cycle_before_ms` остаётся `15000` мс.
 
-Все продуктовые инварианты жизненного цикла сохранены и покрыты регрессией.
+### Кеш перевода и очередь перевода
 
-### Перевод: новый пакет провайдеров и кеш
+- `backend/core/cache_manager.py` переписан на in-memory LRU с дебаунс-персистом на диск (раньше — блокирующая запись на каждый ход из asyncio-пути), карантин повреждённого файла кеша сохранён.
+- `TranslationDispatcher` стал перезапускаемым (`stop()` больше не «ломает» диспетчер для следующих сессий), добавлено ограничение параллелизма по провайдеру и базовый rate limiting, параллелизм по целевым языкам сохраняется.
 
-- провайдеры перевода вынесены из `backend/core/translation_engine.py` в пакет `backend/translation/`:
-  - `base.py` (контракты, общий HTTP-слой), `engine.py`, `readiness.py`, `registry.py`,
-  - `providers/google_v2.py`, `providers/google_v3.py`, `providers/google_gas.py`, `providers/experimental_google_web.py`, `providers/azure.py`, `providers/deepl.py`, `providers/libretranslate.py`, `providers/openai_compatible.py`, `providers/public_mirrors.py`.
-- `backend/translation/registry.py` собирает реестр по умолчанию; `backend/core/translation_engine.py` остаётся точкой совместимости и подготовки запросов, но не содержит реализаций провайдеров.
-- `backend/core/cache_manager.py` — новая реализация переводческого кеша: in-memory LRU с дебаунс-персистом на диск, безопасный для asyncio (без блокирующего I/O на каждый ход), автоматический карантин повреждённого файла кеша.
-- ключи кеша перевода учитывают `provider_name`, исключая коллизии при двух провайдерах на один язык.
-- конфигурация перевода поддерживает выбор провайдера на строку через `translation.lines`; у каждой строки стабильный `slot_id`, дубли целевых языков допустимы при разных слотах; legacy `translation.provider` и `translation.target_languages` сохранены для совместимости.
-- legacy `subtitle_output.display_order` по кодам языков мигрируется в id слотов перевода (`translation_1..translation_5`).
+### Логи
 
-### Конфигурация и атомарная запись
+- `backend/core/structured_log_compact.py` — новый helper для сжатия структурированных рантайм-логов (truncate длинных строк, summary длинных списков, ограничение глубины), подключён в `structured_runtime_logger`.
 
-- монолитный `backend/config.py` заменён пакетом `backend/config/` с явными `defaults.py`, `secrets.py` и доменными нормализаторами в `backend/config/normalizers/`.
-- config и профили пишутся атомарно через `backend/core/atomic_io.py` (временный файл рядом + `os.replace()`), Windows-safe.
-- повреждённый `user-data/config.json` восстанавливается автоматически: невалидный JSON переносится в backup с меткой времени, восстанавливаются значения по умолчанию, миграции и нормализаторы выполняются и для восстановленного payload.
-- `ConfigStateService` использует явную блокировку: активный in-memory снимок конфига безопасен при конкурентных операциях рантайма и настроек.
-- активное состояние конфигурации отслеживается через метаданные `active_config_source`, `active_config_persisted`, `active_config_hash`.
+### UX и стили
 
-### Поверхность Browser Speech
+- встроенные эффекты появления субтитров пополнились на `slide_up`, `zoom_in`, `blur_in`, `glow` (рядом с уже существовавшими `none`, `fade`, `subtle_pop`).
+- мелкие правки frontend-панелей: translation panel и slot cards стали аккуратнее в крайних случаях, расширены строки i18n, точечные доработки ASR/runtime/style-панелей.
 
-- Web Speech worker в desktop-сборке запускается через Google Chrome в отдельном окне с адресной строкой и изолированным профилем; `asr.browser.worker_launch_browser` поддерживает только `auto` и `google_chrome`.
-- desktop-лаунчер всегда открывает worker в отдельном окне Google Chrome с адресной строкой и изолированным `--user-data-dir`.
-- worker-окно Chrome запускается с `HIGH_PRIORITY_CLASS` и на Windows 10/11 c opt-out из `ProcessPowerThrottling` (Efficiency Mode), что устраняет «зависание» Web Speech при перекрытии окна.
-- worker запускается с отключёнными Chrome feature gates: `CalculateNativeWinOcclusion`, `HighEfficiencyModeAvailable`, `HeuristicMemorySaver`, `IntensiveWakeUpThrottling`, `GlobalMediaControls`.
-- классический и экспериментальный worker берут `navigator.wakeLock.request("screen")` пока распознавание активно и окно видимо; lock автоматически переснимается после visibility-flip и отпускается на Stop.
-- ранняя контролируемая ротация сессии: `asr.browser.max_browser_session_age_ms` по умолчанию `180000` мс (раньше `240000`); окно `prepare_cycle_before_ms` остаётся `15000` мс.
-- network preflight: после трёх `network` ошибок за ~12 c worker пробует `https://www.google.com/generate_204`; при провале supervisor уходит в терминальный `recognition_network_unreachable` вместо бесконечного цикла рестартов.
-- добавлен health-сигнал `voice_below_recognition_threshold`: фиксирует кейс «голос слышен микрофону, но Google не распознаёт» (RMS ≥ 0.025, накопленные `no-speech`, тишина распознавания ≥ 8 с).
-- experimental `/google-asr-experimental` выровнен с базовым FSM (`browser-asr-audio-track-session-manager.js`).
+### Документация
 
-### Проверка обновлений (live)
+- `docs/CHANGELOG.md` и `docs/TECHNICAL_ARCHITECTURE.md` приведены к единому русскому изложению.
+- `docs/DESKTOP_RELEASE_CHANGELOG_0.3.0.md` заменён на `docs/DESKTOP_RELEASE_CHANGELOG_0.3.1.md`; в новом файле явно отделено «реально новое в 0.3.1» от «уже было в 0.3.0».
 
-- новый сервис `backend/services/update_service.py` и роут `POST /api/updates/check` (`backend/api/routes_updates.py`):
-  - polling GitHub Releases по `updates.github_repo` и `updates.release_channel`;
-  - сохраняет `updates.latest_known_version` и `updates.last_checked_utc` в `user-data/config.json`;
-  - защищает `runtime_start_snapshot`: метаданные обновлений мерджатся в persisted-payload, а не пишут «снимок старта» обратно на диск.
-- bootstrap-лаунчер тихо проверяет GitHub Releases на старте и показывает диалог только при доступной новой версии (Continue / Download).
+### Что было уже в 0.3.0 и не считается новым в 0.3.1
 
-### OpenAI helper endpoints
-
-- новый роут `backend/api/routes_openai_models.py`:
-  - `GET /api/openai/recommended-models` — курируемый список без обращения к OpenAI API из браузера;
-  - `POST /api/openai/models` — листинг моделей по предоставленному ключу (с дефолтным фильтром «вероятно text-моделей»);
-  - `POST /api/openai/usable-models` — лёгкая проба моделей через `/responses` с кэшированием и ограничением параллелизма.
-- панель Translation использует эти endpoint-ы, чтобы заполнить поле `model` без хранения ключа во фронте.
-
-### Дашборд и UX
-
-- вкладка Translation вынесена в отдельный модуль `frontend/js/panels/translation-panel.js`:
-  - разделение на панель маршрутизации/слотов и редактор настроек провайдера;
-  - стабильные карточки `translation_1 .. translation_5` (рисуются только для явно добавленных линий);
-  - выбор слота перенастраивает редактор настроек провайдера на провайдера этого слота;
-  - предупреждения о незаполненных обязательных настройках провайдеров для включённых слотов.
-- вкладка Style: тема интерфейса (светлая/тёмная) и палитра акцентного градиента (`ui.theme`, `ui.palette.accent*`), применяется и к окнам Web Speech worker.
-- добавлены встроенные эффекты появления субтитров: `slide_up`, `zoom_in`, `blur_in`, `glow` (вместе с `none`, `fade`, `subtle_pop`).
-- добавлена вкладка «Справка / Помощь» после «Tools & Data», устроена как локальные topic-tabs; в разделе remote зафиксирован порядок worker → controller → health → pairing → sync settings → prepare run → start worker runtime → bridge windows → start controller dashboard.
-- расширенное покрытие i18n: прогресс рантайма, редактор слотов стиля, remote LAN, диагностика и прочий ранее захардкоженный текст.
-- карточка прогресса рантайма в режимах Browser Speech переключается на компактный вид.
-- смена языка UI сохраняется сразу, без обязательного глобального Save.
-- статус `experimental` для экспериментальных провайдеров перевода больше не сводится в `degraded`.
-- для разработки маршруты и статика отдаются с заголовками no-store (`Cache-Control: no-store, no-cache, must-revalidate`), обычный refresh подхватывает правки.
-
-### Логи, диагностика, экспорт
-
-- структурированный рантайм-лог сжимается через `backend/core/structured_log_compact.py` (truncate длинных строк, summary длинных списков, ограничение глубины), JSONL остаётся пригодным даже на медленных дисках.
-- `/api/logs/client-event` остаётся best-effort: при сбоях записи возвращает `ok=true`, `logged=false`, `reason=log_write_failed`.
-- `GET /api/exports/diagnostics` собирает локальный ZIP: `runtime_status.json`, `preflight_report.json`, `config_redacted.json`, `latest_session.jsonl`, `runtime-events.jsonl`, `backend.log`, `environment.txt`, `diagnostics-manifest.json`; чувствительные поля редактируются.
-- runtime-кеши/temp остаются локальными к detected runtime environment (`runtime_dir`, `cache_root`, `temp_root`).
-
-### Контракт старта рантайма
-
-- `POST /api/runtime/start` принимает опциональный `config_payload` вместе с `device_id`;
-- дашборд отправляет текущий нормализованный in-memory конфиг при нажатии «Старт», чтобы изменения только в рантайме применялись без обязательного «Save Settings»;
-- снимок применяется только в памяти, помечается метаданными активного конфига (`runtime_start_snapshot`, `persisted=false`) и не пишется в `user-data/config.json`, пока пользователь явно не сохранит настройки;
-- предзагрузка remote-сессии читает `remote.session_id` и `remote.pair_code` из этого снимка, чтобы pairing следовал несохранённым правкам UI.
-
-### Хранилище и пути
-
-- пользовательские логи бэкенда и desktop — в корневом `logs/` (устаревший `user-data/logs/` мигрируется при старте лаунчера/рантайма);
-- локальные модели — в `user-data/models/`;
-- bundled-схема и примеры в `backend/data/` остаются source assets;
-- bind-адрес по умолчанию — `127.0.0.1`; LAN bind включается только в профиле Remote Worker.
+- Декомпозиция `RuntimeOrchestrator` на контроллеры под `backend/core/runtime/` (state/metrics/session/segment/lifecycle/browser-worker/speech sources/audio capture/processing tasks/translation runtime/transcript/output fanout).
+- Разделение `SubtitleRouter` на `subtitle_lifecycle_core.py` + `subtitle_presentation.py` + фасад.
+- Пакет `backend/translation/` (`base.py`, `engine.py`, `readiness.py`, `registry.py`) и пакет провайдеров `providers/*`.
+- `backend/core/atomic_io.py` и атомарная запись config/profiles.
+- `backend/services/config_state_service.py` (`ConfigStateService` с явной блокировкой и метаданными активного снимка конфига).
+- `backend/services/update_service.py` + `POST /api/updates/check` + защита `runtime_start_snapshot` от записи метаданных обновлений.
+- OpenAI helper endpoints `GET /api/openai/recommended-models`, `POST /api/openai/models`, `POST /api/openai/usable-models`.
+- Карточки `translation_1..translation_5`, `TranslationLineConfig`, миграция `subtitle_output.display_order` в id слотов перевода.
+- Web Speech worker в Google Chrome в отдельном окне с адресной строкой и изолированным `--user-data-dir`, `asr.browser.worker_launch_browser` со значениями `auto`/`google_chrome`.
+- Web Speech supervisor (`browser-asr-session-manager.js`), experimental `/google-asr-experimental`, тема/палитра UI, вкладка Help, расширенный i18n, runtime-event coalescing и стабильность `/ws/events` / `/ws/asr_worker`.
+- `GET /api/exports/diagnostics` (ZIP с runtime/config/log/session-данными) и best-effort `/api/logs/client-event`.
 
 ### Тесты и верификация
 
@@ -144,21 +81,6 @@
 
 - `283 tests`
 - `OK`
-
-Покрытие фокусируется на:
-
-- архитектуре backend (`tests/test_backend_architecture.py`, `tests/test_paths_release_contracts.py`);
-- миграциях и экспорте схемы конфига (`tests/test_config_migrations.py`, `tests/test_config_schema_export.py`);
-- контрактах browser worker и шлюза (`tests/test_browser_worker_contract.py`, `tests/test_browser_asr_gateway.py`, `tests/test_browser_asr_service.py`);
-- рантайм-контроллерах (`tests/test_runtime_metrics_controller.py`, `tests/test_runtime_session_controller.py`, `tests/test_segment_state_controller.py`, `tests/test_browser_worker_state_controller.py`, `tests/test_runtime_lifecycle_coordinator.py`, `tests/test_runtime_non_remote_controllers.py`, `tests/test_runtime_event_coalescing.py`, `tests/test_runtime_event_sequence_monotonic.py`);
-- subtitle lifecycle и роутере (`tests/test_subtitle_router.py`, `tests/test_subtitle_lifecycle_relevance.py`, `tests/test_subtitle_style_effects.py`);
-- очереди перевода и провайдерах (`tests/test_translation_dispatcher.py`, `tests/test_translation_engine.py`, `tests/test_openai_compatible_provider.py`, `tests/test_config_translation_providers.py`, `tests/test_cache_manager.py`);
-- update service (`tests/test_update_service_check_now.py`, `tests/test_update_service_persistence.py`);
-- OpenAI helper endpoints (`tests/test_openai_models_route.py`);
-- логировании и сессии (`tests/test_logging_and_session.py`, `tests/test_structured_log_compact.py`, `tests/test_structured_runtime_logger.py`, `tests/test_session_logger.py`);
-- API/WebSocket (`tests/test_api_and_websockets.py`, `tests/test_ws_manager.py`, `tests/test_runtime_status_contract.py`);
-- лаунчере и bootstrap (`tests/test_launcher.py`, `tests/test_bootstrap_launcher.py`, `tests/test_bootstrap_payload.py`, `tests/test_runtime_bootstrap.py`);
-- ASR-провайдере и параметрах (`tests/test_asr_provider_contract.py`, `tests/test_asr_provider_selection.py`, `tests/test_parakeet_lifecycle.py`, `tests/test_parakeet_model_installer_manifest.py`, `tests/test_vad_engine.py`, `tests/test_segment_queue.py`, `tests/test_rnnoise_processor.py`).
 
 ## 0.3.0
 
