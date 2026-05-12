@@ -120,10 +120,29 @@ class FrontendArchitectureTests(unittest.TestCase):
         self.assertIn("lastPresetCatalogSignature", panel_js)
         self.assertIn("shouldRebuildPresets", panel_js)
 
+    def test_subtitle_style_renderer_maps_effect_ids_to_css_classes(self) -> None:
+        renderer_js = (JS_ROOT / "subtitle-style.js").read_text(encoding="utf-8")
+        self.assertIn("function effectClassName(effect)", renderer_js)
+        self.assertIn('replace(/_/g, "-")', renderer_js)
+        self.assertIn("effectClassName(lineStyle.effect || effectiveStyle.effect", renderer_js)
+
+    def test_subtitle_style_renderer_does_not_reanimate_partial_or_existing_rows(self) -> None:
+        renderer_js = (JS_ROOT / "subtitle-style.js").read_text(encoding="utf-8")
+        self.assertIn('transient: true', renderer_js)
+        self.assertIn("function shouldAnimateEntry(entry, previousEntrySignatures)", renderer_js)
+        self.assertIn("if (entry.transient)", renderer_js)
+        self.assertIn("__subtitleStyleRenderState", renderer_js)
+        self.assertIn('nextEntrySignatures.push(renderEntrySignature(entry))', renderer_js)
+
     def test_overlay_filters_stale_payloads_using_created_at_ms(self) -> None:
         overlay_js = (OVERLAY_ROOT / "overlay.js").read_text(encoding="utf-8")
         self.assertIn("created_at_ms", overlay_js)
         self.assertIn("ignored stale overlay_update", overlay_js)
+
+    def test_overlay_skips_dom_render_when_payload_signature_is_unchanged(self) -> None:
+        overlay_js = (OVERLAY_ROOT / "overlay.js").read_text(encoding="utf-8")
+        self.assertIn("signature !== overlayState.lastRenderSignature", overlay_js)
+        self.assertIn("applyClasses();\n      return;", overlay_js)
 
     def test_dashboard_ws_client_treats_timestamp_as_authoritative_freshness_signal(self) -> None:
         # Regression: dashboards sit on a long-lived /ws/events connection while

@@ -186,6 +186,9 @@
         writeDebug("text updated", renderedTexts.join(" || "));
       }
       overlayState.lastRenderSignature = signature;
+    } else {
+      applyClasses();
+      return;
     }
     if (window.SubtitleStyleRenderer && linesContainer) {
       window.SubtitleStyleRenderer.render(linesContainer, payload, { overlay: true });

@@ -287,7 +287,7 @@
       return [
         {
           rowSlot: "source",
-          entries: [{ kind: "source", text: activePartialText, style_slot: "source" }],
+          entries: [{ kind: "source", text: activePartialText, style_slot: "source", transient: true }],
         },
       ];
     }
@@ -358,6 +358,28 @@
     };
   }
 
+  function effectClassName(effect) {
+    const normalized = String(effect || "none").trim().toLowerCase().replace(/_/g, "-") || "none";
+    return `effect-${normalized}`;
+  }
+
+  function renderEntrySignature(entry) {
+    return [
+      entry.transient ? "partial" : "completed",
+      entry.style_slot || "source",
+      entry.kind || "source",
+      entry.lang || "",
+      entry.text || "",
+    ].join("\u001f");
+  }
+
+  function shouldAnimateEntry(entry, previousEntrySignatures) {
+    if (entry.transient) {
+      return false;
+    }
+    return !previousEntrySignatures.has(renderEntrySignature(entry));
+  }
+
   function applyStyleMap(element, styleMap) {
     Object.entries(styleMap).forEach(([key, value]) => {
       element.style.setProperty(key, value);
@@ -373,6 +395,8 @@
       ? payload.style
       : resolveEffectiveStyle(options?.styleConfig || null, presets);
     const rows = composeRenderRows(payload);
+    const previousEntrySignatures = new Set(container.__subtitleStyleRenderState?.entrySignatures || []);
+    const nextEntrySignatures = [];
     const wrapper = document.createElement("div");
     wrapper.className = `subtitle-stage-shell${options?.overlay ? " is-overlay-shell" : ""}`;
     const stage = document.createElement("div");
@@ -397,9 +421,10 @@
       rowConfig.entries.forEach((entry, entryIndex) => {
         const lineStyle = effectiveStyle.line_slots?.[entry.style_slot] || effectiveStyle.base || {};
         const surface = document.createElement("div");
-        surface.className = `subtitle-line__surface subtitle-slot-${entry.style_slot} effect-${
-          lineStyle.effect || effectiveStyle.effect || "none"
-        }`;
+        const effectClass = shouldAnimateEntry(entry, previousEntrySignatures)
+          ? effectClassName(lineStyle.effect || effectiveStyle.effect || "none")
+          : "effect-none";
+        surface.className = `subtitle-line__surface subtitle-slot-${entry.style_slot} ${effectClass}`;
         surface.dataset.slot = entry.style_slot || "source";
         surface.dataset.kind = entry.kind || "source";
         surface.dataset.row = String(rowIndex);
@@ -407,6 +432,9 @@
         applyStyleMap(surface, buildCssVariables(lineStyle, stageScale));
         surface.textContent = entry.text;
         content.appendChild(surface);
+        if (!entry.transient) {
+          nextEntrySignatures.push(renderEntrySignature(entry));
+        }
       });
 
       row.appendChild(content);
@@ -416,6 +444,9 @@
     wrapper.appendChild(stage);
     container.innerHTML = "";
     container.appendChild(wrapper);
+    container.__subtitleStyleRenderState = {
+      entrySignatures: nextEntrySignatures,
+    };
     return {
       empty: rows.length === 0,
       rowCount: rows.length,
@@ -430,6 +461,7 @@
     normalizeStyleConfig,
     resolveEffectiveStyle,
     composeRenderRows,
+    effectClassName,
     render,
   };
 })();
