@@ -290,9 +290,6 @@ export function normalizeConfigShape(config) {
   if (launchBrowser === "chromium") {
     launchBrowser = "auto";
   }
-  if (launchBrowser === "microsoft_edge") {
-    launchBrowser = "google_chrome";
-  }
   normalized.asr.browser.worker_launch_browser = ["auto", "google_chrome"].includes(launchBrowser)
     ? launchBrowser
     : "auto";

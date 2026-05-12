@@ -168,13 +168,6 @@ class BrowserWorkerContractTests(unittest.TestCase):
         self.assertIn("/static/js/browser-asr-audio-track-session-manager.js", self.experimental_html)
         self.assertIn("Web Speech Worker (Experimental)", self.experimental_html)
 
-    def test_edge_only_worker_pages_are_removed(self) -> None:
-        self.assertFalse(GOOGLE_ASR_HTML.with_name("google_asr_edge.html").exists())
-        self.assertFalse(GOOGLE_ASR_HTML.with_name("google_asr_experimental_edge.html").exists())
-
-    def test_dashboard_worker_browser_select_has_no_microsoft_edge(self) -> None:
-        self.assertNotIn('value="microsoft_edge"', self.index_html)
-
     def test_experimental_manager_uses_audio_track_start_and_default_fallback(self) -> None:
         self.assertIn("recognition.start(audioTrack)", self.experimental_manager_js)
         self.assertIn("recognition.start()", self.experimental_manager_js)

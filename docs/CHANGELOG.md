@@ -72,9 +72,7 @@
 
 ### Поверхность Browser Speech
 
-- удалена ветка Microsoft Edge как отдельный worker:
-  - `/google-asr-edge` и `/google-asr-experimental-edge` возвращают `404`;
-  - `asr.browser.worker_launch_browser` теперь только `auto` или `google_chrome`; legacy-значение `microsoft_edge` мигрируется в `google_chrome`, `chromium` мигрируется в `auto`.
+- Web Speech worker в desktop-сборке запускается через Google Chrome в отдельном окне с адресной строкой и изолированным профилем; `asr.browser.worker_launch_browser` поддерживает только `auto` и `google_chrome`.
 - desktop-лаунчер всегда открывает worker в отдельном окне Google Chrome с адресной строкой и изолированным `--user-data-dir`.
 - worker-окно Chrome запускается с `HIGH_PRIORITY_CLASS` и на Windows 10/11 c opt-out из `ProcessPowerThrottling` (Efficiency Mode), что устраняет «зависание» Web Speech при перекрытии окна.
 - worker запускается с отключёнными Chrome feature gates: `CalculateNativeWinOcclusion`, `HighEfficiencyModeAvailable`, `HeuristicMemorySaver`, `IntensiveWakeUpThrottling`, `GlobalMediaControls`.

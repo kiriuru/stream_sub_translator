@@ -25,8 +25,7 @@ This README describes the current desktop product surface for the `0.3.1` code l
 - Translation providers moved into a dedicated `backend/translation/providers/` package; the translation cache (`backend/core/cache_manager.py`) is an in-memory LRU with debounced disk persistence and quarantine for corrupt cache files.
 - Config writes are atomic on Windows (`backend/core/atomic_io.py` via `os.replace()`), and a corrupt `user-data/config.json` is safely rotated into `*.corrupt-<timestamp>.json` while the app boots on defaults.
 - Translation routing is managed through stable `translation_1 .. translation_5` slot cards with per-line provider selection; the dashboard warns when enabled lines are missing required credentials.
-- The Microsoft Edge worker branch is removed: Browser Speech always opens in a dedicated **Google Chrome** window with an isolated `user-data-dir`, `HIGH_PRIORITY_CLASS`, Windows 10/11 EcoQoS opt-out, Screen Wake Lock, terminal `recognition_network_unreachable` degradation, and the new `voice_below_recognition_threshold` health signal.
-- `/google-asr-edge` and `/google-asr-experimental-edge` return `404` (regression-pinned in `tests/test_api_and_websockets.py`).
+- Browser Speech opens in a dedicated **Google Chrome** window with an isolated `user-data-dir`, `HIGH_PRIORITY_CLASS`, Windows 10/11 EcoQoS opt-out, Screen Wake Lock, terminal `recognition_network_unreachable` degradation, and the new `voice_below_recognition_threshold` health signal.
 - Live update check: `POST /api/updates/check` polls GitHub Releases (opt-in via `updates.enabled`), persists `updates.latest_known_version` + `updates.last_checked_utc`, and the bootstrap launcher silently prompts only when a newer version is available.
 - OpenAI helper endpoints (`GET /api/openai/recommended-models`, `POST /api/openai/models`, `POST /api/openai/usable-models`) let the dashboard populate the `model` field without storing keys in the browser.
 - User-facing logs live under root `logs/` (legacy `user-data/logs/` migrates on startup); local ASR models stay under `user-data/models/`.
@@ -312,12 +311,11 @@ Visual layout was not redesigned in `0.3.1`; the major changes remain the intern
 ### Web Speech
 
 - Uses a separate dedicated **Google Chrome** worker window (`/google-asr`).
-- On desktop, Overview → Recognition can pick **Auto** or **Google Chrome** for that worker (`asr.browser.worker_launch_browser`: `auto` or `google_chrome`); both resolve to launching Chrome. Legacy values `microsoft_edge` and `chromium` are migrated to `google_chrome` and `auto` respectively. The launcher reads this from `config.json` each time the worker URL is opened. The same control is hidden in the web-only dashboard (`start.bat` in a normal browser), where `window.open` always follows the OS default browser.
+- On desktop, Overview → Recognition can pick **Auto** or **Google Chrome** for that worker (`asr.browser.worker_launch_browser`: `auto` or `google_chrome`); both resolve to launching Chrome. The launcher reads this from `config.json` each time the worker URL is opened. The same control is hidden in the web-only dashboard (`start.bat` in a normal browser), where `window.open` always follows the OS default browser.
 - Desktop behavior is fixed:
   - SST always opens Web Speech as a separate browser window with an address bar.
   - The launcher opens the worker in a **separate Chrome window** with the address bar (`--new-window` + worker URL).
   - Chrome uses an **isolated** `user-data-dir` under the runtime root for that window only.
-  - The `Microsoft Edge` worker branch is removed; `/google-asr-edge` and `/google-asr-experimental-edge` return `404`.
   - There is no browser-window mode toggle in the desktop UI.
   - This behavior must not be replaced with `--app`, popup-launcher pages, hidden bootstrap windows, or in-tab navigation.
 - Requires browser microphone permission.

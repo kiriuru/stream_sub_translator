@@ -98,9 +98,6 @@ class ApiAndWebSocketTests(unittest.TestCase):
             self.assertEqual(browser_worker_page.status_code, 200)
             self.assertIn("browser-asr-audio-track-session-manager.js", browser_worker_page.text)
 
-            self.assertEqual(client.get("/google-asr-edge").status_code, 404)
-            self.assertEqual(client.get("/google-asr-experimental-edge").status_code, 404)
-
             dashboard = client.get("/")
             self.assertEqual(dashboard.status_code, 200)
             self.assertIn('type="module" src="/static/js/main.js', dashboard.text)

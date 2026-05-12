@@ -397,7 +397,7 @@ ConfigSchema
 │   ├── prefer_gpu, model_load_mode, model_revision, rnnoise_enabled, rnnoise_strength
 │   ├── browser: AsrBrowserConfig
 │   │   ├── recognition_language
-│   │   ├── worker_launch_browser: "auto" | "google_chrome"      # Edge удалён
+│   │   ├── worker_launch_browser: "auto" | "google_chrome"
 │   │   ├── interim_results, continuous_results
 │   │   ├── force_finalization_enabled, force_finalization_timeout_ms
 │   │   ├── minimum_reconnect_interval_ms, normal_restart_delay_ms,
@@ -512,8 +512,6 @@ Frontend pages (FastAPI static):
 - `/static/*`, `/overlay-assets/*`, `/project-fonts/*`
 
 Все эти маршруты в desktop-режиме отдаются с заголовками `Cache-Control: no-store, no-cache, must-revalidate`, чтобы обычный refresh подхватывал правки без жёсткой перезагрузки.
-
-> Удалено: `/google-asr-edge` и `/google-asr-experimental-edge` (404). Это зафиксировано регрессией в `tests/test_api_and_websockets.py`.
 
 ### 8.1 События в `/ws/events`
 

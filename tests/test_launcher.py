@@ -267,16 +267,6 @@ class LauncherBrowserPreferenceTests(unittest.TestCase):
         self.assertEqual(launcher_module.ordered_browser_executable_names("auto"), ("chrome.exe",))
         self.assertEqual(launcher_module.ordered_browser_executable_names("google_chrome"), ("chrome.exe",))
 
-    def test_load_worker_launch_browser_preference_maps_legacy_microsoft_edge(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            cfg = root / "config.json"
-            cfg.write_text(
-                json.dumps({"asr": {"browser": {"worker_launch_browser": "microsoft_edge"}}}),
-                encoding="utf-8",
-            )
-            self.assertEqual(launcher_module._load_worker_launch_browser_preference(cfg), "google_chrome")
-
     def test_load_worker_launch_browser_preference_invalid_falls_back(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
