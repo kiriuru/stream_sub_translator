@@ -38,6 +38,9 @@
       this.networkPreflightBurstWindowMs = 12000;
       this.networkPreflightTimeoutMs = 4000;
       this.networkPreflightCooldownMs = 30000;
+      /** Dedupes noisy recognition.start lines during no-speech / tight onend loops (~max 850/h per key). */
+      this.recognitionStartLogMinGapMs = 4200;
+      this._appendLogThrottleState = null;
       this._watchdogTimer = null;
       this._permissionPromise = null;
       this._socketListenersAttached = false;
@@ -132,6 +135,36 @@
 
     _appendLog(message) {
       this.options.appendLog?.(message);
+    }
+
+    _appendLogThrottled(message, throttleKey, minGapMs) {
+      if (!throttleKey || !minGapMs) {
+        this._appendLog(message);
+        return;
+      }
+      const now = this._now();
+      if (!this._appendLogThrottleState) {
+        this._appendLogThrottleState = new Map();
+      }
+      const last = Number(this._appendLogThrottleState.get(throttleKey) || 0);
+      if (last && now - last < minGapMs) {
+        return;
+      }
+      this._appendLog(message);
+      this._appendLogThrottleState.set(throttleKey, now);
+    }
+
+    _recognitionStartBurstThrottle(reason) {
+      const raw = String(reason || "")
+        .trim()
+        .toLowerCase()
+        .replace(/-/g, "_");
+      const burst = raw === "no_speech" || raw === "nospeech" || raw === "normal_onend";
+      const gapMs = Math.max(500, Number(this.recognitionStartLogMinGapMs || 4200));
+      if (!burst) {
+        return { gapMs, key: null };
+      }
+      return { gapMs, key: `recognition-start:${raw}` };
     }
 
     _setStatus(status) {
@@ -825,6 +858,7 @@
       this.stop();
       this._stopWatchdog();
       this._releaseWakeLock("destroy");
+      this._appendLogThrottleState = null;
       const socket = this.state.socket;
       this.state.socket = null;
       this.state.websocketReady = false;
@@ -1463,9 +1497,14 @@
       this.state.pendingRestartReason = null;
       this.ensureSocketConnected();
       const recognition = this._createRecognition(generationId);
+      const startLogThrottle = this._recognitionStartBurstThrottle(reason);
       try {
         recognition.start();
-        this._appendLog(`recognition.start (${reason})`);
+        if (startLogThrottle.key) {
+          this._appendLogThrottled(`recognition.start (${reason})`, startLogThrottle.key, startLogThrottle.gapMs);
+        } else {
+          this._appendLog(`recognition.start (${reason})`);
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error || "start failed");
         if (String(message).toLowerCase().includes("already started")) {

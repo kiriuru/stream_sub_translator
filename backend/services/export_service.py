@@ -51,7 +51,7 @@ class ExportService:
         model_manifest_path = self._resolve_model_manifest_path(asr_diagnostics)
         latest_session_log = self._app.state.paths.logs_dir / "session-latest.jsonl"
         backend_log = self._app.state.paths.logs_dir / "backend.log"
-        runtime_events_log = self._app.state.paths.logs_dir / "runtime-events.jsonl"
+        runtime_events_log = self._app.state.paths.logs_dir / "runtime-events.log"
 
         with zipfile.ZipFile(bundle_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("runtime_status.json", self._json_text(runtime_payload))
@@ -63,7 +63,7 @@ class ExportService:
             archive.writestr("environment.txt", self._build_environment_text())
             archive.writestr("diagnostics-manifest.json", self._json_text(self._build_manifest()))
             self._write_file_if_present(archive, latest_session_log, "latest_session.jsonl")
-            self._write_file_if_present(archive, runtime_events_log, "runtime-events.jsonl")
+            self._write_file_if_present(archive, runtime_events_log, "runtime-events.log")
             self._write_file_if_present(archive, backend_log, "backend.log")
 
         self._app.state.structured_runtime_logger.log(
@@ -237,7 +237,7 @@ class ExportService:
             "app_version": app_version,
             "files": {
                 "backend.log": "backend log, redacted, normal verbosity",
-                "runtime-events.jsonl": "structured runtime events, compacted status, redacted",
+                "runtime-events.log": "structured runtime events, compact text lines, redacted",
                 "session-latest.jsonl": "readable session timeline, raw bounded ring buffer",
                 "config_redacted.json": "redacted config snapshot",
                 "runtime_status.json": "runtime status snapshot",

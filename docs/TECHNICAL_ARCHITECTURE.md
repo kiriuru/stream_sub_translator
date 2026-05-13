@@ -213,7 +213,7 @@ stream-sub-translator/
 | `overlay_broadcaster.py` | Публикация overlay payload c sequence/created_at_ms. |
 | `obs_caption_output.py` | OBS Closed Captions output (websocket к OBS). |
 | `session_logger.py` | `SessionLogger` + `SessionLogManager` (best-effort JSONL запись клиентских событий). |
-| `structured_runtime_logger.py` | `runtime-events.jsonl` — структурированный рантайм-лог. |
+| `structured_runtime_logger.py` | `runtime-events.log` — структурированный рантайм-лог (компактные текстовые строки). |
 | `structured_log_compact.py` | Сжатие значений (truncate строк, summary длинных списков, ограничение глубины). |
 | `audio_capture.py`, `audio_devices.py`, `vad.py`, `segment_queue.py` | аудиоконвейер. |
 | `asr_engine.py`, `asr_provider_selection.py`, `parakeet_provider.py` | локальный ASR layer. |
@@ -549,7 +549,7 @@ Frontend pages (FastAPI static):
 | Поток | Файл |
 | --- | --- |
 | Backend stdout/stderr | `logs/backend.log` (rotating) |
-| Структурированные события рантайма | `logs/runtime-events.jsonl` (через `StructuredRuntimeLogger`, поля сжимаются `structured_log_compact.compact_for_runtime_log`) |
+| Структурированные события рантайма | `logs/runtime-events.log` (через `StructuredRuntimeLogger`, поля сжимаются `structured_log_compact.compact_for_runtime_log`) |
 | Клиентские live-события | `logs/session-latest.jsonl` (через `SessionLogger`, best-effort) |
 | Desktop-launcher | `logs/desktop-launcher.log` |
 | Bootstrap-launcher | `logs/bootstrap-launcher.log` |
@@ -561,7 +561,7 @@ Frontend pages (FastAPI static):
 - `preflight_report.json`;
 - `config_redacted.json` (через `redaction.redact_payload`);
 - `latest_session.jsonl` (ограниченный по объёму client-event лог);
-- `runtime-events.jsonl`;
+- `runtime-events.log`;
 - `backend.log` (с редактированием по строкам);
 - `environment.txt`;
 - `diagnostics-manifest.json`.
@@ -705,7 +705,7 @@ project-root/
 │   ├── bootstrap-launcher.log
 │   ├── desktop-launcher.log
 │   ├── backend.log
-│   ├── runtime-events.jsonl
+│   ├── runtime-events.log
 │   ├── session-latest.jsonl
 │   └── browser-recognition.log
 └── fonts/   (project-local font assets)

@@ -17,7 +17,7 @@ def compact_for_runtime_log(
     max_depth: int = _DEFAULT_MAX_DEPTH,
 ) -> Any:
     """
-    Shrink values for runtime-events.jsonl: truncate long strings, summarize long lists,
+    Shrink values for runtime-events.log: truncate long strings, summarize long lists,
     cap nesting depth. None is returned as None and typically dropped by the caller.
     """
     if obj is None:

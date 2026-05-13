@@ -341,12 +341,17 @@
         if (reason && reason !== "user-start") {
           this._emitWorkerStatus("restart-executed");
         }
+        const startLogThrottle = this._recognitionStartBurstThrottle(reason);
+        const expLogKey = startLogThrottle.key ? `${startLogThrottle.key}:exp` : null;
         if (audioTrack) {
           this.state.startMode = "audio_track";
           this.state.audioTrackStartAttempts = Number(this.state.audioTrackStartAttempts || 0) + 1;
-          this._appendLog(
-            `experimental recognition.start(audioTrack) lang=${recognition.lang}, interim=${recognition.interimResults}, continuous=${recognition.continuous}`
-          );
+          const line = `experimental recognition.start(audioTrack) lang=${recognition.lang}, interim=${recognition.interimResults}, continuous=${recognition.continuous}`;
+          if (expLogKey) {
+            this._appendLogThrottled(line, expLogKey, startLogThrottle.gapMs);
+          } else {
+            this._appendLog(line);
+          }
           this._emitWorkerStatus("audio-track-start-attempt");
           try {
             recognition.start(audioTrack);
@@ -373,7 +378,11 @@
         }
         this.state.startMode = "default_start";
         recognition.start();
-        this._appendLog(`experimental recognition.start (${reason})`);
+        if (expLogKey) {
+          this._appendLogThrottled(`experimental recognition.start (${reason})`, expLogKey, startLogThrottle.gapMs);
+        } else {
+          this._appendLog(`experimental recognition.start (${reason})`);
+        }
       } catch (error) {
         const message = this._buildErrorMessage(
           error,

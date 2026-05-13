@@ -29,16 +29,21 @@ class BrowserAsrGateway:
     _ROUTINE_LOG_VERBOSE_LIMIT = 3
     # Structured runtime log: avoid writing on every worker status tick (can be sub-second).
     _STATUS_HEARTBEAT_INTERVAL_MS = 15000
+    # When only high-churn fields change (RMS, result index, duplicate counters, …), avoid
+    # spamming runtime-events; operational state transitions still log immediately.
+    _DETAIL_ONLY_STATUS_LOG_MIN_INTERVAL_MS = 3600
 
     def __init__(self, *, structured_logger: StructuredRuntimeLogger | None = None) -> None:
         self._state = BrowserAsrDiagnostics()
         self._structured_logger = structured_logger
         self._last_status_heartbeat_at_ms = 0
+        self._last_browser_worker_status_log_ms = 0
         self._heartbeat_counter_baseline = self._counter_snapshot(self._state)
 
     def reset(self) -> None:
         self._state = BrowserAsrDiagnostics()
         self._last_status_heartbeat_at_ms = 0
+        self._last_browser_worker_status_log_ms = 0
         self._heartbeat_counter_baseline = self._counter_snapshot(self._state)
 
     def worker_connected(self, *, browser_mode: str | None = None) -> None:
@@ -106,7 +111,7 @@ class BrowserAsrGateway:
                 "browser_session_age_ms": self._state.browser_session_age_ms,
             }
         )
-        # Do not log each partial to runtime-events.jsonl — streaming partials can generate
+        # Do not log each partial to runtime-events.log — streaming partials can generate
         # very high line rates and megabytes per hour. Timestamps above feed runtime/diagnostics.
 
     def note_final(self, *, text_len: int | None = None, source_lang: str | None = None, sequence: int | None = None) -> None:
@@ -234,6 +239,7 @@ class BrowserAsrGateway:
         mapped_event = self._map_reason_to_event(reason)
         if self._should_log_status_snapshot(previous_state=previous_state, reason=reason, mapped_event=mapped_event):
             self._log_event("browser_worker_status", **self._structured_status_log_summary(reason))
+            self._last_browser_worker_status_log_ms = self._now_ms()
             self._mark_status_activity()
         elif self._should_log_status_heartbeat():
             self._log_event("browser_worker_heartbeat", **self._heartbeat_payload())
@@ -272,7 +278,7 @@ class BrowserAsrGateway:
         return self._state.model_copy()
 
     def _structured_status_log_summary(self, reason: str | None) -> dict[str, Any]:
-        """Small payload for runtime-events.jsonl; full state remains in diagnostics / runtime API."""
+        """Small payload for runtime-events.log; full state remains in diagnostics / runtime API."""
         s = self._state
         return {
             "reason": reason,
@@ -351,11 +357,62 @@ class BrowserAsrGateway:
             return False
         if reason in {"socket-open", "user-stop", "terminal-error", "microphone-permission-failed"}:
             return True
-        previous_snapshot = self._material_status_snapshot(previous_state)
-        current_snapshot = self._material_status_snapshot(self._state)
-        if previous_snapshot != current_snapshot:
+        prev_core = self._core_status_snapshot(previous_state)
+        cur_core = self._core_status_snapshot(self._state)
+        if prev_core != cur_core:
             return True
-        return False
+        prev_mat = self._material_status_snapshot(previous_state)
+        cur_mat = self._material_status_snapshot(self._state)
+        if prev_mat == cur_mat:
+            return False
+        return (self._now_ms() - self._last_browser_worker_status_log_ms) >= int(
+            self._DETAIL_ONLY_STATUS_LOG_MIN_INTERVAL_MS
+        )
+
+    def _core_status_snapshot(self, state: BrowserAsrDiagnostics) -> tuple[Any, ...]:
+        """Subset of fields that reflect user-observable / supervisor behavior (not per-tick RMS or result cursor)."""
+        return (
+            state.worker_connected,
+            state.desired_running,
+            state.recognition_running,
+            state.recognition_state,
+            state.supervisor_state,
+            state.websocket_ready,
+            state.browser_mode,
+            state.start_mode,
+            state.provider_name,
+            state.session_id,
+            state.client_segment_id,
+            state.generation_id,
+            state.active_recognition,
+            state.active_media_stream,
+            state.pending_start,
+            state.effective_continuous_mode,
+            state.recognition_continuous,
+            state.forced_final,
+            state.last_session_started_at_ms,
+            state.last_session_ended_at_ms,
+            state.browser_cycle_pending,
+            state.browser_cycle_count,
+            state.browser_minimum_reconnect_suppressed_count,
+            state.browser_forced_final_on_interruption_count,
+            state.mic_track_ready_state,
+            state.mic_track_muted,
+            state.get_user_media_last_error,
+            state.mic_stream_active,
+            state.audio_track_live,
+            state.audio_track_ready_state,
+            state.audio_track_muted,
+            state.fallback_used,
+            state.visibility_state,
+            state.last_error,
+            state.error_type,
+            state.degraded_reason,
+            state.rearm_count,
+            state.restart_count,
+            state.watchdog_rearm_count,
+            state.stopping_since_ms,
+        )
 
     def _material_status_snapshot(self, state: BrowserAsrDiagnostics) -> tuple[Any, ...]:
         return (

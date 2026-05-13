@@ -489,7 +489,7 @@ Created next to the executable:
   - `bootstrap-launcher.log`
   - `desktop-launcher.log`
   - `backend.log`
-  - `runtime-events.jsonl`
+  - `runtime-events.log`
   - `session-latest.jsonl`
   - browser/client logs as applicable to the current runtime path
 
@@ -500,7 +500,7 @@ Useful diagnostics paths:
 - backend/runtime failures:
   - inspect `logs/backend.log`
 - structured runtime events:
-  - inspect `logs/runtime-events.jsonl`
+  - inspect `logs/runtime-events.log`
 - latest dashboard/overlay/browser-worker client events:
   - inspect `logs/session-latest.jsonl`
 

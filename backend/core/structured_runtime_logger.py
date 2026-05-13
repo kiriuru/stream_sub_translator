@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from backend.core.compact_log_line import format_structured_runtime_line
 from backend.core.redaction import redact_mapping
 from backend.core.structured_log_compact import compact_mapping_for_runtime_log
 
 
 class StructuredRuntimeLogger:
-    _LOG_FILE = "runtime-events.jsonl"
+    _LOG_FILE = "runtime-events.log"
 
     def __init__(
         self,
@@ -30,7 +30,7 @@ class StructuredRuntimeLogger:
         """
         Truncate the current runtime events log on app startup.
 
-        The export service already treats `runtime-events.jsonl` as "latest" diagnostics; keeping old
+        The export service already treats `runtime-events.log` as "latest" diagnostics; keeping old
         runs in the same file makes session exports noisy and can confuse postmortem inspection.
         Rotation is still used within a single run to cap disk usage.
         """
@@ -80,7 +80,7 @@ class StructuredRuntimeLogger:
 
     def _write_record(self, record: Mapping[str, Any]) -> None:
         try:
-            line = json.dumps(record, ensure_ascii=False, sort_keys=True)
+            line = format_structured_runtime_line(record)
         except Exception:
             return
         try:

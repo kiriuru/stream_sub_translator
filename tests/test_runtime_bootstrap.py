@@ -72,7 +72,7 @@ class RuntimeBootstrapperSeedTests(unittest.TestCase):
         legacy_logs_dir = self.root / "user-data" / "logs"
         legacy_logs_dir.mkdir(parents=True, exist_ok=True)
         (legacy_logs_dir / "backend.log").write_text("legacy-backend", encoding="utf-8")
-        (legacy_logs_dir / "runtime-events.jsonl").write_text("legacy-runtime", encoding="utf-8")
+        (legacy_logs_dir / "runtime-events.log").write_text("legacy-runtime", encoding="utf-8")
 
         paths = SimpleNamespace(
             project_root=self.root,
@@ -90,7 +90,7 @@ class RuntimeBootstrapperSeedTests(unittest.TestCase):
         ensure_runtime_layout(paths)
 
         self.assertTrue((paths.logs_dir / "backend.log").exists())
-        self.assertTrue((paths.logs_dir / "runtime-events.jsonl").exists())
+        self.assertTrue((paths.logs_dir / "runtime-events.log").exists())
         self.assertFalse(legacy_logs_dir.exists())
         self.assertTrue((paths.data_dir / "models" / "README.txt").exists())
 

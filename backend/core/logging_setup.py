@@ -4,15 +4,18 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from backend.core.compact_log_line import format_backend_log_line
 from backend.core.redaction import redact_text
 
 
 _HANDLER_NAME = "sst-backend-log"
 
 
-class RedactingFormatter(logging.Formatter):
+class CompactRedactingFormatter(logging.Formatter):
+    """Streamer.bot-style lines: ``[YYYY-MM-DD HH:MM:SS.mmm INF] Translation Dispatcher :: ...``."""
+
     def format(self, record: logging.LogRecord) -> str:
-        return redact_text(super().format(record))
+        return redact_text(format_backend_log_line(record))
 
 
 def configure_backend_logging(logs_dir: Path) -> Path:
@@ -48,7 +51,7 @@ def configure_backend_logging(logs_dir: Path) -> Path:
     )
     handler._sst_handler_name = _HANDLER_NAME
     handler.setLevel(logging.INFO)
-    handler.setFormatter(RedactingFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    handler.setFormatter(CompactRedactingFormatter())
 
     if root_logger.level == logging.NOTSET or root_logger.level > logging.INFO:
         root_logger.setLevel(logging.INFO)

@@ -65,6 +65,9 @@ class BrowserWorkerContractTests(unittest.TestCase):
         self.assertIn("watchdog forced rearm", self.manager_js)
         self.assertIn("_runWatchdog()", self.manager_js)
         self.assertIn("recognition.start deferred: recognition is stopping", self.manager_js)
+        self.assertIn("_appendLogThrottled", self.manager_js)
+        self.assertIn("_recognitionStartBurstThrottle", self.manager_js)
+        self.assertIn("recognitionStartLogMinGapMs", self.manager_js)
 
     def test_supervisor_keeps_pending_start_generation_and_visibility_guards(self) -> None:
         self.assertIn("pendingStart", self.manager_js)

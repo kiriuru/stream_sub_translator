@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from backend.core.browser_asr_gateway import BrowserAsrGateway
 
@@ -303,6 +304,40 @@ class BrowserAsrGatewayTests(unittest.TestCase):
         self.assertTrue(experimental_records)
         self.assertIn("experimental_worker_loaded", [record["event"] for record in experimental_records])
         self.assertIn("audio_track_start_attempt", [record["event"] for record in experimental_records])
+
+    def test_detail_only_worker_status_not_spammed_within_window(self) -> None:
+        logger = _RecordingStructuredLogger()
+        gateway = BrowserAsrGateway(structured_logger=logger)
+        gateway.worker_connected()
+        logger.records.clear()
+
+        gateway.update_status(
+            {
+                "reason": "result",
+                "desired_running": True,
+                "recognition_running": True,
+                "recognition_state": "running",
+                "browser_supervisor_state": "running",
+                "mic_rms": 0.01,
+                "last_result_index": 1,
+            }
+        )
+        gateway.update_status(
+            {
+                "reason": "duplicate-partial",
+                "mic_rms": 0.55,
+                "last_result_index": 99,
+            }
+        )
+        status_events = [record for record in logger.records if record["event"] == "browser_worker_status"]
+        self.assertEqual(len(status_events), 1)
+
+        with mock.patch.object(BrowserAsrGateway, "_DETAIL_ONLY_STATUS_LOG_MIN_INTERVAL_MS", 0):
+            logger.records.clear()
+            gateway.update_status({"reason": "result", "mic_rms": 0.02, "last_result_index": 2})
+            gateway.update_status({"reason": "result", "mic_rms": 0.03, "last_result_index": 3})
+        status_events_interval_off = [record for record in logger.records if record["event"] == "browser_worker_status"]
+        self.assertEqual(len(status_events_interval_off), 2)
 
 
 if __name__ == "__main__":

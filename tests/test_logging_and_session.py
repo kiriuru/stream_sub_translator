@@ -71,7 +71,7 @@ class LoggingAndSessionTests(unittest.TestCase):
             logs_dir = root / "logs"
             logs_dir.mkdir(parents=True, exist_ok=True)
             (logs_dir / "backend.log").write_text("", encoding="utf-8")
-            (logs_dir / "runtime-events.jsonl").write_text("", encoding="utf-8")
+            (logs_dir / "runtime-events.log").write_text("", encoding="utf-8")
             (logs_dir / "session-latest.jsonl").write_text("", encoding="utf-8")
 
             app = SimpleNamespace(
@@ -95,8 +95,29 @@ class LoggingAndSessionTests(unittest.TestCase):
             manifest = service._build_manifest()  # noqa: SLF001
 
         self.assertIn("backend.log", manifest["files"])
-        self.assertIn("runtime-events.jsonl", manifest["files"])
+        self.assertIn("runtime-events.log", manifest["files"])
         self.assertIn("session-latest.jsonl", manifest["files"])
+
+    def test_backend_log_uses_streamer_bot_style_compact_lines(self) -> None:
+        import logging
+
+        from backend.core.logging_setup import CompactRedactingFormatter
+
+        record = logging.LogRecord(
+            name="backend.core.translation_dispatcher",
+            level=logging.INFO,
+            pathname="x",
+            lineno=1,
+            msg="Dropping stale translation result for sequence=%s target=%s",
+            args=(42, "ja"),
+            exc_info=None,
+        )
+        line = CompactRedactingFormatter().format(record)
+        self.assertRegex(
+            line,
+            r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} INF\] Translation Dispatcher :: "
+            r"Dropping stale translation result for sequence=42 target=ja$",
+        )
 
     def test_backend_logging_configures_httpx_warning_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

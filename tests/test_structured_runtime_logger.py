@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -12,13 +11,13 @@ from backend.core.structured_runtime_logger import StructuredRuntimeLogger
 class StructuredRuntimeLoggerTests(unittest.TestCase):
     def test_init_truncates_existing_log(self) -> None:
         with TemporaryDirectory() as temp_dir:
-            log_path = Path(temp_dir) / "runtime-events.jsonl"
-            log_path.write_text('{"old": true}\n', encoding="utf-8")
+            log_path = Path(temp_dir) / "runtime-events.log"
+            log_path.write_text("old line\n", encoding="utf-8")
             logger = StructuredRuntimeLogger(Path(temp_dir))
             _ = logger
             self.assertEqual(log_path.read_text(encoding="utf-8"), "")
 
-    def test_writes_valid_jsonl(self) -> None:
+    def test_writes_compact_text_line(self) -> None:
         with TemporaryDirectory() as temp_dir:
             logger = StructuredRuntimeLogger(Path(temp_dir))
             logger.log(
@@ -28,15 +27,14 @@ class StructuredRuntimeLoggerTests(unittest.TestCase):
                 payload={"sequence": 9, "provider": "stub", "latency_ms": 12.5},
             )
 
-            log_path = Path(temp_dir) / "runtime-events.jsonl"
+            log_path = Path(temp_dir) / "runtime-events.log"
             lines = log_path.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(lines), 1)
-            record = json.loads(lines[0])
-            self.assertEqual(record["event"], "translation_job_started")
-            self.assertEqual(record["channel"], "translation_dispatcher")
-            self.assertEqual(record["source"], "translation_dispatcher")
-            self.assertEqual(record["sequence"], 9)
-            self.assertEqual(record["provider"], "stub")
+            line = lines[0]
+            self.assertRegex(line, r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} DBG\] Translation Dispatcher :: translation_job_started")
+            self.assertIn("latency_ms=12.5", line)
+            self.assertIn("provider=stub", line)
+            self.assertIn("sequence=9", line)
 
     def test_redacts_secrets(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -58,15 +56,11 @@ class StructuredRuntimeLoggerTests(unittest.TestCase):
                 },
             )
 
-            record = json.loads((Path(temp_dir) / "runtime-events.jsonl").read_text(encoding="utf-8").splitlines()[0])
-            self.assertEqual(record["api_key"], "[redacted]")
-            self.assertEqual(record["token"], "[redacted]")
-            self.assertEqual(record["access_token"], "[redacted]")
-            self.assertEqual(record["refresh_token"], "[redacted]")
-            self.assertEqual(record["nested"]["pair_code"], "[redacted]")
-            self.assertEqual(record["nested"]["authorization"], "[redacted]")
-            self.assertEqual(record["nested"]["client_secret"], "[redacted]")
-            self.assertEqual(record["nested"]["credentials_blob"], "[redacted]")
+            line = (Path(temp_dir) / "runtime-events.log").read_text(encoding="utf-8").splitlines()[0]
+            self.assertIn("api_key=[redacted]", line)
+            self.assertIn("token=[redacted]", line)
+            self.assertNotIn("secret-value", line)
+            self.assertNotIn("oauth-token", line)
 
     def test_write_failures_are_best_effort(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -84,12 +78,11 @@ class StructuredRuntimeLoggerTests(unittest.TestCase):
                 source="browser_asr_gateway",
                 payload={"error": long_msg, "code": 42},
             )
-            log_path = Path(temp_dir) / "runtime-events.jsonl"
-            record = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
-            err = str(record.get("error", ""))
-            self.assertLess(len(err), 300)
-            self.assertTrue(err.endswith("…"))
-            self.assertEqual(record.get("code"), 42)
+            log_path = Path(temp_dir) / "runtime-events.log"
+            line = log_path.read_text(encoding="utf-8").splitlines()[0]
+            self.assertIn("code=42", line)
+            self.assertLess(len(line), 500)
+            self.assertIn("error=", line)
 
     def test_experimental_browser_channel_is_recorded_in_runtime_events(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -100,9 +93,8 @@ class StructuredRuntimeLoggerTests(unittest.TestCase):
                 payload={"browser_mode": "browser_google_experimental", "chunk": "not-audio-data"},
             )
 
-            log_path = Path(temp_dir) / "runtime-events.jsonl"
-            record = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
-            self.assertEqual(record["event"], "audio_track_start_attempt")
-            self.assertEqual(record["channel"], "browser_recognition_experimental")
-            self.assertEqual(record["browser_mode"], "browser_google_experimental")
-            self.assertEqual(record["chunk"], "not-audio-data")
+            log_path = Path(temp_dir) / "runtime-events.log"
+            line = log_path.read_text(encoding="utf-8").splitlines()[0]
+            self.assertIn("audio_track_start_attempt", line)
+            self.assertIn("browser_mode=browser_google_experimental", line)
+            self.assertIn("chunk=not-audio-data", line)
