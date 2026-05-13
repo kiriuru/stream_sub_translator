@@ -171,6 +171,25 @@ class ObsCaptionOutputTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(output.requests, [("SendStreamCaption", {"captionText": "Hello"})])
 
+    async def test_debug_mirror_dedups_set_input_settings_when_enabled(self) -> None:
+        config = _base_config()
+        config["obs_closed_captions"]["enabled"] = True
+        config["obs_closed_captions"]["output_mode"] = "source_final_only"
+        config["obs_closed_captions"]["debug_mirror"]["enabled"] = True
+        config["obs_closed_captions"]["debug_mirror"]["input_name"] = "CC_DEBUG"
+        output = RecordingObsCaptionOutput(config)
+
+        await output._handle_source_final("Hello")
+        await output._handle_source_final("Hello")
+
+        self.assertEqual(
+            output.requests,
+            [
+                ("SetInputSettings", {"inputName": "CC_DEBUG", "inputSettings": {"text": "Hello"}, "overlay": True}),
+                ("SendStreamCaption", {"captionText": "Hello"}),
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

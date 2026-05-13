@@ -476,12 +476,23 @@ class ObsCaptionOutput:
         settings = self._settings()
         if not send_stream_caption and not mirror_debug_text:
             return
-        if (
-            send_stream_caption
-            and not force
-            and bool(settings["timing"]["avoid_duplicate_text"])
-            and normalized == (self._last_caption_text or "")
-        ):
+        avoid_duplicates = bool(settings["timing"]["avoid_duplicate_text"])
+        debug_input_name = self._debug_input_name(settings)
+
+        should_send_debug = bool(mirror_debug_text and debug_input_name)
+        should_send_caption = bool(send_stream_caption)
+
+        if avoid_duplicates and not force:
+            if should_send_caption and normalized == (self._last_caption_text or ""):
+                should_send_caption = False
+            if (
+                should_send_debug
+                and normalized == (self._last_debug_text or "")
+                and str(debug_input_name or "") == str(self._last_debug_input_name or "")
+            ):
+                should_send_debug = False
+
+        if not should_send_caption and not should_send_debug:
             return
 
         had_active_connection = self._connected and self._websocket is not None
@@ -500,20 +511,18 @@ class ObsCaptionOutput:
 
         try:
             timestamp = datetime.now(timezone.utc).isoformat()
-            debug_input_name = self._debug_input_name(settings)
-            if mirror_debug_text:
-                if debug_input_name:
-                    await self._send_request(
-                        "SetInputSettings",
-                        {
-                            "inputName": debug_input_name,
-                            "inputSettings": {"text": normalized},
-                            "overlay": True,
-                        },
-                    )
-                    self._last_debug_text = normalized
-                    self._last_debug_input_name = debug_input_name
-            if send_stream_caption:
+            if should_send_debug and debug_input_name:
+                await self._send_request(
+                    "SetInputSettings",
+                    {
+                        "inputName": debug_input_name,
+                        "inputSettings": {"text": normalized},
+                        "overlay": True,
+                    },
+                )
+                self._last_debug_text = normalized
+                self._last_debug_input_name = debug_input_name
+            if should_send_caption:
                 try:
                     await self._send_request("SendStreamCaption", {"captionText": normalized})
                     self._last_caption_text = normalized
