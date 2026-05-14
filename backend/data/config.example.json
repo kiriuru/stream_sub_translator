@@ -1,5 +1,5 @@
 {
-  "config_version": 6,
+  "config_version": 7,
   "profile": "default",
   "ui": {
     "language": "",
@@ -271,5 +271,12 @@
     "sync_source_and_translation_expiry": true,
     "keep_completed_translation_during_active_partial": true,
     "hard_max_phrase_ms": 5500
+  },
+  "source_text_replacement": {
+    "enabled": false,
+    "include_builtin": true,
+    "case_insensitive": true,
+    "whole_words": true,
+    "pairs": []
   }
 }

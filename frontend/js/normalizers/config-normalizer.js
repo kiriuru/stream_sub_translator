@@ -524,6 +524,26 @@ export function normalizeConfigShape(config) {
 
   normalized.targets = [...translation.target_languages];
 
+  if (!normalized.source_text_replacement || typeof normalized.source_text_replacement !== "object") {
+    normalized.source_text_replacement = {};
+  }
+  const strRepl = normalized.source_text_replacement;
+  strRepl.enabled = strRepl.enabled === true;
+  strRepl.include_builtin = strRepl.include_builtin !== false;
+  strRepl.case_insensitive = strRepl.case_insensitive !== false;
+  strRepl.whole_words = strRepl.whole_words !== false;
+  if (!Array.isArray(strRepl.pairs)) {
+    strRepl.pairs = [];
+  }
+  strRepl.pairs = strRepl.pairs
+    .filter((p) => p && typeof p === "object")
+    .map((p) => ({
+      source: String(p.source || "").trim(),
+      target: String(p.target || ""),
+    }))
+    .filter((p) => p.source)
+    .slice(0, 100);
+
   const subtitleOutput = normalized.subtitle_output;
   subtitleOutput.show_source = subtitleOutput.show_source !== false;
   subtitleOutput.show_translations = subtitleOutput.show_translations !== false;

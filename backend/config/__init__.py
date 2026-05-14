@@ -14,6 +14,7 @@ from backend.config.defaults import build_default_config
 from backend.config.normalizers.asr import normalize_asr_config
 from backend.config.normalizers.obs import normalize_obs_closed_captions_config
 from backend.config.normalizers.remote import normalize_remote_config
+from backend.config.normalizers.source_text_replacement import normalize_source_text_replacement_config
 from backend.config.normalizers.subtitles import (
     normalize_subtitle_lifecycle_config,
     normalize_subtitle_output_config,
@@ -273,6 +274,10 @@ class LocalConfigManager:
             defaults=self.default_config()["subtitle_lifecycle"],
             fallback_realtime=normalized["asr"]["realtime"],
             fallback_realtime_defaults=self.default_config()["asr"]["realtime"],
+        )
+        normalized["source_text_replacement"] = normalize_source_text_replacement_config(
+            normalized.get("source_text_replacement", {}),
+            defaults=self.default_config()["source_text_replacement"],
         )
         normalized["asr"]["realtime"]["finalization_hold_ms"] = normalized["subtitle_lifecycle"]["pause_to_finalize_ms"]
         normalized["asr"]["realtime"]["max_segment_ms"] = normalized["subtitle_lifecycle"]["hard_max_phrase_ms"]

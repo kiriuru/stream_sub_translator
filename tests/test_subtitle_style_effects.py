@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from backend.core.subtitle_style import normalize_subtitle_style_config
+from backend.core.subtitle_style import merge_style_presets, normalize_subtitle_style_config
 
 
 class SubtitleStyleEffectsTests(unittest.TestCase):
@@ -23,6 +23,13 @@ class SubtitleStyleEffectsTests(unittest.TestCase):
         }
         normalized = normalize_subtitle_style_config(payload)
         self.assertEqual(normalized["base"]["effect"], "none")
+
+    def test_builtin_presets_include_accessibility_dark_cinema_meeting_soft(self) -> None:
+        catalog = merge_style_presets()
+        for key in ("accessibility_high_contrast", "dark_cinema", "meeting_soft"):
+            with self.subTest(preset=key):
+                self.assertIn(key, catalog)
+                self.assertTrue(catalog[key].get("built_in"))
 
 
 if __name__ == "__main__":

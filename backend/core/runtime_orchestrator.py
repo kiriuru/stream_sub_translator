@@ -261,6 +261,7 @@ class RuntimeOrchestrator:
             publish_transcript=lambda event: self._broadcast_transcript(event),
             publish_source_event=self._output.publish_source_event,
             default_source_lang=str(self.config_getter().get("source_lang", "auto") or "auto"),
+            config_getter=self.config_getter,
         )
         # NOTE: hook-based generic SpeechSource factory removed in favor of concrete SpeechSource implementations.
         self._browser_speech_source = BrowserSpeechSource(

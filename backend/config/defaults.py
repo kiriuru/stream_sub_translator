@@ -229,4 +229,11 @@ def build_default_config(prefer_gpu_default: bool) -> dict[str, Any]:
             "keep_completed_translation_during_active_partial": True,
             "hard_max_phrase_ms": 5500,
         },
+        "source_text_replacement": {
+            "enabled": False,
+            "include_builtin": True,
+            "case_insensitive": True,
+            "whole_words": True,
+            "pairs": [],
+        },
     }

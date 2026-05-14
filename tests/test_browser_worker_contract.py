@@ -7,6 +7,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 GOOGLE_ASR_HTML = PROJECT_ROOT / "frontend" / "google_asr.html"
 BROWSER_ASR_MANAGER_JS = PROJECT_ROOT / "frontend" / "js" / "browser-asr-session-manager.js"
+WEB_SPEECH_RECOGNITION_POLICY_JS = PROJECT_ROOT / "frontend" / "js" / "browser-web-speech-recognition-policy.js"
 GOOGLE_ASR_EXPERIMENTAL_HTML = PROJECT_ROOT / "frontend" / "google_asr_experimental.html"
 BROWSER_ASR_AUDIO_TRACK_MANAGER_JS = (
     PROJECT_ROOT / "frontend" / "js" / "browser-asr-audio-track-session-manager.js"
@@ -15,6 +16,7 @@ RUNTIME_PANEL_JS = PROJECT_ROOT / "frontend" / "js" / "panels" / "runtime-panel.
 ASR_PANEL_JS = PROJECT_ROOT / "frontend" / "js" / "panels" / "asr-panel.js"
 INDEX_HTML = PROJECT_ROOT / "frontend" / "index.html"
 DESKTOP_JS = PROJECT_ROOT / "frontend" / "js" / "desktop.js"
+SOURCE_TEXT_REPLACEMENT_PANEL_JS = PROJECT_ROOT / "frontend" / "js" / "panels" / "source-text-replacement-panel.js"
 
 
 class BrowserWorkerContractTests(unittest.TestCase):
@@ -22,19 +24,28 @@ class BrowserWorkerContractTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.html = GOOGLE_ASR_HTML.read_text(encoding="utf-8")
         cls.manager_js = BROWSER_ASR_MANAGER_JS.read_text(encoding="utf-8")
+        cls.web_speech_policy_js = WEB_SPEECH_RECOGNITION_POLICY_JS.read_text(encoding="utf-8")
         cls.experimental_html = GOOGLE_ASR_EXPERIMENTAL_HTML.read_text(encoding="utf-8")
         cls.experimental_manager_js = BROWSER_ASR_AUDIO_TRACK_MANAGER_JS.read_text(encoding="utf-8")
         cls.runtime_panel_js = RUNTIME_PANEL_JS.read_text(encoding="utf-8")
         cls.asr_panel_js = ASR_PANEL_JS.read_text(encoding="utf-8")
         cls.index_html = INDEX_HTML.read_text(encoding="utf-8")
         cls.desktop_js = DESKTOP_JS.read_text(encoding="utf-8")
+        cls.source_text_replacement_panel_js = SOURCE_TEXT_REPLACEMENT_PANEL_JS.read_text(encoding="utf-8")
 
     def test_hidden_or_minimized_window_warning_is_present(self) -> None:
         self.assertIn("hidden or minimized", self.html)
         self.assertIn("recognition can stall", self.html)
 
     def test_worker_page_loads_external_session_manager(self) -> None:
-        self.assertIn('/static/js/browser-asr-session-manager.js', self.html)
+        self.assertIn("/static/js/browser-asr-session-manager.js", self.html)
+
+    def test_worker_page_loads_web_speech_policy_before_session_manager(self) -> None:
+        self.assertIn("/static/js/browser-web-speech-recognition-policy.js", self.html)
+        policy_pos = self.html.find("browser-web-speech-recognition-policy.js")
+        manager_pos = self.html.find("browser-asr-session-manager.js")
+        self.assertGreater(policy_pos, 0)
+        self.assertGreater(manager_pos, policy_pos)
 
     def test_worker_page_keeps_only_ui_glue_and_uses_session_manager_for_runtime(self) -> None:
         self.assertNotIn("function ensureRecognition()", self.html)
@@ -50,6 +61,13 @@ class BrowserWorkerContractTests(unittest.TestCase):
         self.assertIn('"audio-capture"', self.manager_js)
         self.assertIn("audio_capture_recovery", self.manager_js)
         self.assertIn('this._setSupervisorState("fatal")', self.manager_js)
+        self.assertIn("phrases-not-supported", self.manager_js)
+        self.assertIn("language-not-supported", self.manager_js)
+
+    def test_manager_supports_recognition_overlap_and_soft_web_speech_fallbacks(self) -> None:
+        self.assertIn("_createOverlapRecognitionPair", self.manager_js)
+        self.assertIn("overlap: pre-started buddy recognition slot", self.manager_js)
+        self.assertIn("shouldEnableRecognitionOverlap", self.web_speech_policy_js)
 
     def test_supervisor_uses_controlled_restart_and_watchdog_exists(self) -> None:
         self.assertIn("normal_onend: 350", self.manager_js)
@@ -169,6 +187,11 @@ class BrowserWorkerContractTests(unittest.TestCase):
 
     def test_experimental_worker_page_exists_and_loads_dedicated_audio_track_manager(self) -> None:
         self.assertIn("/static/js/browser-asr-audio-track-session-manager.js", self.experimental_html)
+        self.assertIn("/static/js/browser-web-speech-recognition-policy.js", self.experimental_html)
+        policy_pos = self.experimental_html.find("browser-web-speech-recognition-policy.js")
+        manager_pos = self.experimental_html.find("browser-asr-session-manager.js")
+        self.assertGreater(policy_pos, 0)
+        self.assertGreater(manager_pos, policy_pos)
         self.assertIn("Web Speech Worker (Experimental)", self.experimental_html)
 
     def test_experimental_manager_uses_audio_track_start_and_default_fallback(self) -> None:
@@ -221,6 +244,17 @@ class BrowserWorkerContractTests(unittest.TestCase):
         self.assertNotIn("_".join(["google", "legacy", "http"]), self.asr_panel_js)
         self.assertIn("if (result?.runtime && mode !== \"local\")", self.runtime_panel_js)
         self.assertNotIn("_".join(["google", "legacy", "http", "experimental"]), self.runtime_panel_js)
+
+    def test_source_text_replacement_tools_use_add_remove_editor(self) -> None:
+        self.assertIn('id="str-repl-word"', self.index_html)
+        self.assertIn('id="str-repl-replace"', self.index_html)
+        self.assertIn('id="str-repl-add"', self.index_html)
+        self.assertIn('id="str-repl-remove-selected"', self.index_html)
+        self.assertIn('id="str-repl-pairs-list"', self.index_html)
+        self.assertNotIn('id="str-repl-custom"', self.index_html)
+        self.assertIn("#str-repl-add", self.source_text_replacement_panel_js)
+        self.assertIn("str-repl-remove-selected", self.source_text_replacement_panel_js)
+        self.assertIn("str-repl-pair-select", self.source_text_replacement_panel_js)
 
 
 if __name__ == "__main__":

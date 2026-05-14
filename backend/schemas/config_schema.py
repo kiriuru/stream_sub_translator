@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-CURRENT_CONFIG_VERSION = 6
+CURRENT_CONFIG_VERSION = 7
 
 
 class SchemaModel(BaseModel):
@@ -318,6 +318,21 @@ class SubtitleLifecycleConfig(SchemaModel):
     hard_max_phrase_ms: int = 5500
 
 
+class SourceTextReplacementPairConfig(SchemaModel):
+    source: str = ""
+    target: str = ""
+
+
+class SourceTextReplacementConfig(SchemaModel):
+    """Post-ASR text replacements before translation and on-screen output."""
+
+    enabled: bool = False
+    include_builtin: bool = True
+    case_insensitive: bool = True
+    whole_words: bool = True
+    pairs: list[SourceTextReplacementPairConfig] = Field(default_factory=list)
+
+
 class ConfigSchema(SchemaModel):
     config_version: int = CURRENT_CONFIG_VERSION
     profile: str = "default"
@@ -334,6 +349,7 @@ class ConfigSchema(SchemaModel):
     subtitle_output: SubtitleOutputConfig = Field(default_factory=SubtitleOutputConfig)
     subtitle_style: dict[str, Any] = Field(default_factory=dict)
     subtitle_lifecycle: SubtitleLifecycleConfig = Field(default_factory=SubtitleLifecycleConfig)
+    source_text_replacement: SourceTextReplacementConfig = Field(default_factory=SourceTextReplacementConfig)
 
 
 def build_default_config(*, prefer_gpu: bool = True) -> ConfigSchema:

@@ -7,6 +7,7 @@ import { createLogger } from "./dashboard/logging.js";
 import { getCurrentLocale } from "./dashboard/helpers.js";
 import { mountAsrPanel } from "./panels/asr-panel.js";
 import { mountDiagnosticsPanel } from "./panels/diagnostics-panel.js";
+import { mountSourceTextReplacementPanel } from "./panels/source-text-replacement-panel.js";
 import { mountModelManagerPanel } from "./panels/model-manager-panel.js";
 import { mountObsCaptionsPanel } from "./panels/obs-captions-panel.js";
 import { mountOverlayPanel } from "./panels/overlay-panel.js";
@@ -164,6 +165,7 @@ async function bootstrap() {
     mountOverlayPanel(document, { store, actions, api, ws, logger, events }),
     mountObsCaptionsPanel(document, { store, actions, api, ws, logger, events }),
     mountDiagnosticsPanel(document, { store, actions, api, ws, logger, events }),
+    mountSourceTextReplacementPanel(document, { store, actions, api, ws, logger, events }),
     mountStyleEditorPanel(document, { store, actions, api, ws, logger, events }),
     mountProfilesPanel(document, { store, actions, api, ws, logger, events }),
     mountRemotePanel(document, { store, actions, api, ws, logger, events }),

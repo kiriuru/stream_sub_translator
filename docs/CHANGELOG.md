@@ -6,7 +6,44 @@
 
 ## Unreleased
 
-После релиза `0.3.1` дополнительных изменений в `main` пока нет. Любые follow-up правки будут добавляться сюда до выпуска следующей версии.
+Изменений после фиксации релиза `0.3.2` в этом журнале пока нет.
+
+## 0.3.2
+
+### Версия и конфигурация
+
+- `backend/versioning.py`: `PROJECT_VERSION = "0.3.2"` (источник правды для `GET /api/version` и проверки обновлений).
+- `backend/schemas/config_schema.py`: `CURRENT_CONFIG_VERSION = 7`.
+- Новая секция конфига `source_text_replacement`: опциональная пост-ASR замена слов/фраз до перевода, субтитров и OBS captions; не влияет на распознавание.
+- `backend/data/source_text_builtin_pairs.json`: стартовый список пар (английский + русский), заменяемый/дополняемый пользовательскими парами в UI.
+- `backend/core/source_text_replacement.py`, `backend/config/normalizers/source_text_replacement.py`, правки `LocalConfigManager`, `TranscriptController`, `runtime_orchestrator`.
+- `backend/data/config.example.json`: версия `7` и блок `source_text_replacement`.
+- Регрессии: `tests/test_source_text_replacement.py`, расширены `tests/test_config_migrations.py`, `tests/test_runtime_status_contract.py`.
+
+### Dashboard и i18n
+
+- `frontend/index.html`, `frontend/js/panels/source-text-replacement-panel.js`, `frontend/js/main.js`, `frontend/js/normalizers/config-normalizer.js`, `frontend/js/i18n.js`, `frontend/css/app.css`: вкладка **Инструменты и данные** — блок «После распознавания / замена слов» (вкл/выкл, встроенный список, регистр, целые слова; свои пары: два поля «слово» и «замена», кнопка «Добавить», список с выбором чекбоксами и одна кнопка «Удалить выбранные»; для применения к запущенному backend — глобальное **Сохранить**).
+- Справка Help: уточнён текст `help.tools.body` (EN/RU) про пост-ASR слой.
+
+### Web Speech worker (браузер)
+
+- `frontend/js/browser-web-speech-recognition-policy.js`: политика overlap-сессий (по умолчанию при `continuous=false`) и утилиты для будущих on-device/phrase hints.
+- `frontend/js/browser-asr-session-manager.js`: двойной экземпляр `SpeechRecognition` с предстартом «buddy» после финала (снижение разрыва между сессиями Chrome); мягкий повтор при `phrases-not-supported` и одна попытка после `language-not-supported` со сбросом Chrome on-device hints; игнорирование шумного `aborted` на активном слоте при уже запущенном buddy.
+
+### Субтитры и OBS
+
+- `backend/core/subtitle_style.py`: пресеты `accessibility_high_contrast`, `dark_cinema`, `meeting_soft` (ориентиры: доступность, тёмная сцена, спокойный «встречный» вид).
+- `backend/core/obs_caption_output.py`, правки стиля/версионирования по мере выравнивания релиза (см. git-историю ветки).
+
+### Документация
+
+- `docs/TECHNICAL_ARCHITECTURE.md`: актуализация под `0.3.2`, `config_version` 7, поток `source_text_replacement`, **расширенный раздел про локальный NVIDIA Parakeet** (VAD, очередь сегментов, RNNoise, два провайдера quality vs low-latency, связь с `subtitle_lifecycle`).
+- `README.md` / `README.ru.md`: версия `0.3.2`, ссылка на `docs/DESKTOP_RELEASE_CHANGELOG_0.3.2.md`.
+- `docs/DESKTOP_RELEASE_CHANGELOG_0.3.2.md`: delta release notes для установленных папок релиза.
+
+### Тесты
+
+- Полный прогон: `python -m unittest discover -s tests` — **298** тестов, `OK` (на момент фиксации релиза).
 
 ## 0.3.1
 

@@ -11,7 +11,7 @@ from helpers import AppStateSandbox
 class RuntimeStatusContractTests(unittest.TestCase):
     def test_runtime_status_exposes_typed_runtime_sections(self) -> None:
         config = {
-            "config_version": 6,
+            "config_version": 7,
             "source_lang": "ru",
             "asr": {"mode": "local", "provider_preference": "official_eu_parakeet_low_latency"},
             "translation": {

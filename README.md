@@ -1,8 +1,8 @@
-# SST Desktop 0.3.1
+# SST Desktop 0.3.2
 
 SST Desktop is a local Windows application for real-time speech recognition, optional translation, subtitle routing, and OBS-ready output.
 
-This README describes the current desktop product surface for the `0.3.1` code line.
+This README describes the current desktop product surface for the `0.3.2` code line.
 
 ## Language
 
@@ -12,25 +12,21 @@ This README describes the current desktop product surface for the `0.3.1` code l
 
 - Full technical architecture document: [docs/TECHNICAL_ARCHITECTURE.md](./docs/TECHNICAL_ARCHITECTURE.md)
 - Unified changelog: [docs/CHANGELOG.md](./docs/CHANGELOG.md)
-- `0.3.1` delta notes: [docs/DESKTOP_RELEASE_CHANGELOG_0.3.1.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.3.1.md)
-- Current branch follow-up notes (after `0.3.1`): `docs/CHANGELOG.md` -> `Unreleased`
+- `0.3.2` delta notes: [docs/DESKTOP_RELEASE_CHANGELOG_0.3.2.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.3.2.md)
+- Previous delta (`0.3.1`): [docs/DESKTOP_RELEASE_CHANGELOG_0.3.1.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.3.1.md)
+- Current branch follow-up notes (after `0.3.2`): `docs/CHANGELOG.md` → `Unreleased`
 
 ## Release Highlights
 
-`0.3.1` is a stabilization release on top of `0.3.0`. Public contracts (`/api`, WebSocket payloads, overlay/runtime/transcript shapes) do not change. The local-first product baseline is preserved.
+`0.3.2` ships optional **post-ASR word replacement** before translation and on-screen output (Tools & Data), bumps saved config to **`config_version` 7** with new `source_text_replacement` settings, continues **Web Speech** reliability work (policy module + session manager), adds **subtitle style presets** (`accessibility_high_contrast`, `dark_cinema`, `meeting_soft`), and expands **`docs/TECHNICAL_ARCHITECTURE.md`** with a full **local Parakeet** chapter (audio capture, RNNoise, VAD, segment queue, quality vs low-latency model paths). Public HTTP routes stay the same; older configs pick up defaults on load.
 
-- `backend/versioning.py::PROJECT_VERSION = "0.3.1"` is the single source of truth.
-- `RuntimeOrchestrator` is now a facade over explicit controllers in `backend/core/runtime/` (state, lifecycle, metrics, session, segments, browser-worker bookkeeping, speech sources, audio capture, processing tasks, translation runtime, transcript pipeline, output fanout).
-- `SubtitleRouter` is split into `subtitle_lifecycle_core.py` (FSM, TTL, relevance), `subtitle_presentation.py` (payload assembly, slot styling, partial/final merging), and a thin publish facade.
-- Translation providers moved into a dedicated `backend/translation/providers/` package; the translation cache (`backend/core/cache_manager.py`) is an in-memory LRU with debounced disk persistence and quarantine for corrupt cache files.
-- Config writes are atomic on Windows (`backend/core/atomic_io.py` via `os.replace()`), and a corrupt `user-data/config.json` is safely rotated into `*.corrupt-<timestamp>.json` while the app boots on defaults.
-- Translation routing is managed through stable `translation_1 .. translation_5` slot cards with per-line provider selection; the dashboard warns when enabled lines are missing required credentials.
-- Browser Speech opens in a dedicated **Google Chrome** window with an isolated `user-data-dir`, `HIGH_PRIORITY_CLASS`, Windows 10/11 EcoQoS opt-out, Screen Wake Lock, terminal `recognition_network_unreachable` degradation, and the new `voice_below_recognition_threshold` health signal.
-- Live update check: `POST /api/updates/check` polls GitHub Releases (opt-in via `updates.enabled`), persists `updates.latest_known_version` + `updates.last_checked_utc`, and the bootstrap launcher silently prompts only when a newer version is available.
-- OpenAI helper endpoints (`GET /api/openai/recommended-models`, `POST /api/openai/models`, `POST /api/openai/usable-models`) let the dashboard populate the `model` field without storing keys in the browser.
-- User-facing logs live under root `logs/` (legacy `user-data/logs/` migrates on startup); local ASR models stay under `user-data/models/`.
-- Built-in subtitle effects now include `none`, `fade`, `subtle_pop`, `slide_up`, `zoom_in`, `blur_in`, `glow` and apply both in dashboard preview and OBS overlay.
-- A `Help` dashboard tab is wired in after `Tools & Data`, organized as topic tabs (overview, recognition/tuning, translation, subtitles/style, OBS, tools/diagnostics, desktop/remote).
+The `0.3.1` stabilization baseline still applies (modular runtime controllers, `SubtitleRouter` split, `backend/translation/providers`, atomic config + corrupt rotation, translation slot cards `translation_1..translation_5`, Chrome worker window hardening, `POST /api/updates/check`, OpenAI model helper routes, Help tab, subtitle entrance effects, logs under `logs/`). See the `0.3.1` delta doc for that narrative.
+
+- `backend/versioning.py::PROJECT_VERSION = "0.3.2"` is the single source of truth.
+- Optional **word replacement** layer: `backend/core/source_text_replacement.py`, bundled pairs `backend/data/source_text_builtin_pairs.json`, Tools & Data UI (`source-text-replacement-panel.js`: word/replacement fields, add list, checkbox multi-select + single remove-selected, global Save to apply live), wired through `TranscriptController` so subtitles, translation, and OBS captions see the filtered text.
+- **Web Speech:** `frontend/js/browser-web-speech-recognition-policy.js`; further `browser-asr-session-manager.js` improvements (buddy `SpeechRecognition`, Chrome error recovery).
+- **Styles:** additional built-in presets in `backend/core/subtitle_style.py`.
+- **Docs / tests:** architecture doc refresh; `298` unit tests, `OK`, including `tests/test_source_text_replacement.py`.
 
 ## Release Package
 
@@ -199,7 +195,7 @@ The main window includes:
 
 `Start` sends the current in-memory config snapshot to `/api/runtime/start`, so unsaved dashboard changes can take effect immediately in the runtime without forcing a disk save first. The snapshot is tracked through `active_config_source = runtime_start_snapshot`, `active_config_persisted = false`, and `active_config_hash`, so it does not silently overwrite `user-data/config.json`.
 
-Visual layout was not redesigned in `0.3.1`; the major changes remain the internal modular architecture and runtime robustness inherited from `0.3.0`.
+Visual layout was not redesigned in the `0.3.x` line; major work remains internal modular architecture and runtime robustness.
 
 ## Main Tabs
 
@@ -305,7 +301,7 @@ Visual layout was not redesigned in `0.3.1`; the major changes remain the intern
 - Uses the local runtime and local audio capture path.
 - Supports GPU-first policy on compatible NVIDIA systems.
 - CPU fallback is available when needed.
-- Remains the default local AI path and is still available in `0.3.1`.
+- Remains the default local AI path in current builds.
 - `Recognition -> Backend ASR provider` now only offers `Official EU Parakeet Low Latency` and `Official EU Parakeet`.
 
 ### Web Speech
@@ -321,7 +317,7 @@ Visual layout was not redesigned in `0.3.1`; the major changes remain the intern
 - Requires browser microphone permission.
 - For stable operation, keep the worker window visible while active.
 
-Classic Web Speech in `0.3.1` includes:
+Classic Web Speech includes:
 
 - a dedicated lifecycle supervisor;
 - controlled `start/stop/restart` behavior;
@@ -402,9 +398,9 @@ sessions, suppresses duplicates, and force-finalizes on interruption the same wa
 - Disconnect/reconnect the dashboard and confirm the worker does not create a duplicate active recognition instance.
 - Close or revoke microphone access and confirm the page degrades rather than failing silently.
 
-## Runtime Robustness in 0.3.1
+## Runtime robustness (0.3.x)
 
-The runtime/event stack is substantially more defensive than in `0.2.9.2`, and `0.3.1` adds more structure on top of `0.3.0`:
+The runtime/event stack is substantially more defensive than in `0.2.9.2`, and `0.3.1` added more structure on top of `0.3.0`:
 
 - `RuntimeOrchestrator` is a facade over explicit controllers in `backend/core/runtime/` (state, lifecycle, metrics, session, segments, browser-worker bookkeeping, speech sources, audio capture, processing tasks, translation runtime, transcript pipeline, output fanout).
 - `SubtitleRouter` is split into `subtitle_lifecycle_core.py` (FSM, TTL, relevance), `subtitle_presentation.py` (payload assembly, slot styling, partial/final merging), and a thin publish facade.
@@ -438,17 +434,17 @@ Overlay remains a separate lightweight page for OBS Browser Source and auto-reco
 
 ## Config and Schema Notes
 
-`0.3.1` keeps the explicit config contract introduced in `0.3.0` and tightens it further:
+`0.3.x` keeps the explicit config contract introduced in `0.3.0` and tightens it further:
 
-- config is versioned and migrated through explicit steps (`backend/core/config_migrations.py`, current `CURRENT_CONFIG_VERSION = 6`);
-- config normalization lives under `backend/config/` (`defaults.py`, `secrets.py`, `normalizers/asr.py|browser.py|obs.py|remote.py|subtitles.py|translation.py`);
+- config is versioned and migrated through explicit steps (`backend/core/config_migrations.py`, current `CURRENT_CONFIG_VERSION = 7` in `backend/schemas/config_schema.py`);
+- config normalization lives under `backend/config/` (`defaults.py`, `secrets.py`, `normalizers/asr.py|browser.py|obs.py|remote.py|subtitles.py|translation.py|source_text_replacement.py`);
 - profiles use the same migration/normalization pipeline;
 - generated schema lives at `backend/data/config.schema.json` and is published via `python -m backend.core.config_schema_export`;
 - `translation.lines` is the slot-aware translation config surface (`translation_1..translation_5` with per-line `enabled`, `target_lang`, `provider`, `label`), while legacy `translation.provider` and `translation.target_languages` stay for compatibility;
 - legacy language-based `subtitle_output.display_order` values are migrated to slot ids like `translation_1`;
 - `/api/runtime/start` can apply an optional normalized `config_payload` snapshot for runtime-only changes without persisting `user-data/config.json` (tracked via `active_config_source = runtime_start_snapshot`, `active_config_persisted = false`, `active_config_hash`);
 - config writes are atomic on Windows (temporary file in the same folder + `os.replace()`); a corrupt `user-data/config.json` is rotated into `*.corrupt-<timestamp>.json` and defaults are restored;
-- `backend/versioning.py` (`PROJECT_VERSION = "0.3.1"`) remains the single source of truth for the app version.
+- `backend/versioning.py` (`PROJECT_VERSION = "0.3.2"`) remains the single source of truth for the app version.
 
 ## Remote Notes
 
@@ -571,7 +567,7 @@ Run the current regression suite with:
 
 - `.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`
 
-The current `0.3.1` verification run used:
+The current `0.3.2` verification run used:
 
 - `python -m compileall backend desktop tests`
 - `.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`
@@ -581,7 +577,7 @@ The current `0.3.1` verification run used:
 
 Result:
 
-- `283 tests`
+- `298 tests`
 - `OK`
 - release artifacts refreshed:
   - `dist\Stream Subtitle Translator\Stream Subtitle Translator.exe`
@@ -597,5 +593,5 @@ Result:
 
 ## Release Version
 
-- `0.3.1`
+- `0.3.2`
 - Single runtime source of truth: `backend/versioning.py` (`PROJECT_VERSION`).

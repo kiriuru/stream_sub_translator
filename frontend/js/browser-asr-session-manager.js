@@ -90,6 +90,12 @@
         pendingRestartReason: this.state.pendingRestartReason || null,
         lastRestartReason: this.state.lastRestartReason || null,
         recognition: null,
+        recognitionOverlapSlots: null,
+        recognitionOverlapActiveSlot: null,
+        recognitionOverlapPrestarted: false,
+        recognitionOverlapSlotListening: null,
+        webSpeechPhraseHintsSuppressed: Boolean(this.state.webSpeechPhraseHintsSuppressed),
+        webSpeechLanguageSoftFallbackUsed: Boolean(this.state.webSpeechLanguageSoftFallbackUsed),
         recognitionGenerationId: 0,
         effectiveContinuousMode: this.state.effectiveContinuousMode || "native_continuous",
         currentClientSegmentId: this.state.currentClientSegmentId || null,
@@ -185,6 +191,113 @@
 
     _getRecognitionSettings() {
       return this.options.getRecognitionSettings?.() || {};
+    }
+
+    _webSpeechPolicy() {
+      const root = typeof globalThis !== "undefined" ? globalThis : typeof window !== "undefined" ? window : null;
+      return root && root.SSTWebSpeechRecognitionPolicy ? root.SSTWebSpeechRecognitionPolicy : null;
+    }
+
+    _recognitionOverlapModeDesired() {
+      const policy = this._webSpeechPolicy();
+      if (policy && typeof policy.shouldEnableRecognitionOverlap === "function") {
+        return Boolean(policy.shouldEnableRecognitionOverlap(this._getRecognitionSettings()));
+      }
+      const settings = this._getRecognitionSettings();
+      return Boolean(settings && settings.continuous === false && settings.overlap_recognition_sessions !== false);
+    }
+
+    _recognitionOverlapActive() {
+      return Array.isArray(this.state.recognitionOverlapSlots) && this.state.recognitionOverlapSlots.length === 2;
+    }
+
+    _overlapResultAllowed(overlapSlotIndex) {
+      if (overlapSlotIndex == null) {
+        return true;
+      }
+      if (!this._recognitionOverlapActive()) {
+        return true;
+      }
+      const active = Number(this.state.recognitionOverlapActiveSlot || 0) % 2;
+      if (overlapSlotIndex === active) {
+        return true;
+      }
+      const buddy = (active + 1) % 2;
+      return overlapSlotIndex === buddy && Boolean(this.state.recognitionOverlapPrestarted);
+    }
+
+    _applyChromeCompatHintsToRecognition(recognition) {
+      if (!recognition || !this.state.webSpeechPhraseHintsSuppressed) {
+        return;
+      }
+      const policy = this._webSpeechPolicy();
+      if (policy && typeof policy.stripChromeOnDeviceHints === "function") {
+        policy.stripChromeOnDeviceHints(recognition);
+      }
+    }
+
+    _stripWebSpeechExperimentalHints(recognition) {
+      const policy = this._webSpeechPolicy();
+      if (policy && typeof policy.stripChromeOnDeviceHints === "function") {
+        policy.stripChromeOnDeviceHints(recognition);
+      }
+    }
+
+    _prestartOverlapBuddyIfNeeded(overlapSlotIndex) {
+      if (overlapSlotIndex == null || !this._recognitionOverlapActive()) {
+        return;
+      }
+      if (Number(this.state.recognitionOverlapActiveSlot || 0) !== overlapSlotIndex) {
+        return;
+      }
+      if (this.state.recognitionOverlapPrestarted) {
+        return;
+      }
+      const slots = this.state.recognitionOverlapSlots;
+      const buddy = (overlapSlotIndex + 1) % 2;
+      const buddyRec = slots[buddy];
+      if (!buddyRec) {
+        return;
+      }
+      if (this.state.recognitionOverlapSlotListening && this.state.recognitionOverlapSlotListening[buddy]) {
+        this.state.recognitionOverlapPrestarted = true;
+        return;
+      }
+      try {
+        buddyRec.start();
+        this.state.recognitionOverlapPrestarted = true;
+        this._appendLog("overlap: pre-started buddy recognition slot");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error || "buddy start failed");
+        this._appendLog(`overlap: buddy pre-start failed: ${message}`);
+      }
+    }
+
+    _handleOverlapRecognitionEnded(overlapSlotIndex, generationId) {
+      if (!this._recognitionOverlapActive()) {
+        return false;
+      }
+      if (!this.state.recognitionOverlapSlotListening) {
+        this.state.recognitionOverlapSlotListening = [false, false];
+      }
+      this.state.recognitionOverlapSlotListening[overlapSlotIndex] = false;
+      if (!this.state.desiredRunning) {
+        return false;
+      }
+      const active = Number(this.state.recognitionOverlapActiveSlot || 0) % 2;
+      const buddy = (active + 1) % 2;
+      if (overlapSlotIndex === active) {
+        if (this.state.recognitionOverlapSlotListening[buddy]) {
+          this.state.recognitionOverlapActiveSlot = buddy;
+          this.state.recognition = this.state.recognitionOverlapSlots[buddy];
+          this.state.recognitionOverlapPrestarted = false;
+          this._setSupervisorState("running");
+          this._setRecognitionState("running");
+          this._emitWorkerStatus("recognition-ended");
+          return true;
+        }
+      }
+      return false;
     }
 
     _isForceFinalizationEnabled() {
@@ -753,14 +866,26 @@
       this.maxNetworkBackoffMs = this.state.networkReconnectMaxMs;
       this.maxStoppingMs = Math.max(500, Number(settings.stuckStoppingTimeoutMs || this.state.stuckStoppingTimeoutMs || this.maxStoppingMs));
       this.state.stuckStoppingTimeoutMs = this.maxStoppingMs;
-      const recognition = this.state.recognition;
-      if (!recognition) {
+      const targets = [];
+      if (this._recognitionOverlapActive()) {
+        this.state.recognitionOverlapSlots.forEach((slot) => {
+          if (slot) {
+            targets.push(slot);
+          }
+        });
+      } else if (this.state.recognition) {
+        targets.push(this.state.recognition);
+      }
+      if (!targets.length) {
         this._updateCounters();
         return;
       }
-      recognition.lang = this.state.configuredLanguage;
-      recognition.interimResults = settings.interimResults !== false;
-      recognition.continuous = this.state.actualContinuous;
+      targets.forEach((recognition) => {
+        recognition.lang = this.state.configuredLanguage;
+        recognition.interimResults = settings.interimResults !== false;
+        recognition.continuous = this.state.actualContinuous;
+        this._applyChromeCompatHintsToRecognition(recognition);
+      });
       this._updateCounters();
     }
 
@@ -825,6 +950,8 @@
       this._setTerminalDegradedReason(null);
       this._resetNetworkErrorBurst();
       this._acquireWakeLock("user-start");
+      this.state.webSpeechPhraseHintsSuppressed = false;
+      this.state.webSpeechLanguageSoftFallbackUsed = false;
       this._performControlledStart("user-start");
     }
 
@@ -833,6 +960,8 @@
       this.state.desiredRunning = false;
       this.state.pendingStart = false;
       this.state.generationId = Number(this.state.generationId || 0) + 1;
+      this.state.webSpeechPhraseHintsSuppressed = false;
+      this.state.webSpeechLanguageSoftFallbackUsed = false;
       this._resetCycleState();
       this._clearAllTimers();
       this.state.currentPartial = "";
@@ -1255,16 +1384,35 @@
       return Boolean(this.state.desiredRunning);
     }
 
-    _createRecognition(generationId) {
-      const recognition = new this.SpeechRecognitionCtor();
-      recognition.maxAlternatives = 1;
+    _createOverlapRecognitionPair(generationId) {
+      const slots = [new this.SpeechRecognitionCtor(), new this.SpeechRecognitionCtor()];
+      slots[0].maxAlternatives = 1;
+      slots[1].maxAlternatives = 1;
+      this.state.recognitionOverlapSlots = slots;
+      this.state.recognitionOverlapActiveSlot = 0;
+      this.state.recognitionOverlapPrestarted = false;
+      this.state.recognitionOverlapSlotListening = [false, false];
       this.state.recognitionGenerationId = generationId;
-      this.state.recognition = recognition;
+      this.state.recognition = slots[0];
       this.applyRecognitionSettings();
+      this._wireRecognitionHandlers(slots[0], generationId, 0);
+      this._wireRecognitionHandlers(slots[1], generationId, 1);
+    }
 
+    _wireRecognitionHandlers(recognition, generationId, overlapSlotIndex) {
       recognition.onstart = () => {
         if (!this._isActiveGeneration(generationId)) {
           return;
+        }
+        if (overlapSlotIndex != null) {
+          if (!this.state.recognitionOverlapSlotListening) {
+            this.state.recognitionOverlapSlotListening = [false, false];
+          }
+          this.state.recognitionOverlapSlotListening[overlapSlotIndex] = true;
+          if (overlapSlotIndex !== Number(this.state.recognitionOverlapActiveSlot || 0) % 2) {
+            this._markActivity("start");
+            return;
+          }
         }
         this.state.lastStartAtMs = this._now();
         this.state.lastSessionStartedAtMs = this.state.lastStartAtMs;
@@ -1288,6 +1436,9 @@
         if (!this._isActiveGeneration(generationId)) {
           return;
         }
+        if (overlapSlotIndex != null && overlapSlotIndex !== Number(this.state.recognitionOverlapActiveSlot || 0) % 2) {
+          return;
+        }
         this.state.onSound = true;
         this._markActivity("sound");
         this._updateCounters();
@@ -1297,12 +1448,18 @@
         if (!this._isActiveGeneration(generationId)) {
           return;
         }
+        if (overlapSlotIndex != null && overlapSlotIndex !== Number(this.state.recognitionOverlapActiveSlot || 0) % 2) {
+          return;
+        }
         this.state.onSound = false;
         this._updateCounters();
       };
 
       recognition.onspeechstart = () => {
         if (!this._isActiveGeneration(generationId)) {
+          return;
+        }
+        if (overlapSlotIndex != null && overlapSlotIndex !== Number(this.state.recognitionOverlapActiveSlot || 0) % 2) {
           return;
         }
         this._markActivity("speech");
@@ -1316,6 +1473,41 @@
         const errorMessage = String(event?.message || "").trim();
         this._setLastError(errorKind, errorMessage);
         this._markActivity("error");
+        const policy = this._webSpeechPolicy();
+        const phrasesUnsupported =
+          (policy && typeof policy.isPhrasesNotSupportedError === "function" && policy.isPhrasesNotSupportedError(errorKind))
+          || errorKind === "phrases-not-supported";
+        if (phrasesUnsupported) {
+          this.state.webSpeechPhraseHintsSuppressed = true;
+          this.state.pendingRestartReason = "normal_onend";
+          this._setStatus("restarting");
+          this._appendLog(
+            this._locale() === "ru"
+              ? "Web Speech: phrases-not-supported — повтор без on-device phrase hints."
+              : "Web Speech: phrases-not-supported — retrying without on-device phrase hints."
+          );
+          this._emitWorkerStatus("recognition-error");
+          return;
+        }
+        const langUnsupported =
+          (policy && typeof policy.isLanguageNotSupportedError === "function" && policy.isLanguageNotSupportedError(errorKind))
+          || errorKind === "language-not-supported";
+        if (langUnsupported && !this.state.webSpeechLanguageSoftFallbackUsed) {
+          this.state.webSpeechLanguageSoftFallbackUsed = true;
+          const stripTargets = this._recognitionOverlapActive()
+            ? this.state.recognitionOverlapSlots
+            : [this.state.recognition];
+          stripTargets.forEach((rec) => this._stripWebSpeechExperimentalHints(rec));
+          this.state.pendingRestartReason = "normal_onend";
+          this._setStatus("restarting");
+          this._appendLog(
+            this._locale() === "ru"
+              ? "Web Speech: language-not-supported — одна попытка повтора после сброса on-device подсказок."
+              : "Web Speech: language-not-supported — one retry after clearing on-device hints."
+          );
+          this._emitWorkerStatus("recognition-error");
+          return;
+        }
         if (errorKind === "no-speech") {
           this.state.noSpeechCount = Number(this.state.noSpeechCount || 0) + 1;
           this.state.pendingRestartReason = "no_speech";
@@ -1343,19 +1535,41 @@
           return;
         }
         if (errorKind === "aborted") {
+          if (this._recognitionOverlapActive() && overlapSlotIndex != null) {
+            const active = Number(this.state.recognitionOverlapActiveSlot || 0) % 2;
+            const buddy = (active + 1) % 2;
+            if (
+              overlapSlotIndex === active
+              && this.state.recognitionOverlapSlotListening
+              && this.state.recognitionOverlapSlotListening[buddy]
+            ) {
+              this._emitWorkerStatus("recognition-error");
+              return;
+            }
+          }
           if (this.state.desiredRunning) {
             this.state.pendingRestartReason = "normal_onend";
           }
           this._emitWorkerStatus("recognition-error");
           return;
         }
-        if (["not-allowed", "service-not-allowed", "audio-capture", "language-not-supported"].includes(errorKind)) {
+        if (["not-allowed", "service-not-allowed", "audio-capture"].includes(errorKind)) {
           this.state.desiredRunning = false;
           this.state.pendingStart = false;
           this._clearAllTimers();
           this._setSupervisorState("fatal");
           this._setStatus(this._locale() === "ru" ? `ошибка: ${errorKind}` : `error: ${errorKind}`);
           this._setTerminalDegradedReason(errorKind === "audio-capture" ? "audio_capture_recovery" : "permission_denied");
+          this._emitWorkerStatus("terminal-error");
+          return;
+        }
+        if (langUnsupported) {
+          this.state.desiredRunning = false;
+          this.state.pendingStart = false;
+          this._clearAllTimers();
+          this._setSupervisorState("fatal");
+          this._setStatus(this._locale() === "ru" ? `ошибка: ${errorKind}` : `error: ${errorKind}`);
+          this._setTerminalDegradedReason("permission_denied");
           this._emitWorkerStatus("terminal-error");
         }
       };
@@ -1374,6 +1588,9 @@
           this._setSupervisorState("idle");
           this._setStatus("stopped");
           this._emitWorkerStatus("recognition-ended");
+          return;
+        }
+        if (overlapSlotIndex != null && this._handleOverlapRecognitionEnded(overlapSlotIndex, generationId)) {
           return;
         }
         this._cleanupRecognitionInstance(generationId);
@@ -1395,6 +1612,9 @@
 
       recognition.onresult = (event) => {
         if (!this._isActiveGeneration(generationId)) {
+          return;
+        }
+        if (!this._overlapResultAllowed(overlapSlotIndex)) {
           return;
         }
         let interimText = "";
@@ -1468,11 +1688,24 @@
           });
           this._consumeCompletedSegment();
           this._setStatus("final");
+          this._prestartOverlapBuddyIfNeeded(overlapSlotIndex);
         }
         this._emitWorkerStatus("result");
         this._updateCounters();
       };
+    }
 
+    _createRecognition(generationId) {
+      const recognition = new this.SpeechRecognitionCtor();
+      recognition.maxAlternatives = 1;
+      this.state.recognitionGenerationId = generationId;
+      this.state.recognitionOverlapSlots = null;
+      this.state.recognitionOverlapActiveSlot = null;
+      this.state.recognitionOverlapPrestarted = false;
+      this.state.recognitionOverlapSlotListening = null;
+      this.state.recognition = recognition;
+      this.applyRecognitionSettings();
+      this._wireRecognitionHandlers(recognition, generationId, null);
       return recognition;
     }
 
@@ -1496,8 +1729,33 @@
       this.state.providerName = this.state.browserMode || "browser_google";
       this.state.pendingRestartReason = null;
       this.ensureSocketConnected();
-      const recognition = this._createRecognition(generationId);
       const startLogThrottle = this._recognitionStartBurstThrottle(reason);
+      const useOverlap = this._recognitionOverlapModeDesired();
+      if (useOverlap) {
+        this._createOverlapRecognitionPair(generationId);
+        try {
+          this.state.recognitionOverlapSlots[0].start();
+          if (startLogThrottle.key) {
+            this._appendLogThrottled(`recognition.start overlap slot0 (${reason})`, startLogThrottle.key, startLogThrottle.gapMs);
+          } else {
+            this._appendLog(`recognition.start overlap slot0 (${reason})`);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error || "start failed");
+          if (String(message).toLowerCase().includes("already started")) {
+            this._setSupervisorState("running");
+            this._setRecognitionState("running");
+            this._setStatus("listening");
+            return;
+          }
+          this._setRecognitionState("idle");
+          this._setSupervisorState("restarting");
+          this._appendLog(`recognition.start overlap failed: ${message}`);
+          this._scheduleRestart("network");
+        }
+        return;
+      }
+      const recognition = this._createRecognition(generationId);
       try {
         recognition.start();
         if (startLogThrottle.key) {
@@ -1521,11 +1779,20 @@
     }
 
     _transitionToStopping(reason) {
-      const recognition = this.state.recognition;
+      const slots = [];
+      if (this._recognitionOverlapActive()) {
+        (this.state.recognitionOverlapSlots || []).forEach((rec) => {
+          if (rec) {
+            slots.push(rec);
+          }
+        });
+      } else if (this.state.recognition) {
+        slots.push(this.state.recognition);
+      }
       if (reason !== "user-stop") {
         this._forceFinalizeOnInterruption("browser_recognition_interrupted");
       }
-      if (!recognition) {
+      if (!slots.length) {
         this._cleanupRecognitionInstance(this.state.recognitionGenerationId);
         this._setRecognitionState("idle");
         this._setSupervisorState(this.state.desiredRunning ? "restarting" : "idle");
@@ -1542,7 +1809,13 @@
       this.state.stoppingSinceMs = this._now();
       this._setStatus("stopping");
       try {
-        recognition.stop();
+        slots.forEach((rec) => {
+          try {
+            rec.stop();
+          } catch (_inner) {
+            // best effort
+          }
+        });
         this._appendLog(`recognition.stop (${reason})`);
       } catch (_error) {
         this._cleanupRecognitionInstance(this.state.recognitionGenerationId);
@@ -1598,20 +1871,35 @@
     }
 
     _cleanupRecognitionInstance(generationId) {
-      if (!this.state.recognition || generationId !== this.state.recognitionGenerationId) {
+      if (generationId !== this.state.recognitionGenerationId) {
         return;
       }
-      const recognition = this.state.recognition;
-      recognition.onstart = null;
-      recognition.onend = null;
-      recognition.onerror = null;
-      recognition.onresult = null;
-      recognition.onsoundstart = null;
-      recognition.onsoundend = null;
-      recognition.onspeechstart = null;
-      recognition.onspeechend = null;
-      recognition.onaudiostart = null;
-      recognition.onaudioend = null;
+      const targets = [];
+      if (this._recognitionOverlapActive()) {
+        (this.state.recognitionOverlapSlots || []).forEach((rec) => {
+          if (rec) {
+            targets.push(rec);
+          }
+        });
+      } else if (this.state.recognition) {
+        targets.push(this.state.recognition);
+      }
+      targets.forEach((recognition) => {
+        recognition.onstart = null;
+        recognition.onend = null;
+        recognition.onerror = null;
+        recognition.onresult = null;
+        recognition.onsoundstart = null;
+        recognition.onsoundend = null;
+        recognition.onspeechstart = null;
+        recognition.onspeechend = null;
+        recognition.onaudiostart = null;
+        recognition.onaudioend = null;
+      });
+      this.state.recognitionOverlapSlots = null;
+      this.state.recognitionOverlapActiveSlot = null;
+      this.state.recognitionOverlapPrestarted = false;
+      this.state.recognitionOverlapSlotListening = null;
       this.state.recognition = null;
     }
 
@@ -1669,10 +1957,19 @@
       }
       if (this.state.browserSupervisorState === "stopping" && this.state.stoppingSinceMs) {
         if ((now - Number(this.state.stoppingSinceMs)) >= this.maxStoppingMs) {
-          const recognition = this.state.recognition;
-          if (recognition) {
+          if (this._recognitionOverlapActive()) {
+            (this.state.recognitionOverlapSlots || []).forEach((recognition) => {
+              if (recognition) {
+                try {
+                  recognition.abort();
+                } catch (_error) {
+                  // best effort
+                }
+              }
+            });
+          } else if (this.state.recognition) {
             try {
-              recognition.abort();
+              this.state.recognition.abort();
             } catch (_error) {
               // best effort
             }

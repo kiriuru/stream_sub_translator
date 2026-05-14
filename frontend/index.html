@@ -900,6 +900,88 @@
             <p id="logs-discoverability-text" class="muted" data-i18n="tools.runtime.logs_location">Logs are stored in logs/: backend.log, runtime-events.log, session-latest.jsonl.</p>
       </section>
 
+      <section class="panel stack">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow" data-i18n="tools.source_replacement.eyebrow">After recognition</p>
+            <h2 data-i18n="tools.source_replacement.title">Word replacement (before translation)</h2>
+          </div>
+        </div>
+        <p class="muted" data-i18n="tools.source_replacement.intro">
+          Optional post-ASR layer: replaces listed words in recognized text before translation, subtitles, and OBS captions. Does not change how ASR itself works.
+        </p>
+        <div class="toggle-row">
+          <label class="checkbox-row">
+            <input id="str-repl-enabled" type="checkbox" />
+            <span data-i18n="tools.source_replacement.enable">Enable word replacement</span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <label class="checkbox-row">
+            <input id="str-repl-builtin" type="checkbox" />
+            <span data-i18n="tools.source_replacement.builtin">Include built-in profanity list (English + Russian)</span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <label class="checkbox-row">
+            <input id="str-repl-ci" type="checkbox" />
+            <span data-i18n="tools.source_replacement.case_insensitive">Case-insensitive matching</span>
+          </label>
+          <label class="checkbox-row">
+            <input id="str-repl-whole" type="checkbox" />
+            <span data-i18n="tools.source_replacement.whole_words">Whole words only</span>
+          </label>
+        </div>
+        <div class="stack-field">
+          <span data-i18n="tools.source_replacement.custom_label">Custom word list</span>
+          <div class="translation-action-grid str-repl-editor-grid">
+            <label class="stack-field grow">
+              <span data-i18n="tools.source_replacement.word">Word or phrase</span>
+              <input
+                type="text"
+                id="str-repl-word"
+                class="mono"
+                maxlength="240"
+                autocomplete="off"
+                spellcheck="false"
+                data-i18n-placeholder="tools.source_replacement.word_placeholder"
+              />
+            </label>
+            <label class="stack-field grow">
+              <span data-i18n="tools.source_replacement.replace_with">Replace with</span>
+              <input
+                type="text"
+                id="str-repl-replace"
+                class="mono"
+                maxlength="240"
+                autocomplete="off"
+                spellcheck="false"
+                data-i18n-placeholder="tools.source_replacement.replace_placeholder"
+              />
+            </label>
+            <div class="str-repl-add-cell">
+              <button type="button" id="str-repl-add" data-i18n="tools.source_replacement.add">Add</button>
+            </div>
+          </div>
+          <ul id="str-repl-pairs-list" class="str-repl-pairs-list" aria-live="polite"></ul>
+          <div class="str-repl-list-actions">
+            <button
+              type="button"
+              id="str-repl-remove-selected"
+              class="secondary"
+              disabled
+              data-i18n="tools.source_replacement.remove_selected"
+            >
+              Remove selected
+            </button>
+          </div>
+          <p id="str-repl-pairs-empty" class="muted" data-i18n="tools.source_replacement.list_empty">
+            No custom entries yet.
+          </p>
+        </div>
+        <p class="muted" data-i18n="tools.source_replacement.custom_hint"></p>
+      </section>
+
       <details class="panel advanced-panel">
         <summary data-i18n="tools.advanced.summary">Advanced Recognition &amp; Diagnostics</summary>
         <div class="grid details-grid">
@@ -1515,7 +1597,7 @@
     <footer class="app-footer">
       <span>Powered by Kiriuru</span>
     </footer>
-    <div class="project-version-tag" title="Project version">v0.2.9.0</div>
+    <div class="project-version-tag" title="Project version">v0.3.2</div>
 
     <script src="/static/js/core/redaction.js?v=20260505a"></script>
     <script src="/static/js/subtitle-style.js?v=20260512c"></script>

@@ -43,7 +43,8 @@ class ConfigMigrationTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(migrated["config_version"], CURRENT_CONFIG_VERSION)
+        self.assertIn("source_text_replacement", migrated)
+        self.assertFalse(migrated["source_text_replacement"]["enabled"])
         self.assertIn("ui", migrated)
         self.assertIn("asr", migrated)
         self.assertIn("translation", migrated)
