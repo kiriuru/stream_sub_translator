@@ -12,6 +12,8 @@ def build_default_config(prefer_gpu_default: bool) -> dict[str, Any]:
         "profile": "default",
         "ui": {
             "language": "",
+            "layout": "standard",
+            "show_remote_tools": False,
             "theme": "dark",
             "palette": {
                 "accent": "#6cc7ff",

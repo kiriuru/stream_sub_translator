@@ -4,7 +4,7 @@ from typing import Awaitable, Callable
 
 from backend.core.runtime.output_fanout_controller import OutputFanoutController
 from backend.core.runtime.subtitle_presentation_controller import SubtitlePresentationController
-from backend.core.runtime.translation_runtime_controller import TranslationRuntimeController
+from backend.core.runtime.translation_preview_lineage import TranslationPreviewLineage
 from backend.core.source_text_replacement import apply_to_transcript_event
 from backend.models import TranscriptEvent
 
@@ -59,9 +59,15 @@ class TranscriptController:
 
         if routed.event == "final":
             source_lang = self._event_source_lang(routed, self._default_source_lang)
+            seg = routed.segment
+            lk = TranslationPreviewLineage.lineage_key(
+                str(seg.segment_id) if seg and getattr(seg, "segment_id", None) else None,
+                int(seg.revision) if seg and getattr(seg, "revision", None) is not None else None,
+            )
             await self._translation.submit_final(
                 sequence=int(routed.sequence),
                 source_text=str(routed.text or ""),
                 source_lang=source_lang,
+                preview_lineage_key=lk,
             )
 

@@ -274,8 +274,6 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
     languageOrder: root.querySelector("#translation-language-order"),
     addBtn: root.querySelector("#translation-lang-add-btn"),
     removeBtn: root.querySelector("#translation-lang-remove-btn"),
-    upBtn: root.querySelector("#translation-lang-up-btn"),
-    downBtn: root.querySelector("#translation-lang-down-btn"),
     results: root.querySelector("#translation-results"),
   };
 
@@ -889,35 +887,6 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
     actions.updateTranslationSelection(null);
     logger(`[translation] removed line ${selectedSlotId}`);
   });
-  elements.upBtn?.addEventListener("click", () => {
-    const selectedSlotId = getSelectedSlotId(store.getState());
-    if (!selectedSlotId) {
-      return;
-    }
-    actions.mutateConfig((draft) => {
-      const order = Array.isArray(draft.subtitle_output.display_order) ? draft.subtitle_output.display_order : [];
-      const index = order.indexOf(selectedSlotId);
-      if (index > 0) {
-        [order[index - 1], order[index]] = [order[index], order[index - 1]];
-      }
-    });
-    logger(`[translation] moved line up ${selectedSlotId}`);
-  });
-  elements.downBtn?.addEventListener("click", () => {
-    const selectedSlotId = getSelectedSlotId(store.getState());
-    if (!selectedSlotId) {
-      return;
-    }
-    actions.mutateConfig((draft) => {
-      const order = Array.isArray(draft.subtitle_output.display_order) ? draft.subtitle_output.display_order : [];
-      const index = order.indexOf(selectedSlotId);
-      if (index >= 0 && index < order.length - 1) {
-        [order[index + 1], order[index]] = [order[index], order[index + 1]];
-      }
-    });
-    logger(`[translation] moved line down ${selectedSlotId}`);
-  });
-
   render(store.getState());
   const unsubscribe = subscribe(render);
   return () => unsubscribe();

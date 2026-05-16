@@ -16,6 +16,7 @@
   ],
   "asr": {
     "mode": "local",
+    "desktop_profile_lock": "",
     "provider_preference": "official_eu_parakeet_low_latency",
     "prefer_gpu": true,
     "rnnoise_enabled": false,

@@ -14,7 +14,11 @@ function renderProgress(runtime, elements, { mode } = {}) {
   if (!card) {
     return;
   }
-  const browserMode = isBrowserRecognitionMode(mode);
+  if (isBrowserRecognitionMode(mode)) {
+    card.hidden = true;
+    card.classList.remove("is-compact");
+    return;
+  }
   const shouldShow = runtime?.status === "starting" || Boolean(message);
   card.hidden = !shouldShow;
   if (!shouldShow) {
@@ -24,14 +28,10 @@ function renderProgress(runtime, elements, { mode } = {}) {
     elements.progressFill.style.width = "0%";
     return;
   }
-  card.classList.toggle("is-compact", browserMode);
+  card.classList.remove("is-compact");
   const percentMatch = message.match(/(\d+(?:\.\d+)?)%/);
   const percent = percentMatch ? Number.parseFloat(percentMatch[1]) : (runtime?.status === "starting" ? 12 : 0);
-  const msgLower = message.toLowerCase();
-  elements.progressTitle.textContent =
-    msgLower.includes("browser speech") || msgLower.includes("web speech")
-      ? t("runtime.progress.browser_speech")
-      : t("runtime.progress.title");
+  elements.progressTitle.textContent = t("runtime.progress.title");
   elements.progressPercent.textContent = Number.isFinite(percent) ? `${Math.round(percent)}%` : "...";
   elements.progressText.textContent = message || t("runtime.progress.preparing");
   elements.progressFill.style.width = `${Math.max(0, Math.min(100, percent || 0))}%`;
@@ -60,6 +60,7 @@ export function mountRuntimePanel(root, { store, actions }) {
     progressFill: root.querySelector("#runtime-progress-fill"),
     versionTag: root.querySelector(".project-version-tag"),
     globalSaveBtn: root.querySelector("#global-save-btn"),
+    globalSaveBtnToolbar: root.querySelector("#global-save-btn-toolbar"),
   };
 
   async function onStart() {
@@ -180,9 +181,11 @@ export function mountRuntimePanel(root, { store, actions }) {
   elements.stopBtn?.addEventListener("click", () => {
     actions.stopRuntime();
   });
-  elements.globalSaveBtn?.addEventListener("click", () => {
+  const onGlobalSave = () => {
     actions.saveCurrentConfig();
-  });
+  };
+  elements.globalSaveBtn?.addEventListener("click", onGlobalSave);
+  elements.globalSaveBtnToolbar?.addEventListener("click", onGlobalSave);
   elements.overlayLink?.addEventListener("click", async (event) => {
     if (!window.DesktopBridge?.isDesktopMode?.()) {
       return;

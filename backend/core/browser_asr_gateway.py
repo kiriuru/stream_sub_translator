@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import Any
 
 from backend.core.structured_runtime_logger import StructuredRuntimeLogger
+from backend.core.timekeeping import MonotonicClock, perf_counter_clock
 from backend.models import BrowserAsrDiagnostics
 
 
@@ -33,17 +33,18 @@ class BrowserAsrGateway:
     # spamming runtime-events; operational state transitions still log immediately.
     _DETAIL_ONLY_STATUS_LOG_MIN_INTERVAL_MS = 3600
 
-    def __init__(self, *, structured_logger: StructuredRuntimeLogger | None = None) -> None:
+    def __init__(self, *, structured_logger: StructuredRuntimeLogger | None = None, clock: MonotonicClock | None = None) -> None:
         self._state = BrowserAsrDiagnostics()
         self._structured_logger = structured_logger
-        self._last_status_heartbeat_at_ms = 0
-        self._last_browser_worker_status_log_ms = 0
+        self._clock: MonotonicClock = clock or perf_counter_clock
+        self._last_status_heartbeat_mono: float = 0.0
+        self._last_browser_worker_status_log_mono: float = 0.0
         self._heartbeat_counter_baseline = self._counter_snapshot(self._state)
 
     def reset(self) -> None:
         self._state = BrowserAsrDiagnostics()
-        self._last_status_heartbeat_at_ms = 0
-        self._last_browser_worker_status_log_ms = 0
+        self._last_status_heartbeat_mono = 0.0
+        self._last_browser_worker_status_log_mono = 0.0
         self._heartbeat_counter_baseline = self._counter_snapshot(self._state)
 
     def worker_connected(self, *, browser_mode: str | None = None) -> None:
@@ -239,7 +240,7 @@ class BrowserAsrGateway:
         mapped_event = self._map_reason_to_event(reason)
         if self._should_log_status_snapshot(previous_state=previous_state, reason=reason, mapped_event=mapped_event):
             self._log_event("browser_worker_status", **self._structured_status_log_summary(reason))
-            self._last_browser_worker_status_log_ms = self._now_ms()
+            self._last_browser_worker_status_log_mono = self._clock()
             self._mark_status_activity()
         elif self._should_log_status_heartbeat():
             self._log_event("browser_worker_heartbeat", **self._heartbeat_payload())
@@ -365,8 +366,8 @@ class BrowserAsrGateway:
         cur_mat = self._material_status_snapshot(self._state)
         if prev_mat == cur_mat:
             return False
-        return (self._now_ms() - self._last_browser_worker_status_log_ms) >= int(
-            self._DETAIL_ONLY_STATUS_LOG_MIN_INTERVAL_MS
+        return (self._clock() - self._last_browser_worker_status_log_mono) * 1000.0 >= float(
+            int(self._DETAIL_ONLY_STATUS_LOG_MIN_INTERVAL_MS)
         )
 
     def _core_status_snapshot(self, state: BrowserAsrDiagnostics) -> tuple[Any, ...]:
@@ -468,7 +469,7 @@ class BrowserAsrGateway:
     def _should_log_status_heartbeat(self) -> bool:
         if not (self._state.worker_connected or self._state.desired_running):
             return False
-        return (self._now_ms() - self._last_status_heartbeat_at_ms) >= self._STATUS_HEARTBEAT_INTERVAL_MS
+        return (self._clock() - self._last_status_heartbeat_mono) * 1000.0 >= float(self._STATUS_HEARTBEAT_INTERVAL_MS)
 
     def _heartbeat_payload(self) -> dict[str, Any]:
         current_counters = self._counter_snapshot(self._state)
@@ -486,7 +487,7 @@ class BrowserAsrGateway:
         }
 
     def _mark_status_activity(self) -> None:
-        self._last_status_heartbeat_at_ms = self._now_ms()
+        self._last_status_heartbeat_mono = self._clock()
         self._heartbeat_counter_baseline = self._counter_snapshot(self._state)
 
     def _last_result_age_ms(self) -> int | None:
@@ -494,6 +495,18 @@ class BrowserAsrGateway:
         if not ages:
             return None
         return min(ages)
+
+    def _now_ms(self) -> int:
+        """Wall-clock-independent timebase in ms (monotonic), for tests and sampling."""
+        return int(self._clock() * 1000.0)
+
+    @property
+    def _last_status_heartbeat_at_ms(self) -> float:
+        return self._last_status_heartbeat_mono * 1000.0
+
+    @_last_status_heartbeat_at_ms.setter
+    def _last_status_heartbeat_at_ms(self, value: float) -> None:
+        self._last_status_heartbeat_mono = float(value) / 1000.0
 
     @staticmethod
     def _counter_snapshot(state: BrowserAsrDiagnostics) -> dict[str, int]:
@@ -508,10 +521,6 @@ class BrowserAsrGateway:
             "late_forced_final_suppressed": max(0, int(state.late_forced_final_suppressed or 0)),
             "stale_worker_events_ignored": max(0, int(state.stale_worker_events_ignored or 0)),
         }
-
-    @staticmethod
-    def _now_ms() -> int:
-        return int(time.time() * 1000)
 
     def _should_log_mapped_event(self, event: str) -> bool:
         if event in self._ROUTINE_RESTART_EVENTS:

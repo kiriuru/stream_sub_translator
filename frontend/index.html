@@ -5,11 +5,17 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title data-i18n="document.title.dashboard">Stream Subtitle Translator</title>
     <link rel="stylesheet" href="/project-fonts.css?v=20260422a" />
-    <link rel="stylesheet" href="/static/css/app.css?v=20260508a" />
+    <link rel="stylesheet" href="/static/css/app.css?v=20260516e" />
     <link rel="stylesheet" href="/static/css/subtitle-style.css?v=20260512c" />
+    <link rel="stylesheet" href="/static/css/compact-layout.css?v=20260516q" />
   </head>
-  <body>
+  <body class="sst-layout-standard">
     <main class="app-shell">
+      <aside id="compact-nav-root" class="compact-nav-root" aria-label="Compact navigation" hidden>
+        <button id="compact-nav-expand" class="compact-nav-expand" type="button" aria-expanded="false" aria-controls="compact-nav-list" aria-label="Open sections" data-i18n-aria-label="compact.nav.open">☰</button>
+        <nav id="compact-nav-list" class="compact-nav-icons" role="navigation"></nav>
+      </aside>
+      <div class="compact-workspace">
       <header class="panel sst-card hero-panel">
         <div class="hero-copy">
           <p class="eyebrow" data-i18n="header.eyebrow">Local Runtime Dashboard</p>
@@ -26,6 +32,7 @@
         </div>
       </header>
 
+      <div class="compact-sticky-chrome">
       <section class="panel sst-card sst-health-card runtime-shell">
         <div class="runtime-shell-main">
           <div class="runtime-status">
@@ -67,7 +74,15 @@
           </aside>
         </div>
       </section>
+      <div class="compact-save-row">
+        <button id="global-save-btn" type="button" class="sst-button" data-i18n="common.save">Save</button>
+        <p id="save-status-text" class="muted save-status" data-i18n="save.status.default">
+          Save applies most settings immediately. ASR provider, GPU policy, and microphone device changes take effect after Stop/Start.
+        </p>
+      </div>
+      </div>
 
+      <div class="compact-main-column">
       <section class="panel overview-layout">
         <div class="overview-grid">
           <div class="overview-left-column">
@@ -84,56 +99,10 @@
               <pre id="final-transcript" class="transcript-box"></pre>
             </article>
 
-            <article class="mini-card overview-overlay-card">
-              <h2 data-i18n="overview.overlay.title">OBS Overlay URL</h2>
-              <p id="overlay-url" class="mono mini-card-value" data-i18n="common.loading">loading...</p>
-              <a id="overlay-link" target="_blank" rel="noreferrer" data-i18n="common.open_overlay">Open overlay</a>
-            </article>
           </div>
 
           <div class="overview-right-column">
-            <article class="mini-card overview-recognition-card">
-              <h2 data-i18n="overview.recognition.title">Recognition</h2>
-              <div class="stack compact-stack">
-                <label>
-                  <span class="label" data-i18n="overview.recognition.mode">Recognition method</span>
-                  <select id="recognition-mode-select">
-                    <option value="local" data-i18n="overview.recognition.mode.local">Local Parakeet ASR</option>
-                    <option value="browser_google" data-i18n="overview.recognition.mode.browser_google">Web Speech</option>
-                    <option value="browser_google_experimental" data-i18n="overview.recognition.mode.browser_google_experimental">Web Speech (Experimental)</option>
-                  </select>
-                </label>
-                <label id="recognition-language-row" hidden>
-                  <span class="label" data-i18n="overview.recognition.language">Recognition language</span>
-                  <select id="recognition-language-select"></select>
-                </label>
-                <label id="recognition-worker-browser-row" hidden>
-                  <span class="label" data-i18n="overview.recognition.worker_browser">Worker browser (desktop)</span>
-                  <select id="recognition-worker-browser-select">
-                    <option value="auto" data-i18n="overview.recognition.worker_browser.auto">Auto (Google Chrome)</option>
-                    <option value="google_chrome" data-i18n="overview.recognition.worker_browser.chrome">Google Chrome</option>
-                  </select>
-                </label>
-                <p id="recognition-worker-browser-web-note" class="muted" hidden data-i18n="overview.recognition.worker_browser.web_hint"></p>
-                <label id="local-asr-provider-row">
-                  <span class="label" data-i18n="overview.recognition.provider">Backend ASR provider</span>
-                  <select id="local-asr-provider-select">
-                    <option value="official_eu_parakeet_low_latency" data-i18n="overview.recognition.provider.parakeet_low_latency">Official EU Parakeet Low Latency</option>
-                    <option value="official_eu_parakeet" data-i18n="overview.recognition.provider.parakeet">Official EU Parakeet</option>
-                  </select>
-                </label>
-                <p id="local-asr-provider-hint" class="muted" data-i18n="overview.recognition.provider.hint">Backend providers are configured here for local microphone capture. Web Speech modes use the separate browser worker window.</p>
-              </div>
-            </article>
-
-            <article class="mini-card overview-microphone-card">
-              <h2 data-i18n="overview.microphone.title">Microphone</h2>
-              <div class="actions compact-actions">
-                <select id="audio-input-select"></select>
-              </div>
-              <p id="audio-input-meta" class="muted" data-i18n="overview.microphone.none">No device selected.</p>
-            </article>
-
+            <div id="overview-recognition-anchor" class="overview-recognition-anchor"></div>
             <article class="mini-card overview-preview-card">
               <div class="section-heading">
                 <div>
@@ -152,20 +121,72 @@
           <button class="tab-button" type="button" data-tab-target="translation" data-i18n="tab.translation">Translation</button>
           <button class="tab-button" type="button" data-tab-target="subtitles" data-i18n="tab.subtitles">Subtitles</button>
           <button class="tab-button" type="button" data-tab-target="style" data-i18n="tab.style">Style</button>
+          <button class="tab-button" type="button" data-tab-target="theme" data-i18n="tab.theme">UI Theme</button>
           <button class="tab-button" type="button" data-tab-target="obs" data-i18n="tab.obs">OBS</button>
           <button class="tab-button" type="button" data-tab-target="tuning" data-i18n="tab.tuning">Tuning</button>
+          <button class="tab-button" type="button" data-tab-target="asr_advanced" data-i18n="tab.asr_advanced">ASR Advanced</button>
+          <button class="tab-button" type="button" data-tab-target="replacement" data-i18n="tab.replacement">Word Replace</button>
           <button class="tab-button" type="button" data-tab-target="tools" data-i18n="tab.tools">Tools &amp; Data</button>
+          <button class="tab-button" type="button" data-tab-target="settings" data-i18n="tab.settings">Settings</button>
           <button class="tab-button" type="button" data-tab-target="help" data-i18n="tab.help">Help</button>
         </nav>
         <div class="tab-save-actions">
-          <button id="global-save-btn" data-i18n="common.save">Save</button>
+          <button id="global-save-btn-toolbar" type="button" data-i18n="common.save">Save</button>
         </div>
       </section>
-      <p id="save-status-text" class="muted save-status" data-i18n="save.status.default">
+      <p id="save-status-text-standard" class="muted save-status save-status-standard" data-i18n="save.status.default">
         Save applies most settings immediately. ASR provider, GPU policy, and microphone device changes take effect after Stop/Start.
       </p>
 
       <section class="tab-panels">
+        <div class="tab-panel" data-tab-panel="recognition">
+      <div id="compact-recognition-anchor" class="compact-recognition-anchor">
+      <section id="dashboard-recognition-panel" class="dashboard-recognition-panel panel stack">
+        <article class="mini-card overview-recognition-card">
+          <h2 data-i18n="overview.recognition.title">Recognition</h2>
+          <div class="stack compact-stack">
+            <label>
+              <span class="label" data-i18n="overview.recognition.mode">Recognition method</span>
+              <select id="recognition-mode-select">
+                <option value="local" data-i18n="overview.recognition.mode.local">Local Parakeet ASR</option>
+                <option value="browser_google" data-i18n="overview.recognition.mode.browser_google">Web Speech</option>
+                <option value="browser_google_experimental" data-i18n="overview.recognition.mode.browser_google_experimental">Web Speech (Experimental)</option>
+              </select>
+            </label>
+            <p id="recognition-mode-hint" class="muted dashboard-hint-text" hidden></p>
+            <label id="recognition-language-row" hidden>
+              <span class="label" data-i18n="overview.recognition.language">Recognition language</span>
+              <select id="recognition-language-select"></select>
+            </label>
+            <label id="recognition-worker-browser-row" hidden>
+              <span class="label" data-i18n="overview.recognition.worker_browser">Worker browser (desktop)</span>
+              <select id="recognition-worker-browser-select">
+                <option value="auto" data-i18n="overview.recognition.worker_browser.auto">Auto (Google Chrome)</option>
+                <option value="google_chrome" data-i18n="overview.recognition.worker_browser.chrome">Google Chrome</option>
+              </select>
+            </label>
+            <p id="recognition-worker-browser-web-note" class="muted dashboard-hint-text" hidden data-i18n="overview.recognition.worker_browser.web_hint"></p>
+            <label id="local-asr-provider-row">
+              <span class="label" data-i18n="overview.recognition.provider">Backend ASR provider</span>
+              <select id="local-asr-provider-select">
+                <option value="official_eu_parakeet_low_latency" data-i18n="overview.recognition.provider.parakeet_low_latency">Official EU Parakeet Low Latency</option>
+                <option value="official_eu_parakeet" data-i18n="overview.recognition.provider.parakeet">Official EU Parakeet</option>
+              </select>
+            </label>
+            <p id="local-asr-provider-hint" class="muted dashboard-hint-text" data-i18n="overview.recognition.provider.hint">Backend providers are configured here for local microphone capture. Web Speech modes use the separate browser worker window.</p>
+          </div>
+        </article>
+        <article class="mini-card overview-microphone-card">
+          <h2 data-i18n="overview.microphone.title">Microphone</h2>
+          <div class="actions compact-actions">
+            <select id="audio-input-select"></select>
+          </div>
+          <p id="audio-input-meta" class="muted dashboard-hint-text" data-i18n="overview.microphone.none">No device selected.</p>
+        </article>
+      </section>
+      </div>
+        </div>
+
         <div class="tab-panel active" data-tab-panel="translation">
       <section class="translation-layout">
         <div class="translation-top">
@@ -192,9 +213,21 @@
               <span data-i18n="translation.cache.persist">Save translation cache to disk between sessions</span>
             </label>
           </div>
+          <div class="translation-line-toolbar">
+            <label class="stack-field grow">
+              <span data-i18n="translation.lines.new_target">Target language for new line</span>
+              <select id="translation-language-select" data-i18n-title="translation.language_picker"></select>
+            </label>
+          </div>
+          <div class="translation-action-grid">
+            <button id="translation-lang-add-btn" type="button" data-i18n="translation.add_line">Add Line</button>
+            <button id="translation-lang-remove-btn" type="button" class="secondary" data-i18n="translation.remove_selected">Remove Selected</button>
+          </div>
+          <p class="muted translation-lines-note" data-i18n="translation.lines.note">Each slot can use its own language, provider, and label. Duplicate target languages are allowed.</p>
           <ul id="translation-language-order" class="ordered-list translation-line-list"></ul>
         </article>
-        <article class="panel translation-provider-panel">
+        <div id="translation-provider-anchor" class="translation-provider-anchor"></div>
+        <article class="panel translation-provider-panel" id="translation-provider-panel">
           <div class="section-heading">
             <div>
               <p class="eyebrow" data-i18n="translation.eyebrow">Provider &amp; Languages</p>
@@ -277,21 +310,6 @@
             </label>
           </div>
           <p id="translation-provider-status" class="muted"></p>
-
-          <div class="subsection-divider" aria-hidden="true"></div>
-          <div class="translation-line-toolbar">
-            <label class="stack-field grow">
-              <span data-i18n="translation.lines.new_target">Target language for new line</span>
-              <select id="translation-language-select" data-i18n-title="translation.language_picker"></select>
-            </label>
-          </div>
-          <p class="muted" data-i18n="translation.lines.note">Each slot can use its own language, provider, and label. Duplicate target languages are allowed.</p>
-          <div class="translation-action-grid">
-            <button id="translation-lang-add-btn" data-i18n="translation.add_line">Add Line</button>
-            <button id="translation-lang-remove-btn" class="secondary" data-i18n="translation.remove_selected">Remove Selected</button>
-            <button id="translation-lang-up-btn" class="secondary" data-i18n="translation.move_up">Move Up</button>
-            <button id="translation-lang-down-btn" class="secondary" data-i18n="translation.move_down">Move Down</button>
-          </div>
         </article>
         </div>
 
@@ -391,11 +409,14 @@
           <div class="button-stack subtitle-action-stack">
             <div class="actions">
               <button id="subtitle-order-up-btn" class="secondary" data-i18n="subtitles.move_up">Move Up</button>
-            </div>
-            <div class="actions">
               <button id="subtitle-order-down-btn" class="secondary" data-i18n="subtitles.move_down">Move Down</button>
             </div>
           </div>
+        </article>
+        <article class="panel mini-card subtitles-overlay-card">
+          <h2 data-i18n="overview.overlay.title">OBS Overlay URL</h2>
+          <p id="overlay-url" class="mono mini-card-value" data-i18n="common.loading">loading...</p>
+          <a id="overlay-link" target="_blank" rel="noreferrer" data-i18n="common.open_overlay">Open overlay</a>
         </article>
         </div>
 
@@ -427,7 +448,6 @@
           </div>
         </div>
         <p id="subtitle-style-custom-status" class="muted" data-i18n="style.custom_status.default">Built-in presets are editable, and custom presets are saved locally in config/profiles.</p>
-
         <div class="settings-surface">
           <div class="surface-header">
             <div>
@@ -436,18 +456,6 @@
             </div>
           </div>
           <div class="style-grid">
-            <label class="stack-field">
-              <span data-i18n="style.field.font_family">Font family</span>
-              <select id="style-font-family"></select>
-            </label>
-            <label class="stack-field">
-              <span data-i18n="style.field.font_size">Font size</span>
-              <input id="style-font-size" type="number" min="12" max="96" step="1" />
-            </label>
-            <label class="stack-field">
-              <span data-i18n="style.field.font_weight">Font weight</span>
-              <input id="style-font-weight" type="number" min="300" max="900" step="100" />
-            </label>
             <label class="stack-field">
               <span data-i18n="style.field.text_color">Text color</span>
               <input id="style-fill-color" type="color" />
@@ -513,31 +521,9 @@
               </select>
             </label>
           </div>
-
-          <details class="style-details">
-            <summary data-i18n="style.more_base">More base style controls</summary>
-            <div class="style-grid">
-              <label class="stack-field">
-                <span data-i18n="style.field.shadow_offset_x">Shadow offset X</span>
-                <input id="style-shadow-offset-x" type="number" min="-24" max="24" step="0.01" />
-              </label>
-              <label class="stack-field">
-                <span data-i18n="style.field.background_padding_x">Background padding X</span>
-                <input id="style-background-padding-x" type="number" min="0" max="40" step="1" />
-              </label>
-              <label class="stack-field">
-                <span data-i18n="style.field.background_padding_y">Background padding Y</span>
-                <input id="style-background-padding-y" type="number" min="0" max="24" step="1" />
-              </label>
-              <label class="stack-field">
-                <span data-i18n="style.field.background_radius">Background radius</span>
-                <input id="style-background-radius" type="number" min="0" max="40" step="1" />
-              </label>
-            </div>
-          </details>
         </div>
 
-        <div class="settings-surface">
+        <div class="settings-surface style-slot-surface">
           <div class="surface-header">
             <div>
               <h3 data-i18n="style.slots.title">Per-line Slot Overrides</h3>
@@ -550,20 +536,7 @@
           </div>
           <div id="style-line-slot-tabs" class="slot-tab-list"></div>
           <p id="style-line-slot-description" class="muted" data-i18n="style.slots.description">Select a line slot to override the base style.</p>
-
           <div id="style-line-slot-fields" class="style-grid">
-            <label class="stack-field">
-              <span data-i18n="style.field.font_family">Font family</span>
-              <select id="style-line-slot-font-family"></select>
-            </label>
-            <label class="stack-field">
-              <span data-i18n="style.field.font_size">Font size</span>
-              <input id="style-line-slot-font-size" type="number" min="12" max="96" step="1" />
-            </label>
-            <label class="stack-field">
-              <span data-i18n="style.field.font_weight">Font weight</span>
-              <input id="style-line-slot-font-weight" type="number" min="300" max="900" step="100" />
-            </label>
             <label class="stack-field">
               <span data-i18n="style.field.text_color">Text color</span>
               <input id="style-line-slot-fill-color" type="color" />
@@ -621,35 +594,15 @@
               </select>
             </label>
           </div>
-
-          <details id="style-line-slot-details" class="style-details">
-            <summary data-i18n="style.more_slot">More selected line slot controls</summary>
-            <div class="style-grid">
-              <label class="stack-field">
-                <span data-i18n="style.field.shadow_offset_x">Shadow offset X</span>
-                <input id="style-line-slot-shadow-offset-x" type="number" min="-24" max="24" step="0.01" />
-              </label>
-              <label class="stack-field">
-                <span data-i18n="style.field.shadow_offset_y">Shadow offset Y</span>
-                <input id="style-line-slot-shadow-offset-y" type="number" min="-24" max="24" step="0.01" />
-              </label>
-              <label class="stack-field">
-                <span data-i18n="style.field.background_padding_x">Background padding X</span>
-                <input id="style-line-slot-background-padding-x" type="number" min="0" max="40" step="1" />
-              </label>
-              <label class="stack-field">
-                <span data-i18n="style.field.background_padding_y">Background padding Y</span>
-                <input id="style-line-slot-background-padding-y" type="number" min="0" max="24" step="1" />
-              </label>
-              <label class="stack-field">
-                <span data-i18n="style.field.background_radius">Background radius</span>
-                <input id="style-line-slot-background-radius" type="number" min="0" max="40" step="1" />
-              </label>
-            </div>
-          </details>
         </div>
 
-        <div class="settings-surface">
+      </section>
+        </div>
+
+        
+        <div class="tab-panel" data-tab-panel="theme">
+      <section class="panel panel-theme">
+        <div id="ui-theme-section" class="settings-surface">
           <div class="surface-header">
             <div>
               <h3 data-i18n="style.ui_theme.title">UI Theme</h3>
@@ -694,20 +647,6 @@
           </div>
           <p id="ui-theme-status" class="muted" data-i18n="style.ui_theme.status">Changes apply immediately. Use the global Save button to persist.</p>
         </div>
-
-        <div class="settings-surface">
-          <div class="surface-header">
-            <div>
-              <h3 data-i18n="style.fonts.title">Fonts</h3>
-              <p class="muted" data-i18n="style.fonts.note">Project-local fonts are the reliable custom-font path. System font listing is best-effort.</p>
-            </div>
-            <button id="font-refresh-btn" class="secondary" data-i18n="style.fonts.refresh">Refresh System Fonts</button>
-          </div>
-          <p class="muted"><span data-i18n="style.fonts.dir">Project-local fonts folder:</span> <span id="project-fonts-dir" class="mono">loading...</span></p>
-          <p id="font-source-status" class="muted" data-i18n="style.fonts.status.default">Fallback fonts are always available. Local system font access depends on the browser/runtime.</p>
-        </div>
-
-        <p class="muted" data-i18n="style.final_note">The same saved subtitle style payload drives this dashboard preview and the OBS overlay. Presets are a starting point, and your edits stay local in config/profiles.</p>
       </section>
         </div>
 
@@ -883,31 +822,15 @@
       </section>
         </div>
 
-        <div class="tab-panel" data-tab-panel="tools">
-      <section class="panel">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow" data-i18n="tools.runtime.eyebrow">Deep Runtime Detail</p>
-            <h2 data-i18n="tools.runtime.title">Runtime Diagnostics</h2>
-          </div>
-        </div>
-        <p id="latency-metrics-text" class="muted" data-i18n="tools.runtime.loading.latency">Latency metrics loading...</p>
-        <p id="asr-diagnostics-text" class="muted" data-i18n="tools.runtime.loading.asr">ASR diagnostics loading...</p>
-        <p id="translation-diagnostics-text" class="muted" data-i18n="tools.runtime.loading.translation">Translation diagnostics loading...</p>
-            <p id="translation-runtime-text" class="muted" data-i18n="tools.runtime.translation_queue_idle">Translation queue idle.</p>
-            <p id="browser-worker-diagnostics-text" class="muted" data-i18n="tools.runtime.browser_worker.not_connected">Browser worker not connected.</p>
-            <p id="obs-cc-diagnostics-text" class="muted" data-i18n="tools.runtime.loading.obs">OBS Closed Captions diagnostics loading...</p>
-            <p id="logs-discoverability-text" class="muted" data-i18n="tools.runtime.logs_location">Logs are stored in logs/: backend.log, runtime-events.log, session-latest.jsonl.</p>
-      </section>
-
-      <section class="panel stack">
+        <div class="tab-panel" data-tab-panel="replacement">
+      <section id="source-replacement-section" class="panel stack">
         <div class="section-heading">
           <div>
             <p class="eyebrow" data-i18n="tools.source_replacement.eyebrow">After recognition</p>
             <h2 data-i18n="tools.source_replacement.title">Word replacement (before translation)</h2>
           </div>
         </div>
-        <p class="muted" data-i18n="tools.source_replacement.intro">
+        <p class="muted dashboard-prose-hint" data-i18n="tools.source_replacement.intro">
           Optional post-ASR layer: replaces listed words in recognized text before translation, subtitles, and OBS captions. Does not change how ASR itself works.
         </p>
         <div class="toggle-row">
@@ -979,14 +902,21 @@
             No custom entries yet.
           </p>
         </div>
-        <p class="muted" data-i18n="tools.source_replacement.custom_hint"></p>
+        <p class="muted dashboard-prose-hint" data-i18n="tools.source_replacement.custom_hint"></p>
       </section>
 
-      <details class="panel advanced-panel">
-        <summary data-i18n="tools.advanced.summary">Advanced Recognition &amp; Diagnostics</summary>
-        <div class="grid details-grid">
-          <article>
-            <h2 data-i18n="tools.advanced.title">Advanced Realtime Tuning</h2>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="asr_advanced">
+      <section class="panel stack dashboard-asr-advanced-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow" data-i18n="tools.advanced.eyebrow">Recognition</p>
+            <h2 data-i18n="tools.advanced.summary">Advanced Recognition &amp; Diagnostics</h2>
+          </div>
+        </div>
+        <div class="grid details-grid asr-advanced-grid">
+          <article class="asr-advanced-tuning-article">
           <div class="actions">
             <label class="inline-field annotated-field">
               <div class="inline-field-head">
@@ -1104,8 +1034,7 @@
             </label>
           </div>
           </article>
-          <article>
-            <h2 data-i18n="tools.notes.title">Recognition Notes</h2>
+          <article class="asr-advanced-notes">
             <p class="muted" data-i18n="tools.notes.1">Lower partial emit and silence hold values feel faster, but can increase flicker.</p>
             <p class="muted" data-i18n="tools.notes.2">`Pause to finalize` controls when a spoken phrase becomes one completed subtitle block.</p>
             <p class="muted" data-i18n="tools.notes.3">`Chunk window` and `chunk overlap` remain advanced compatibility controls. Leave them at `0` unless you are testing a specific backend tuning case.</p>
@@ -1113,19 +1042,28 @@
             <p class="muted" data-i18n="tools.notes.vad">VAD modes: 0 = fastest and most sensitive, 1 = responsive balanced, 2 = stricter and calmer, 3 = strictest and least likely to trigger on noise.</p>
           </article>
         </div>
-      </details>
+            </section>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="tools">
+      <section class="panel" data-sst-compact-hide="true">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow" data-i18n="tools.runtime.eyebrow">Deep Runtime Detail</p>
+            <h2 data-i18n="tools.runtime.title">Runtime Diagnostics</h2>
+          </div>
+        </div>
+        <p id="latency-metrics-text" class="muted" data-i18n="tools.runtime.loading.latency">Latency metrics loading...</p>
+        <p id="asr-diagnostics-text" class="muted" data-i18n="tools.runtime.loading.asr">ASR diagnostics loading...</p>
+        <p id="translation-diagnostics-text" class="muted" data-i18n="tools.runtime.loading.translation">Translation diagnostics loading...</p>
+            <p id="translation-runtime-text" class="muted" data-i18n="tools.runtime.translation_queue_idle">Translation queue idle.</p>
+            <p id="browser-worker-diagnostics-text" class="muted" data-i18n="tools.runtime.browser_worker.not_connected">Browser worker not connected.</p>
+            <p id="obs-cc-diagnostics-text" class="muted" data-i18n="tools.runtime.loading.obs">OBS Closed Captions diagnostics loading...</p>
+            <p id="logs-discoverability-text" class="muted" data-i18n="tools.runtime.logs_location">Logs are stored in logs/: backend.log, runtime-events.log, session-latest.jsonl.</p>
+      </section>
 
       <section class="panel grid">
-        <article>
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow" data-i18n="tools.events.eyebrow">Runtime Feed</p>
-              <h2 data-i18n="tools.events.title">Live Events</h2>
-            </div>
-          </div>
-          <textarea id="log-box" readonly spellcheck="false"></textarea>
-        </article>
-        <article>
+        <article id="dashboard-config-block">
           <div class="section-heading">
             <div>
               <p class="eyebrow" data-i18n="tools.config.eyebrow">Current Session</p>
@@ -1143,7 +1081,7 @@
           </div>
           <textarea id="config-json" class="mono code-box" spellcheck="false"></textarea>
         </article>
-        <article>
+        <article id="dashboard-profiles-block">
           <div class="section-heading">
             <div>
               <p class="eyebrow" data-i18n="tools.profiles.eyebrow">Saved Sets</p>
@@ -1213,6 +1151,68 @@
           <p id="remote-worker-text" class="muted remote-tools-status-line" data-i18n="remote.tools.worker.not_loaded">Worker runtime: not loaded.</p>
         </div>
       </details>
+        </div>
+
+
+        <div class="tab-panel" data-tab-panel="settings">
+      <section class="panel stack">
+        <div class="section-heading settings-section-heading">
+          <div>
+            <p class="eyebrow" data-i18n="settings.eyebrow">Application</p>
+            <h2 data-i18n="settings.title">Settings</h2>
+          </div>
+        </div>
+        <div class="settings-core-fields">
+        <label class="stack-field sst-field settings-layout-switcher">
+          <span data-i18n="ui.layout.label">Dashboard layout</span>
+          <select id="ui-layout-select">
+            <option value="standard" data-i18n="ui.layout.standard">Standard (desktop)</option>
+            <option value="compact" data-i18n="ui.layout.compact">Compact (vertical)</option>
+          </select>
+        </label>
+        <label class="stack-field sst-field settings-language-switcher">
+          <span data-i18n="language.label">Interface language</span>
+          <select id="ui-language-select-settings">
+            <option value="en" data-i18n="language.en">English</option>
+            <option value="ru" data-i18n="language.ru">Русский</option>
+          </select>
+        </label>
+        <label class="checkbox-row settings-remote-tools-toggle">
+          <input id="ui-show-remote-tools" type="checkbox" />
+          <span data-i18n="settings.remote_tools.enable">Show remote LAN tools</span>
+        </label>
+        </div>
+
+        <div id="settings-fonts-section" class="settings-surface settings-fonts-section">
+          <div class="surface-header">
+            <div>
+              <h3 data-i18n="style.fonts.title">Fonts</h3>
+              <p class="muted" data-i18n="style.fonts.note">Project-local fonts are the reliable custom-font path. System font listing is best-effort.</p>
+            </div>
+            <button id="font-refresh-btn" class="secondary" type="button" data-i18n="style.fonts.refresh">Refresh System Fonts</button>
+          </div>
+          <div class="style-grid settings-font-grid">
+            <label class="stack-field">
+              <span data-i18n="style.field.font_family">Font family</span>
+              <select id="style-font-family"></select>
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.font_size">Font size</span>
+              <input id="style-font-size" type="number" min="12" max="96" step="1" />
+            </label>
+            <label class="stack-field">
+              <span data-i18n="style.field.font_weight">Font weight</span>
+              <input id="style-font-weight" type="number" min="300" max="900" step="100" />
+            </label>
+          </div>
+          <p class="muted"><span data-i18n="style.fonts.dir">Project-local fonts folder:</span> <span id="project-fonts-dir" class="mono">loading...</span></p>
+          <p id="font-source-status" class="muted" data-i18n="style.fonts.status.default">Fallback fonts are always available. Local system font access depends on the browser/runtime.</p>
+        </div>
+
+        <div id="settings-translation-provider-anchor" class="settings-translation-provider-anchor"></div>
+        <div id="settings-profiles-anchor" class="settings-profiles-anchor"></div>
+        <div id="settings-config-anchor" class="settings-config-anchor"></div>
+      </section>
         </div>
 
         <div class="tab-panel" data-tab-panel="help">
@@ -1592,17 +1592,19 @@
       </section>
         </div>
       </section>
+      </div>
+      </div>
     </main>
 
     <footer class="app-footer">
       <span>Powered by Kiriuru</span>
     </footer>
-    <div class="project-version-tag" title="Project version">v0.3.2</div>
+    <div class="project-version-tag" title="Project version">v0.4.0</div>
 
     <script src="/static/js/core/redaction.js?v=20260505a"></script>
     <script src="/static/js/subtitle-style.js?v=20260512c"></script>
-    <script src="/static/js/desktop.js?v=20260423a"></script>
+    <script src="/static/js/desktop.js?v=20260516h"></script>
     <script src="/static/js/i18n.js?v=20260508a"></script>
-    <script type="module" src="/static/js/main.js?v=20260508a"></script>
+    <script type="module" src="/static/js/main.js?v=20260516h"></script>
   </body>
 </html>

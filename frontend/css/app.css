@@ -205,12 +205,16 @@ a {
   flex: 0 0 auto;
   min-width: 220px;
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
   justify-content: flex-end;
   align-self: flex-start;
 }
 
-.locale-switcher {
+.locale-switcher,
+.ui-layout-switcher {
   max-width: 220px;
+  flex: 1 1 200px;
 }
 
 .hero-description {
@@ -1679,4 +1683,57 @@ html[data-ui-theme="light"] .ui-theme-preview__btn-primary {
   .remote-tools-action-grid-compact {
     grid-template-columns: 1fr;
   }
+}
+
+[data-tab-panel="settings"] > section.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.settings-core-fields {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.settings-core-fields .stack-field.sst-field {
+  width: auto;
+  max-width: min(280px, 100%);
+}
+
+.settings-core-fields .stack-field.sst-field select {
+  width: auto;
+  min-width: 11.5rem;
+  max-width: 100%;
+}
+
+.settings-core-fields .settings-remote-tools-toggle {
+  margin: 0;
+  padding: 2px 0;
+}
+
+[data-tab-panel="settings"] .settings-translation-provider-anchor:not(:empty),
+[data-tab-panel="settings"] .settings-profiles-anchor:not(:empty),
+[data-tab-panel="settings"] .settings-config-anchor:not(:empty) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+[data-tab-panel="settings"] .settings-translation-provider-anchor > .panel,
+[data-tab-panel="settings"] .settings-profiles-anchor > article,
+[data-tab-panel="settings"] .settings-config-anchor > article {
+  margin: 0;
+}
+
+.subtitles-overlay-card {
+  margin-top: var(--space-3, 12px);
+}
+
+.subtitles-overlay-card .mini-card-value {
+  word-break: break-all;
 }

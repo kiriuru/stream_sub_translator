@@ -129,6 +129,11 @@ function normalizeUiTheme(value) {
   return ["dark", "light"].includes(current) ? current : "dark";
 }
 
+function normalizeUiLayout(value) {
+  const current = String(value || "").trim().toLowerCase();
+  return current === "compact" ? "compact" : "standard";
+}
+
 function normalizeHexColor(value, fallback) {
   const current = String(value || "").trim();
   if (!current) {
@@ -149,6 +154,8 @@ export function normalizeConfigShape(config) {
     normalized.ui = {};
   }
   normalized.ui.language = normalizeUiLanguage(normalized.ui.language);
+  normalized.ui.layout = normalizeUiLayout(normalized.ui.layout);
+  normalized.ui.show_remote_tools = normalized.ui.show_remote_tools === true;
   normalized.ui.theme = normalizeUiTheme(normalized.ui.theme);
   if (!normalized.ui.palette || typeof normalized.ui.palette !== "object") {
     normalized.ui.palette = {};
@@ -270,6 +277,15 @@ export function normalizeConfigShape(config) {
   }
   if (normalized.remote.enabled && normalized.remote.role === "worker" && isBrowserRecognitionMode(normalized.asr.mode)) {
     normalized.asr.mode = "local";
+  }
+  const profileLock = String(normalized.asr.desktop_profile_lock || "").toLowerCase();
+  if (profileLock === "browser_speech") {
+    normalized.asr.desktop_profile_lock = "browser_speech";
+    if (!isBrowserRecognitionMode(normalized.asr.mode)) {
+      normalized.asr.mode = "browser_google";
+    }
+  } else {
+    delete normalized.asr.desktop_profile_lock;
   }
   normalized.asr.provider_preference = String(
     normalized.asr.provider_preference || "official_eu_parakeet_low_latency"

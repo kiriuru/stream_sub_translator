@@ -40,6 +40,8 @@ class UiPaletteConfig(SchemaModel):
 
 class UiConfig(SchemaModel):
     language: Literal["", "en", "ru"] = ""
+    layout: Literal["standard", "compact"] = "standard"
+    show_remote_tools: bool = False
     theme: Literal["dark", "light"] = "dark"
     palette: UiPaletteConfig = Field(default_factory=UiPaletteConfig)
 
@@ -109,6 +111,7 @@ class AsrRealtimeConfig(SchemaModel):
 
 class AsrConfig(SchemaModel):
     mode: Literal["local", "browser_google", "browser_google_experimental"] = "local"
+    desktop_profile_lock: Literal["", "browser_speech"] = ""
     provider_preference: Literal["official_eu_parakeet", "official_eu_parakeet_low_latency"] = (
         "official_eu_parakeet_low_latency"
     )

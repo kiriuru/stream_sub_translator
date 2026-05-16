@@ -152,6 +152,24 @@ class BrowserAsrServiceTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_worker_connected_calls_orchestrator_hook(self) -> None:
+        async def scenario() -> None:
+            orchestrator = _FakeRuntimeOrchestrator()
+            app = SimpleNamespace(state=SimpleNamespace(runtime_orchestrator=orchestrator))
+            service = BrowserAsrService(app)
+            await service.register_connection(_FakeWebSocket())
+            await service.worker_connected()
+            self.assertEqual(orchestrator.connected, 1)
+
+        asyncio.run(scenario())
+
+
+class RuntimeOrchestratorBrowserWorkerApiTests(unittest.TestCase):
+    def test_browser_asr_worker_connected_public_method_exists(self) -> None:
+        from backend.core.runtime_orchestrator import RuntimeOrchestrator
+
+        self.assertTrue(callable(getattr(RuntimeOrchestrator, "browser_asr_worker_connected", None)))
+
 
 if __name__ == "__main__":
     unittest.main()

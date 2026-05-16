@@ -16,30 +16,33 @@ import { mountRemotePanel } from "./panels/remote-panel.js";
 import { mountRuntimePanel } from "./panels/runtime-panel.js";
 import { mountStyleEditorPanel } from "./panels/style-editor-panel.js";
 import { mountTranslationPanel } from "./panels/translation-panel.js";
+import { mountLayoutController } from "./layout/layout-controller.js";
 
 let actionsRef = null;
 
 function initializeLocaleSwitcher(actions) {
-  const select = document.querySelector("#ui-language-select");
-  if (!select) {
+  const selects = [...document.querySelectorAll("#ui-language-select, #ui-language-select-settings")];
+  if (!selects.length) {
     return () => {};
   }
 
   const applyCurrentLocale = () => {
-    select.value = getCurrentLocale();
+    const locale = getCurrentLocale();
+    selects.forEach((select) => {
+      select.value = locale;
+    });
   };
 
-  const onChange = () => {
-    actions.setUiLanguage(select.value || "en");
-    // Persist UI language immediately so it survives reloads without requiring the global Save button.
+  const onChange = (event) => {
+    actions.setUiLanguage(event.target?.value || "en");
     actions.saveCurrentConfig();
   };
 
-  select.addEventListener("change", onChange);
+  selects.forEach((select) => select.addEventListener("change", onChange));
   applyCurrentLocale();
 
   return () => {
-    select.removeEventListener("change", onChange);
+    selects.forEach((select) => select.removeEventListener("change", onChange));
   };
 }
 
@@ -47,20 +50,19 @@ function initializeTabs(actions) {
   const buttons = [...document.querySelectorAll("[data-tab-target]")];
   const panels = [...document.querySelectorAll("[data-tab-panel]")];
   const availableTabs = new Set(panels.map((panel) => panel.dataset.tabPanel));
-  const initialTab = availableTabs.has(store.getState().ui.activeTab)
-    ? store.getState().ui.activeTab
-    : panels[0]?.dataset.tabPanel
-      || "translation";
+  const preferredTab = store.getState().ui.activeTab;
+  const initialTab = availableTabs.has(preferredTab)
+    ? preferredTab
+    : availableTabs.has("translation")
+      ? "translation"
+      : panels.find((panel) => panel.dataset.tabPanel !== "recognition")?.dataset.tabPanel
+        || panels[0]?.dataset.tabPanel
+        || "translation";
 
   function applyActiveTab(tabName) {
-    buttons.forEach((button) => {
-      const active = button.dataset.tabTarget === tabName;
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-selected", active ? "true" : "false");
-    });
-    panels.forEach((panel) => {
-      panel.classList.toggle("active", panel.dataset.tabPanel === tabName);
-    });
+    if (!availableTabs.has(tabName)) {
+      return;
+    }
     actions.setActiveTab(tabName);
   }
 
@@ -156,7 +158,16 @@ async function bootstrap() {
 
   const destroyLocaleSwitcher = initializeLocaleSwitcher(actions);
   initializeTabs(actions);
+  const destroyLayoutController = mountLayoutController(document, { actions });
   const destroyHelpTopics = initializeHelpTopics();
+
+  window.addEventListener("sst:locale-changed", () => {
+    const localeSelect = document.querySelector("#ui-language-select");
+    if (localeSelect) {
+      localeSelect.value = getCurrentLocale();
+    }
+    store.updateState({ ui: { uiLanguage: getCurrentLocale() } });
+  });
 
   const mounts = [
     mountRuntimePanel(document, { store, actions, api, ws, logger, events }),
@@ -172,32 +183,32 @@ async function bootstrap() {
     mountModelManagerPanel(document, { store, actions, api, ws, logger, events }),
   ];
 
-  window.addEventListener("sst:locale-changed", () => {
-    const localeSelect = document.querySelector("#ui-language-select");
-    if (localeSelect) {
-      localeSelect.value = getCurrentLocale();
-    }
-    store.updateState({ ui: { uiLanguage: getCurrentLocale() } });
-  });
+  void window.DesktopBridge?.getContext?.()
+    .then((context) => {
+      if (context && window.AppState) {
+        window.AppState.desktop = { ...window.AppState.desktop, ...context };
+      }
+      if (context?.desktop_mode) {
+        logger(
+          getCurrentLocale() === "ru"
+            ? `[desktop] desktop launcher активен | startup=${context.startup_mode || "local"} | remote_role=${context.remote_role || "disabled"}`
+            : `[desktop] desktop launcher active | startup=${context.startup_mode || "local"} | remote_role=${context.remote_role || "disabled"}`
+        );
+      }
+    })
+    .catch(() => {
+      // desktop bridge is optional
+    });
 
-  try {
-    const context = await window.DesktopBridge?.getContext?.();
-    if (context?.desktop_mode) {
-      logger(
-        getCurrentLocale() === "ru"
-          ? `[desktop] desktop launcher активен | startup=${context.startup_mode || "local"} | remote_role=${context.remote_role || "disabled"}`
-          : `[desktop] desktop launcher active | startup=${context.startup_mode || "local"} | remote_role=${context.remote_role || "disabled"}`
-      );
-    }
-  } catch (_error) {
-    // desktop bridge is optional
-  }
+  void actions
+    .loadInitialData()
+    .then(() => window.SstLayout?.syncDesktopWindowSize?.())
+    .then(() => actions.pollRuntimeStatus())
+    .catch(() => null);
 
-  await actions.loadInitialData();
   actions.refreshSystemFonts().catch(() => {
     // keep font picker usable with project-local + fallback fonts
   });
-  await actions.pollRuntimeStatus().catch(() => null);
   window.setInterval(() => {
     actions.pollRuntimeStatus().catch(() => null);
   }, 1200);
@@ -205,6 +216,7 @@ async function bootstrap() {
 
   window.addEventListener("beforeunload", () => {
     destroyLocaleSwitcher();
+    destroyLayoutController?.();
     destroyHelpTopics();
     mounts.forEach((destroy) => destroy?.());
     ws.disconnect();

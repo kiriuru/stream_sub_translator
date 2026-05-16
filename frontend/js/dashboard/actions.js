@@ -1,4 +1,8 @@
 import { normalizeConfigShape } from "../normalizers/config-normalizer.js";
+import {
+  applyDesktopProfileLockToAsrConfig,
+  isDesktopBrowserQuickStartLocked,
+} from "./desktop-profile-lock.js";
 import { normalizeDiagnostics } from "../normalizers/diagnostics-normalizer.js";
 import { normalizeModelStatus } from "../normalizers/model-normalizer.js";
 import { normalizeOverlayPayload } from "../normalizers/overlay-normalizer.js";
@@ -217,12 +221,15 @@ export function createDashboardActions({ store, api, logger }) {
   }
 
   function setConfig(payload) {
-    const normalized = normalizeConfigShape(payload);
+    const normalized = applyDesktopProfileLockToAsrConfig(normalizeConfigShape(payload));
     const locale = normalizeSupportedUiLanguage(normalized.ui?.language);
     if (window.I18n?.setLocale && locale !== getCurrentLocale()) {
       window.I18n.setLocale(locale);
     }
     applyUiThemeFromConfigPayload(normalized);
+    if (window.SstLayout?.syncLayoutControlsFromConfig) {
+      window.SstLayout.syncLayoutControlsFromConfig(normalized);
+    }
     const nextState = store.getState();
     const configuredTranslationSlots = (Array.isArray(normalized.translation.lines) ? normalized.translation.lines : [])
       .map((line) => String(line?.slot_id || "").toLowerCase())
@@ -249,6 +256,9 @@ export function createDashboardActions({ store, api, logger }) {
     const snapshot = store.getState();
     const draft = normalizeConfigShape(clone(snapshot.config || {}));
     mutator(draft);
+    if (isDesktopBrowserQuickStartLocked(draft)) {
+      applyDesktopProfileLockToAsrConfig(draft);
+    }
     setConfig(draft);
   }
 
@@ -346,6 +356,25 @@ export function createDashboardActions({ store, api, logger }) {
     mutateConfig((draft) => {
       draft.ui.language = nextLocale;
     });
+    syncLanguageSelects(nextLocale);
+  }
+
+  function setUiLayout(layout) {
+    const nextLayout = String(layout || "standard").trim().toLowerCase() === "compact" ? "compact" : "standard";
+    window.SstLayout?.applyDashboardLayout?.(nextLayout);
+    mutateConfig((draft) => {
+      draft.ui.layout = nextLayout;
+    });
+  }
+
+  function syncLanguageSelects(locale) {
+    const value = normalizeSupportedUiLanguage(locale);
+    ["#ui-language-select", "#ui-language-select-settings"].forEach((selector) => {
+      const element = document.querySelector(selector);
+      if (element) {
+        element.value = value;
+      }
+    });
   }
 
   async function saveCurrentConfig(options = {}) {
@@ -424,7 +453,26 @@ export function createDashboardActions({ store, api, logger }) {
   }
 
   function setActiveTab(tabName) {
-    store.updateState({ ui: { activeTab: tabName } });
+    const normalized = String(tabName || "").trim();
+    if (!normalized) {
+      return;
+    }
+    store.updateState({ ui: { activeTab: normalized } });
+    document.querySelectorAll("[data-tab-target]").forEach((button) => {
+      const active = button.dataset.tabTarget === normalized;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    document.querySelectorAll("[data-tab-panel]").forEach((panel) => {
+      panel.classList.toggle("active", panel.dataset.tabPanel === normalized);
+    });
+    if (document.body.classList.contains("sst-layout-compact")) {
+      window.SstLayout?.applyCompactTabScope?.(normalized);
+      const activePanel = document.querySelector(".tab-panel.active");
+      if (activePanel) {
+        activePanel.scrollTop = 0;
+      }
+    }
   }
 
   function updateConfigFromEditor(text) {
@@ -751,6 +799,7 @@ export function createDashboardActions({ store, api, logger }) {
     refreshProfiles,
     refreshSystemFonts,
     setUiLanguage,
+    setUiLayout,
     saveCurrentConfig,
     setSelectedAudioInput,
     updateTranslationSelection,

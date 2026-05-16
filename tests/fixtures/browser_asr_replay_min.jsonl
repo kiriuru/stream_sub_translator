@@ -1,0 +1,4 @@
+{"kind":"worker_connected","event_id":"a","generation_id":1,"session_id":"s","transport_id":1,"mono_ingress_at":0.0,"advance_mono":0}
+{"kind":"ingest","event_id":"b","generation_id":1,"session_id":"s","transport_id":1,"mono_ingress_at":0.0,"is_final":false,"advance_mono":0.1}
+{"kind":"policy_cycle","event_id":"c","degraded_reason":null,"worker_connected":true,"generation_id":1,"session_id":"s","transport_id":1,"mono_ingress_at":0.2,"advance_mono":0}
+{"kind":"ingress_reject","advance_mono":0}

@@ -1,0 +1,1157 @@
+/* Compact dashboard layout — portrait control surface beside a fixed left icon rail. */
+
+
+
+body.sst-layout-compact {
+
+  --compact-rail-width: 52px;
+
+  --compact-rail-expanded-width: min(72vw, 220px);
+
+  overflow: hidden;
+
+  height: 100dvh;
+
+  background: var(--bg-canvas);
+
+  color: var(--text-primary);
+
+}
+
+
+
+body.sst-layout-compact main.app-shell {
+
+  display: flex !important;
+
+  flex-direction: row;
+
+  align-items: stretch;
+
+  gap: 0;
+
+  width: 100%;
+
+  max-width: none;
+
+  height: 100dvh;
+
+  max-height: 100dvh;
+
+  min-height: 0;
+
+  margin: 0;
+
+  padding: 0 !important;
+
+  overflow: hidden;
+
+}
+
+
+
+body.sst-layout-compact .compact-nav-root {
+
+  flex: 0 0 var(--compact-rail-width);
+
+  width: var(--compact-rail-width);
+
+  height: 100%;
+
+  min-height: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: stretch;
+
+  gap: 8px;
+
+  padding: 10px 6px;
+
+  background: var(--bg-control);
+
+  border-right: 1px solid var(--line-subtle);
+
+  color: var(--text-primary);
+
+  position: relative;
+
+  z-index: 60;
+
+  overflow: visible;
+
+}
+
+
+
+body.sst-layout-compact.compact-nav-expanded .compact-nav-root {
+
+  z-index: 90;
+
+}
+
+
+
+body.sst-layout-compact .compact-nav-root[hidden] {
+
+  display: none !important;
+
+}
+
+
+
+body.sst-layout-compact .compact-workspace {
+
+  flex: 1 1 auto;
+
+  min-width: 0;
+
+  min-height: 0;
+
+  height: 100%;
+
+  display: flex;
+
+  flex-direction: column;
+
+  overflow: hidden;
+
+  position: relative;
+
+  background: var(--bg-canvas);
+
+  color: var(--text-primary);
+
+}
+
+
+
+body.sst-layout-compact.compact-nav-expanded .compact-workspace::before {
+
+  content: "";
+
+  position: absolute;
+
+  inset: 0;
+
+  background: color-mix(in srgb, var(--text-primary) 24%, transparent);
+
+  z-index: 70;
+
+  pointer-events: none;
+
+}
+
+
+
+body.sst-layout-compact .compact-sticky-chrome {
+
+  flex: 0 0 auto;
+
+  z-index: 40;
+
+  padding: 10px 12px 8px;
+
+  background: linear-gradient(
+
+    180deg,
+
+    var(--bg-app) 0%,
+
+    color-mix(in srgb, var(--bg-app) 88%, var(--bg-canvas)) 100%
+
+  );
+
+  border-bottom: 1px solid var(--line-subtle);
+
+}
+
+
+
+body.sst-layout-compact .compact-main-column {
+
+  flex: 1 1 auto;
+
+  min-width: 0;
+
+  min-height: 0;
+
+  padding: 0;
+
+  overflow: hidden;
+
+  display: flex;
+
+  flex-direction: column;
+
+  background: var(--bg-canvas);
+
+}
+
+
+
+body.sst-layout-compact .tab-panels {
+
+  flex: 1 1 auto;
+
+  min-height: 0;
+
+  overflow: hidden;
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 0;
+
+}
+
+
+
+body.sst-layout-compact .tab-panel {
+
+  display: none !important;
+
+  flex: 1 1 auto;
+
+  min-height: 0;
+
+  overflow: hidden;
+
+}
+
+
+
+body.sst-layout-compact .tab-panel.active {
+
+  display: flex !important;
+
+  flex-direction: column;
+
+  overflow-x: hidden;
+
+  overflow-y: auto;
+
+  padding: 10px 12px 28px;
+
+  -webkit-overflow-scrolling: touch;
+
+  background: var(--bg-canvas);
+
+  color: var(--text-primary);
+
+}
+
+
+
+/* Hide standard chrome and heavy panels in compact mode */
+
+body.sst-layout-compact .hero-panel,
+
+body.sst-layout-compact .tab-toolbar,
+
+body.sst-layout-compact .save-status-standard,
+
+body.sst-layout-compact .tab-panel[data-tab-panel="help"],
+
+body.sst-layout-compact [data-sst-compact-hide="true"] {
+
+  display: none !important;
+
+}
+
+
+
+body.sst-layout-compact .overview-layout {
+
+  display: none !important;
+
+}
+
+
+
+body.sst-layout-compact .compact-tab-hint {
+
+  margin: 0 0 12px;
+
+  font-size: 12px;
+
+}
+
+
+
+/* Sticky runtime + save */
+
+body.sst-layout-compact .runtime-shell {
+
+  margin: 0;
+
+  padding: 10px;
+
+}
+
+
+
+body.sst-layout-compact .runtime-shell-main {
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 10px;
+
+  min-width: 0;
+
+}
+
+
+
+body.sst-layout-compact .runtime-progress-card {
+
+  margin-top: 8px;
+
+  padding: 8px 10px;
+
+  min-width: 0;
+
+  max-width: 100%;
+
+  box-sizing: border-box;
+
+}
+
+
+
+body.sst-layout-compact .runtime-progress-card .runtime-progress-head {
+
+  gap: 8px;
+
+  margin-bottom: 6px;
+
+}
+
+
+
+body.sst-layout-compact .runtime-progress-card .runtime-progress-head strong {
+
+  font-size: 12px;
+
+  min-width: 0;
+
+}
+
+
+
+body.sst-layout-compact .runtime-progress-card .runtime-progress-head span {
+
+  font-size: 11px;
+
+  flex-shrink: 0;
+
+}
+
+
+
+body.sst-layout-compact .runtime-progress-card .runtime-progress-text {
+
+  margin: 0 0 8px;
+
+  font-size: 12px;
+
+  line-height: 1.4;
+
+  white-space: normal;
+
+  overflow: visible;
+
+  text-overflow: unset;
+
+  word-break: break-word;
+
+}
+
+
+
+body.sst-layout-compact .runtime-progress-card .runtime-progress-bar {
+
+  height: 6px;
+
+}
+
+
+
+body.sst-layout-compact .runtime-side {
+
+  width: 100%;
+
+}
+
+
+
+body.sst-layout-compact .runtime-shell .badges {
+
+  flex-wrap: wrap;
+
+  gap: 4px;
+
+}
+
+
+
+body.sst-layout-compact .runtime-shell .badge {
+
+  font-size: 10px;
+
+  padding: 2px 6px;
+
+}
+
+
+
+body.sst-layout-compact .runtime-actions {
+
+  display: flex;
+
+  gap: 8px;
+
+  width: 100%;
+
+}
+
+
+
+body.sst-layout-compact .runtime-actions .sst-button,
+
+body.sst-layout-compact .runtime-actions .sst-button-ghost {
+
+  flex: 1;
+
+}
+
+
+
+body.sst-layout-compact .compact-save-row {
+
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: stretch;
+
+  gap: 6px;
+
+  margin-top: 8px;
+
+}
+
+
+
+body.sst-layout-compact .compact-save-row .save-status {
+
+  margin: 0;
+
+  font-size: 11px;
+
+  line-height: 1.35;
+
+}
+
+
+
+/* Icon rail */
+
+body.sst-layout-compact .compact-nav-expand {
+
+  width: 38px;
+
+  height: 38px;
+
+  align-self: center;
+
+  border-radius: 10px;
+
+  border: 1px solid var(--line-strong);
+
+  background: var(--bg-panel-elevated);
+
+  color: var(--text-primary);
+
+  cursor: pointer;
+
+  font-size: 17px;
+
+  line-height: 1;
+
+  flex-shrink: 0;
+
+}
+
+
+
+body.sst-layout-compact.compact-nav-expanded .compact-nav-expand {
+
+  position: absolute;
+
+  left: 6px;
+
+  top: 10px;
+
+  z-index: 3;
+
+  border-color: rgb(var(--ui-accent-tertiary-rgb, 124 227 173) / 0.45);
+
+  background: rgb(var(--ui-accent-tertiary-rgb, 124 227 173) / 0.12);
+
+}
+
+
+
+body.sst-layout-compact.compact-nav-expanded .compact-nav-icons {
+
+  position: absolute;
+
+  left: 0;
+
+  top: 0;
+
+  bottom: 0;
+
+  width: var(--compact-rail-expanded-width);
+
+  padding: 56px 8px 8px 6px;
+
+  background: var(--bg-control);
+
+  border-right: 1px solid var(--line-strong);
+
+  box-shadow: 12px 0 32px rgb(0 0 0 / 0.22);
+
+  z-index: 2;
+
+}
+
+
+
+html[data-ui-theme="light"] body.sst-layout-compact.compact-nav-expanded .compact-nav-icons {
+
+  box-shadow: 12px 0 24px rgb(11 20 34 / 0.1);
+
+}
+
+
+
+body.sst-layout-compact .compact-nav-icons {
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 6px;
+
+  width: 100%;
+
+  align-items: stretch;
+
+  flex: 1 1 auto;
+
+  min-height: 0;
+
+  overflow-x: hidden;
+
+  overflow-y: auto;
+
+  padding-bottom: 8px;
+
+}
+
+
+
+body.sst-layout-compact .compact-nav-item {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 10px;
+
+  width: 100%;
+
+  min-height: 38px;
+
+  padding: 0;
+
+  border-radius: 10px;
+
+  border: 1px solid transparent;
+
+  background: transparent;
+
+  color: var(--text-primary);
+
+  cursor: pointer;
+
+  text-align: left;
+
+}
+
+
+
+body.sst-layout-compact .compact-nav-item-icon {
+
+  flex: 0 0 38px;
+
+  width: 38px;
+
+  height: 38px;
+
+  display: inline-flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  font-size: 14px;
+
+  color: var(--text-secondary);
+
+}
+
+
+
+body.sst-layout-compact .compact-nav-item-label {
+
+  flex: 1 1 auto;
+
+  min-width: 0;
+
+  overflow: hidden;
+
+  white-space: nowrap;
+
+  text-overflow: ellipsis;
+
+  font-size: 13px;
+
+  font-weight: 600;
+
+  opacity: 0;
+
+  max-width: 0;
+
+  transition: opacity 0.15s ease, max-width 0.2s ease;
+
+}
+
+
+
+body.sst-layout-compact.compact-nav-expanded .compact-nav-item-label {
+
+  opacity: 1;
+
+  max-width: 160px;
+
+}
+
+
+
+body.sst-layout-compact .compact-nav-item:hover,
+
+body.sst-layout-compact .compact-nav-item:focus-visible,
+
+body.sst-layout-compact .compact-nav-item.is-active {
+
+  border-color: rgb(var(--ui-accent-rgb, 108 199 255) / 0.4);
+
+  background: var(--accent-soft);
+
+}
+
+
+
+body.sst-layout-compact .compact-nav-item.is-active .compact-nav-item-icon,
+
+body.sst-layout-compact .compact-nav-item:hover .compact-nav-item-icon {
+
+  color: var(--text-primary);
+
+}
+
+
+
+/* Single-column content in compact */
+
+body.sst-layout-compact .translation-top,
+
+body.sst-layout-compact .translation-bottom,
+
+body.sst-layout-compact .overview-grid,
+
+body.sst-layout-compact .subtitles-top,
+
+body.sst-layout-compact .subtitles-bottom {
+
+  grid-template-columns: 1fr !important;
+
+}
+
+
+
+body.sst-layout-compact .translation-bottom {
+
+  display: none !important;
+
+}
+
+
+
+body.sst-layout-compact .translation-action-grid {
+
+  display: grid;
+
+  grid-template-columns: 1fr 1fr;
+
+  gap: 8px;
+
+}
+
+
+
+body.sst-layout-compact .translation-action-grid button {
+
+  width: 100%;
+
+}
+
+
+
+body.sst-layout-compact .translation-lines-note {
+
+  font-size: 12px;
+
+  margin: 0 0 8px;
+
+}
+
+
+
+body.sst-layout-compact .tab-panels .panel {
+
+  padding: 12px;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="settings"] > section.panel.stack {
+
+  gap: 10px;
+
+  padding: 10px 12px;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="settings"] .settings-section-heading {
+
+  margin: 0;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="settings"] .settings-section-heading .eyebrow {
+
+  display: none;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="settings"] .settings-section-heading h2 {
+
+  margin: 0 0 4px;
+
+  font-size: 17px;
+
+  line-height: 1.2;
+
+}
+
+
+
+body.sst-layout-compact .settings-core-fields {
+
+  gap: 6px;
+
+}
+
+
+
+body.sst-layout-compact .settings-core-fields .stack-field.sst-field {
+
+  max-width: 100%;
+
+}
+
+
+
+body.sst-layout-compact .settings-core-fields .stack-field.sst-field select {
+
+  width: 100%;
+
+  min-width: 0;
+
+  min-height: 40px;
+
+  padding: 8px 10px;
+
+}
+
+
+
+body.sst-layout-compact .settings-core-fields .settings-remote-tools-toggle {
+
+  font-size: 13px;
+
+  line-height: 1.35;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="settings"] .settings-surface {
+
+  padding: 10px;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="settings"] .settings-surface .surface-header {
+
+  flex-direction: column;
+
+  align-items: stretch;
+
+  gap: 8px;
+
+  margin-bottom: 8px;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="settings"] .settings-surface h3 {
+
+  margin: 0;
+
+  font-size: 14px;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="settings"] .settings-surface .surface-header .muted {
+
+  display: none;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="settings"] .settings-font-grid {
+
+  grid-template-columns: 1fr;
+
+  gap: 8px;
+
+  margin-top: 0;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="settings"] .settings-translation-provider-anchor:not(:empty),
+body.sst-layout-compact [data-tab-panel="settings"] .settings-profiles-anchor:not(:empty),
+body.sst-layout-compact [data-tab-panel="settings"] .settings-config-anchor:not(:empty) {
+
+  gap: 10px;
+
+}
+
+
+
+body.sst-layout-compact .remote-tools-panel {
+
+  display: none;
+
+}
+
+
+
+body.sst-layout-compact.sst-remote-tools-enabled .remote-tools-panel {
+
+  display: block;
+
+}
+
+
+
+body.sst-layout-compact .app-footer {
+
+  display: none;
+
+}
+
+
+
+body.sst-layout-compact .project-version-tag {
+
+  right: 10px;
+
+}
+
+
+
+/* Standard layout: flatten wrappers */
+
+body.sst-layout-standard .compact-nav-root {
+
+  display: none !important;
+
+}
+
+
+
+body.sst-layout-standard .compact-workspace {
+
+  display: contents;
+
+}
+
+
+
+body.sst-layout-standard .compact-sticky-chrome {
+
+  display: contents;
+
+}
+
+
+
+body.sst-layout-standard .compact-main-column {
+
+  display: contents;
+
+}
+
+
+
+body.sst-layout-standard .compact-save-row {
+
+  display: none !important;
+
+}
+
+
+
+body:not(.sst-layout-compact) .compact-nav-root {
+
+  display: none !important;
+
+}
+
+
+
+body.sst-layout-standard .tab-panel[data-tab-panel="recognition"] {
+
+  display: none !important;
+
+}
+
+
+
+body.sst-layout-standard .compact-recognition-anchor {
+
+  display: none !important;
+
+}
+
+
+
+body.sst-layout-compact .dashboard-recognition-panel .dashboard-hint-text,
+
+body.sst-layout-compact .dashboard-prose-hint,
+
+body.sst-layout-compact .asr-advanced-notes,
+
+body.sst-layout-compact [data-tab-panel="asr_advanced"] .inline-field-note {
+
+  display: none !important;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="style"] .surface-header .muted,
+
+body.sst-layout-compact #style-line-slot-description,
+
+body.sst-layout-compact [data-tab-panel="style"] #subtitle-style-custom-status,
+
+body.sst-layout-compact [data-tab-panel="style"] .panel-header .muted {
+
+  display: none !important;
+
+}
+
+
+
+/* Style tab: single-column layout, no horizontal overflow */
+
+body.sst-layout-compact [data-tab-panel="style"] .panel-style {
+
+  gap: 12px;
+
+  min-width: 0;
+
+  max-width: 100%;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="style"] .panel-header,
+
+body.sst-layout-compact [data-tab-panel="style"] .surface-header,
+
+body.sst-layout-compact [data-tab-panel="style"] .toolbar-row {
+
+  flex-direction: column !important;
+
+  align-items: stretch !important;
+
+  gap: 10px;
+
+  margin-bottom: 10px;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="style"] .toolbar-row {
+
+  margin-top: 0;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="style"] .toolbar-row .grow {
+
+  flex: 1 1 auto;
+
+  min-width: 0;
+
+  width: 100%;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="style"] .toolbar-row .button-stack {
+
+  width: 100%;
+
+  flex-direction: column;
+
+  gap: 8px;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="style"] .toolbar-row .button-stack button {
+
+  width: 100%;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="style"] .settings-surface {
+
+  padding: 12px;
+
+  min-width: 0;
+
+  max-width: 100%;
+
+  box-sizing: border-box;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="style"] .style-grid {
+
+  grid-template-columns: 1fr;
+
+  margin-top: 0;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="style"] .slot-tab-list {
+
+  display: grid;
+
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  gap: 8px;
+
+  margin-top: 10px;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="style"] .slot-tab {
+
+  width: 100%;
+
+  min-width: 0;
+
+  box-sizing: border-box;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="style"] .slot-enable-row {
+
+  margin-top: 0;
+
+  width: 100%;
+
+}
+
+
+
+body.sst-layout-compact [data-tab-panel="style"] .stack-field input,
+
+body.sst-layout-compact [data-tab-panel="style"] .stack-field select {
+
+  width: 100%;
+
+  max-width: 100%;
+
+  box-sizing: border-box;
+
+}
+
+

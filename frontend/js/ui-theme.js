@@ -53,6 +53,22 @@ export function applyUiThemeFromConfigPayload(configPayload, targetDocument = do
   root.style.setProperty("--ui-accent-tertiary-rgb", accent3Rgb);
 
   // Dashboard/app CSS variables (app.css) – override key tokens.
+  root.style.setProperty(
+    "--bg-app",
+    resolved.theme === "light" ? "#ffffff" : "#0b1422",
+  );
+  root.style.setProperty(
+    "--bg-canvas",
+    resolved.theme === "light" ? "#f6f8ff" : "#080a12",
+  );
+  root.style.setProperty(
+    "--bg-control",
+    resolved.theme === "light" ? "rgba(255, 255, 255, 0.96)" : "rgba(8, 14, 24, 0.92)",
+  );
+  root.style.setProperty(
+    "--bg-panel-elevated",
+    resolved.theme === "light" ? "rgba(255, 255, 255, 0.92)" : "rgba(7, 14, 24, 0.82)",
+  );
   root.style.setProperty("--accent", resolved.palette.accent);
   root.style.setProperty("--accent-secondary", resolved.palette.accent_secondary);
   root.style.setProperty("--accent-strong", resolved.palette.accent_secondary);

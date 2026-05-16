@@ -197,6 +197,28 @@ class TranslationDispatcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(complete_events), 1)
         self.assertEqual([item.text for item in complete_events[0].translations], ["hello-en"])
 
+    async def test_skips_provider_when_preview_superseded_with_concurrent_jobs(self) -> None:
+        """Superseded job must not call the translation engine when a newer final shares preview lineage."""
+        self.config["translation"]["max_concurrent_jobs"] = 2
+        engine = _StubTranslationEngine(delays={"translation_1": 20.0})
+        self.relevant_sequences.update({1, 2})
+        dispatcher = TranslationDispatcher(
+            engine,
+            lambda: self.config,
+            self._publish,
+            lambda sequence: sequence in self.relevant_sequences,
+            self._metrics_callback,
+            structured_logger=self.structured_logger,
+        )
+        key = "seg:rev:1"
+        await asyncio.gather(
+            dispatcher.submit_final(sequence=1, source_text="older", source_lang="en", preview_lineage_key=key),
+            dispatcher.submit_final(sequence=2, source_text="newer", source_lang="en", preview_lineage_key=key),
+        )
+        await asyncio.sleep(0.35)
+        await dispatcher.stop()
+        self.assertEqual(len(engine.calls), 1)
+
     async def test_completion_event_keeps_published_translations(self) -> None:
         self.config["translation"]["lines"] = [
             {"slot_id": "translation_1", "enabled": True, "target_lang": "en", "provider": "stub", "label": "EN"},
@@ -280,7 +302,8 @@ class TranslationDispatcherTests(unittest.IsolatedAsyncioTestCase):
             structured_logger=self.structured_logger,
         )
         await dispatcher.submit_final(sequence=1, source_text="hello", source_lang="en")
-        await asyncio.sleep(0.03)
+        # Let job 1 enter translate_target (0.2s in-engine delay) before we mark seq 1 irrelevant.
+        await asyncio.sleep(0.12)
         self.relevant_sequences.clear()
         self.relevant_sequences.add(2)
         await dispatcher.cancel_older_than(2)

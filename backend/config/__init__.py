@@ -202,8 +202,16 @@ class LocalConfigManager:
         accent_default = str(defaults_palette.get("accent", "#6cc7ff") or "#6cc7ff")
         accent2_default = str(defaults_palette.get("accent_secondary", "#ff6ce6") or "#ff6ce6")
         accent3_default = str(defaults_palette.get("accent_tertiary", "#7ce3ad") or "#7ce3ad")
+        layout = str(current.get("layout", defaults.get("layout", "standard")) or "standard").strip().lower()
+        if layout not in {"standard", "compact"}:
+            layout = str(defaults.get("layout", "standard") or "standard").strip().lower()
+            if layout not in {"standard", "compact"}:
+                layout = "standard"
+        show_remote_tools = bool(current.get("show_remote_tools", defaults.get("show_remote_tools", False)))
         return {
             "language": language,
+            "layout": layout,
+            "show_remote_tools": show_remote_tools,
             "theme": theme,
             "palette": {
                 "accent": _hex(palette.get("accent"), accent_default),

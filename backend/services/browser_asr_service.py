@@ -6,6 +6,10 @@ from typing import Any
 
 from fastapi import FastAPI, WebSocket
 
+from backend.core.runtime.browser_asr_replay import BrowserAsrJsonlRecorder
+from backend.core.runtime.browser_asr_trace import BrowserAsrTraceFields, log_basr, new_event_id
+from backend.core.timekeeping import perf_counter_clock
+
 
 class BrowserAsrService:
     def __init__(self, app: FastAPI) -> None:
@@ -15,6 +19,8 @@ class BrowserAsrService:
         self._active_websocket: WebSocket | None = None
         self._active_client_session_id: str | None = None
         self._active_generation_id: int = 0
+        self._clock = perf_counter_clock
+        self._jsonl_recorder = BrowserAsrJsonlRecorder.from_env()
         self._snapshot: dict[str, Any] = {
             "worker_connected": False,
             "recognition_state": "disconnected",
@@ -57,6 +63,10 @@ class BrowserAsrService:
             "media_track_leak_guard_count": 0,
             "browser_stale_events_ignored": 0,
         }
+
+    @property
+    def _structured_logger(self):
+        return getattr(self._app.state, "structured_runtime_logger", None)
 
     @property
     def _runtime_orchestrator(self):
@@ -121,8 +131,9 @@ class BrowserAsrService:
     async def handle_status(self, transport_id: int, payload: dict[str, Any]) -> bool:
         if not isinstance(payload, dict):
             return False
-        accepted = await self._accept_payload(transport_id, payload)
+        accepted, reject_code = await self._accept_payload(transport_id, payload)
         if not accepted:
+            self._log_transport_reject(reject_code, transport_id, payload)
             return False
         snapshot_update = {
             "worker_connected": True,
@@ -225,16 +236,32 @@ class BrowserAsrService:
         }
         async with self._lock:
             self._snapshot.update(snapshot_update)
-        await self._runtime_orchestrator.update_browser_asr_worker_status(payload)
+        payload_for_orchestrator = dict(payload)
+        payload_for_orchestrator["basr_status_event_id"] = new_event_id()
+        payload_for_orchestrator["basr_status_mono"] = self._clock()
+        payload_for_orchestrator["basr_transport_id"] = transport_id
+        await self._runtime_orchestrator.update_browser_asr_worker_status(payload_for_orchestrator)
         return True
 
     async def handle_external_update(self, transport_id: int, payload: dict[str, Any]) -> bool:
         if not isinstance(payload, dict):
             return False
-        accepted = await self._accept_payload(transport_id, payload)
+        accepted, reject_code = await self._accept_payload(transport_id, payload)
         if not accepted:
+            self._log_transport_reject(reject_code, transport_id, payload)
+            self._jsonl_recorder.maybe_record(
+                {
+                    "kind": "ingress_reject",
+                    "reject_code": reject_code,
+                    "transport_id": transport_id,
+                    "advance_mono": 0.0,
+                }
+            )
             return False
         backend_received_at_ms = self._now_ms()
+        mono = self._clock()
+        event_id = new_event_id()
+        client_parent = str(payload.get("client_event_id") or "").strip() or None
         update_payload: dict[str, Any] = {
             "partial": str(payload.get("partial", "") or ""),
             "final": str(payload.get("final", "") or ""),
@@ -244,6 +271,10 @@ class BrowserAsrService:
             "session_id": str(payload.get("session_id", "") or "").strip() or None,
             "client_segment_id": str(payload.get("client_segment_id", "") or "").strip() or None,
             "forced_final": bool(payload.get("forced_final", False)),
+            "asr_operational_event_id": event_id,
+            "causal_parent_asr_event_id": client_parent,
+            "basr_mono_ingress_at": mono,
+            "transport_id": transport_id,
         }
         if payload.get("asr_result_created_at_ms") is not None:
             update_payload["asr_result_created_at_ms"] = int(payload.get("asr_result_created_at_ms", 0) or 0)
@@ -257,6 +288,19 @@ class BrowserAsrService:
         ):
             update_payload["backend_received_at_ms"] = backend_received_at_ms
         await self._runtime_orchestrator.ingest_external_asr_update(**update_payload)
+        self._jsonl_recorder.maybe_record(
+            {
+                "kind": "ingest",
+                "event_id": event_id,
+                "causal_parent_id": client_parent,
+                "generation_id": update_payload["generation_id"],
+                "session_id": update_payload["session_id"],
+                "transport_id": transport_id,
+                "mono_ingress_at": mono,
+                "is_final": update_payload["is_final"],
+                "advance_mono": 0.0,
+            }
+        )
         async with self._lock:
             self._snapshot["last_seen_at_ms"] = self._now_ms()
         return True
@@ -293,25 +337,45 @@ class BrowserAsrService:
         snapshot["browser_worker_generation"] = snapshot.get("generation_id", 0)
         return snapshot
 
-    async def _accept_payload(self, transport_id: int, payload: dict[str, Any]) -> bool:
+    def has_active_transport(self) -> bool:
+        return self._active_websocket is not None
+
+    def _log_transport_reject(self, code: str | None, transport_id: int, payload: dict[str, Any]) -> None:
+        trace = BrowserAsrTraceFields(
+            event_id=new_event_id(),
+            causal_parent_id=None,
+            generation_id=int(payload.get("generation_id", 0) or 0) or None,
+            session_id=str(payload.get("session_id", "") or "").strip() or None,
+            transport_id=transport_id,
+            mono_ingress_at=self._clock(),
+        )
+        log_basr(
+            self._structured_logger,
+            "browser_recognition",
+            "ingress_rejected_transport",
+            trace=trace,
+            payload={"reject_code": code},
+        )
+
+    async def _accept_payload(self, transport_id: int, payload: dict[str, Any]) -> tuple[bool, str | None]:
         async with self._lock:
             if transport_id != self._active_transport_id:
                 self._snapshot["browser_stale_events_ignored"] = int(self._snapshot["browser_stale_events_ignored"]) + 1
-                return False
+                return False, "wrong_transport"
             session_id = str(payload.get("session_id", "") or "").strip() or None
             generation_id = int(payload.get("generation_id", 0) or 0)
             if session_id and self._active_client_session_id and session_id != self._active_client_session_id:
                 self._active_client_session_id = session_id
                 self._active_generation_id = generation_id
-                return True
+                return True, None
             if session_id and not self._active_client_session_id:
                 self._active_client_session_id = session_id
             if generation_id and generation_id < self._active_generation_id:
                 self._snapshot["browser_stale_events_ignored"] = int(self._snapshot["browser_stale_events_ignored"]) + 1
-                return False
+                return False, "stale_generation"
             if generation_id:
                 self._active_generation_id = generation_id
-            return True
+            return True, None
 
     @staticmethod
     def _now_ms() -> int:

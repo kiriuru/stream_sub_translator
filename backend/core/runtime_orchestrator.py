@@ -55,6 +55,12 @@ from backend.core.runtime.output_fanout_controller import OutputFanoutController
 from backend.core.runtime.transcript_controller import TranscriptController
 # SpeechSourceFactory is intentionally not used: we select among concrete SpeechSource implementations directly.
 from backend.core.runtime.browser_speech_source import BrowserSpeechSource, _BrowserHooks
+from backend.core.runtime.browser_asr_operational_fsm import BrowserAsrOperationalFsm
+from backend.core.runtime.browser_asr_recovery_policy import (
+    BrowserAsrPolicyExecutor,
+    BrowserAsrRecoveryPolicy,
+)
+from backend.core.runtime.browser_asr_trace import BrowserAsrTraceFields, new_event_id
 from backend.core.runtime.remote_controller_speech_source import RemoteControllerSpeechSource, _RemoteControllerHooks
 from backend.core.runtime.remote_worker_speech_source import RemoteWorkerSpeechSource, _RemoteWorkerHooks
 from backend.core.runtime.local_parakeet_speech_source import LocalParakeetSpeechSource, _LocalParakeetHooks
@@ -172,6 +178,13 @@ class RuntimeOrchestrator:
         }
         self._rnnoise_processor = RNNoiseRecognitionProcessor(sample_rate=self._asr_engine.sample_rate, channels=1)
         self._browser_asr_gateway = BrowserAsrGateway(structured_logger=structured_logger)
+        self._browser_asr_fsm = BrowserAsrOperationalFsm(structured_logger=structured_logger)
+        self._browser_asr_recovery_policy = BrowserAsrRecoveryPolicy()
+        self._browser_transport_probe: Callable[[], bool] | None = None
+        self._browser_asr_policy_executor = BrowserAsrPolicyExecutor(
+            structured_logger=structured_logger,
+            can_send_control=self._browser_policy_can_send,
+        )
         self._asr_mode = AsrModeController(self.config_getter)
         self._remote_audio_connected = False
         self._remote_audio_session_id: str | None = None
@@ -266,6 +279,7 @@ class RuntimeOrchestrator:
         # NOTE: hook-based generic SpeechSource factory removed in favor of concrete SpeechSource implementations.
         self._browser_speech_source = BrowserSpeechSource(
             gateway=self._browser_asr_gateway,
+            structured_logger=structured_logger,
             hooks=_BrowserHooks(
                 browser_worker_connected=self._browser_asr_worker_connected_impl,
                 browser_worker_disconnected=self._browser_asr_worker_disconnected_impl,
@@ -392,6 +406,18 @@ class RuntimeOrchestrator:
             source="runtime_orchestrator",
             payload=payload or None,
         )
+
+    def set_browser_asr_transport_probe(self, probe: Callable[[], bool] | None) -> None:
+        """Optional callback from app bootstrap: BrowserAsrService.has_active_transport."""
+        self._browser_transport_probe = probe
+
+    def _browser_policy_can_send(self) -> bool:
+        if self._browser_transport_probe is None:
+            return False
+        try:
+            return bool(self._browser_transport_probe())
+        except Exception:
+            return False
 
     def _current_asr_mode(self) -> str:
         return self._asr_mode.current_mode(state_is_running=self._state.is_running)
@@ -1144,6 +1170,10 @@ class RuntimeOrchestrator:
         worker_generation_id: int | None,
         worker_session_id: str | None,
         backend_received_at_ms: int | None,
+        asr_operational_event_id: str | None = None,
+        causal_parent_asr_event_id: str | None = None,
+        basr_mono_ingress_at: float | None = None,
+        transport_id: int | None = None,
     ) -> TranscriptEvent | None:
         if not self._state.is_running or not self._is_browser_asr_mode():
             return None
@@ -1175,6 +1205,17 @@ class RuntimeOrchestrator:
             worker_session_id=worker_session_id,
             backend_received_at_ms=backend_received_at_ms,
             backend_published_to_router_at_ms=backend_published_to_router_at_ms,
+            asr_operational_event_id=asr_operational_event_id,
+            causal_parent_asr_event_id=causal_parent_asr_event_id,
+        )
+        self._maybe_note_browser_fsm_ingest(
+            is_final=False,
+            asr_operational_event_id=asr_operational_event_id,
+            causal_parent_asr_event_id=causal_parent_asr_event_id,
+            worker_generation_id=worker_generation_id,
+            worker_session_id=worker_session_id,
+            basr_mono_ingress_at=basr_mono_ingress_at,
+            transport_id=transport_id,
         )
         return TranscriptEvent(
             event="partial",
@@ -1199,6 +1240,10 @@ class RuntimeOrchestrator:
         worker_generation_id: int | None,
         worker_session_id: str | None,
         backend_received_at_ms: int | None,
+        asr_operational_event_id: str | None = None,
+        causal_parent_asr_event_id: str | None = None,
+        basr_mono_ingress_at: float | None = None,
+        transport_id: int | None = None,
     ) -> TranscriptEvent | None:
         if not self._state.is_running or not self._is_browser_asr_mode():
             return None
@@ -1227,6 +1272,17 @@ class RuntimeOrchestrator:
             worker_session_id=worker_session_id,
             backend_received_at_ms=backend_received_at_ms,
             backend_published_to_router_at_ms=backend_published_to_router_at_ms,
+            asr_operational_event_id=asr_operational_event_id,
+            causal_parent_asr_event_id=causal_parent_asr_event_id,
+        )
+        self._maybe_note_browser_fsm_ingest(
+            is_final=True,
+            asr_operational_event_id=asr_operational_event_id,
+            causal_parent_asr_event_id=causal_parent_asr_event_id,
+            worker_generation_id=worker_generation_id,
+            worker_session_id=worker_session_id,
+            basr_mono_ingress_at=basr_mono_ingress_at,
+            transport_id=transport_id,
         )
         return TranscriptEvent(
             event="final",
@@ -1253,6 +1309,8 @@ class RuntimeOrchestrator:
         worker_session_id: str | None = None,
         backend_received_at_ms: int | None = None,
         backend_published_to_router_at_ms: int | None = None,
+        asr_operational_event_id: str | None = None,
+        causal_parent_asr_event_id: str | None = None,
     ) -> TranscriptSegment:
         return TranscriptSegment(
             segment_id=segment_id,
@@ -1273,7 +1331,32 @@ class RuntimeOrchestrator:
             worker_session_id=worker_session_id,
             backend_received_at_ms=backend_received_at_ms,
             backend_published_to_router_at_ms=backend_published_to_router_at_ms,
+            asr_operational_event_id=asr_operational_event_id,
+            causal_parent_asr_event_id=causal_parent_asr_event_id,
         )
+
+    def _maybe_note_browser_fsm_ingest(
+        self,
+        *,
+        is_final: bool,
+        asr_operational_event_id: str | None,
+        causal_parent_asr_event_id: str | None,
+        worker_generation_id: int | None,
+        worker_session_id: str | None,
+        basr_mono_ingress_at: float | None,
+        transport_id: int | None,
+    ) -> None:
+        if not asr_operational_event_id:
+            return
+        trace = BrowserAsrTraceFields(
+            event_id=asr_operational_event_id,
+            causal_parent_id=causal_parent_asr_event_id,
+            generation_id=worker_generation_id,
+            session_id=worker_session_id,
+            transport_id=transport_id,
+            mono_ingress_at=basr_mono_ingress_at,
+        )
+        self._browser_asr_fsm.note_ingest(is_final=is_final, trace=trace)
 
     async def browser_asr_worker_connected(self) -> None:
         source = getattr(self, "_active_speech_source", None)
@@ -1287,6 +1370,15 @@ class RuntimeOrchestrator:
         self._browser_worker_state.mark_connected()
         browser_mode = self._current_asr_mode() if self._is_browser_asr_mode() else None
         self._browser_asr_gateway.worker_connected(browser_mode=browser_mode)
+        conn_trace = BrowserAsrTraceFields(
+            event_id=new_event_id(),
+            causal_parent_id=None,
+            generation_id=None,
+            session_id=None,
+            transport_id=None,
+            mono_ingress_at=time.perf_counter(),
+        )
+        self._browser_asr_fsm.note_worker_connected(trace=conn_trace)
         if self._state.is_running and self._is_browser_asr_mode():
             await self._set_runtime_state(
                 is_running=True,
@@ -1310,7 +1402,17 @@ class RuntimeOrchestrator:
     async def _browser_asr_worker_disconnected_impl(self) -> None:
         self._browser_worker_state.reset_for_stop()
         browser_mode = self._current_asr_mode() if self._is_browser_asr_mode() else None
+        disc_trace = BrowserAsrTraceFields(
+            event_id=new_event_id(),
+            causal_parent_id=None,
+            generation_id=None,
+            session_id=None,
+            transport_id=None,
+            mono_ingress_at=time.perf_counter(),
+        )
         self._browser_asr_gateway.worker_disconnected(browser_mode=browser_mode)
+        self._browser_asr_fsm.note_worker_disconnected(trace=disc_trace)
+        self._browser_asr_fsm.reset()
         self._segment_state.cleanup_on_browser_worker_disconnect()
         await self.subtitle_router.clear_active_partial()
         if self._state.is_running and self._is_browser_asr_mode():
@@ -1335,9 +1437,36 @@ class RuntimeOrchestrator:
     async def _update_browser_asr_worker_status_impl(self, payload: dict[str, Any]) -> None:
         previous = self._browser_asr_gateway.diagnostics()
         self._browser_asr_gateway.update_status(payload)
+        current = self._browser_asr_gateway.diagnostics()
+        st_event = str(payload.get("basr_status_event_id") or "").strip()
+        status_trace: BrowserAsrTraceFields | None = None
+        if st_event:
+            tid = payload.get("basr_transport_id")
+            mono = payload.get("basr_status_mono")
+            status_trace = BrowserAsrTraceFields(
+                event_id=st_event,
+                causal_parent_id=None,
+                generation_id=int(current.generation_id) if current.generation_id is not None else None,
+                session_id=str(current.session_id).strip() if current.session_id else None,
+                transport_id=int(tid) if tid is not None else None,
+                mono_ingress_at=float(mono) if mono is not None else None,
+            )
+        if self._is_browser_asr_mode():
+            self._browser_asr_fsm.note_status_aggregate(
+                recognition_state=current.recognition_state,
+                supervisor_state=current.supervisor_state,
+                degraded_reason=str(current.degraded_reason).strip() if current.degraded_reason else None,
+                worker_connected=bool(current.worker_connected),
+                trace=status_trace,
+            )
+            actions = self._browser_asr_recovery_policy.suggest(
+                degraded_reason=str(current.degraded_reason).strip() if current.degraded_reason else None,
+                last_error=str(current.last_error).strip() if current.last_error else None,
+                worker_connected=bool(current.worker_connected),
+            )
+            self._browser_asr_policy_executor.execute(actions=actions, trace=status_trace)
         if self._state.is_running and self._is_browser_asr_mode():
             self._increment_counter_metric("browser_worker_event_count", 1)
-            current = self._browser_asr_gateway.diagnostics()
             signature = (
                 current.worker_connected,
                 current.desired_running,
@@ -1381,6 +1510,10 @@ class RuntimeOrchestrator:
         worker_send_started_at_ms: int | None = None,
         worker_message_sequence: int | None = None,
         backend_received_at_ms: int | None = None,
+        asr_operational_event_id: str | None = None,
+        causal_parent_asr_event_id: str | None = None,
+        basr_mono_ingress_at: float | None = None,
+        transport_id: int | None = None,
     ) -> None:
         source = getattr(self, "_active_speech_source", None)
         if source is not None:
@@ -1397,6 +1530,10 @@ class RuntimeOrchestrator:
                 worker_send_started_at_ms=worker_send_started_at_ms,
                 worker_message_sequence=worker_message_sequence,
                 backend_received_at_ms=backend_received_at_ms,
+                asr_operational_event_id=asr_operational_event_id,
+                causal_parent_asr_event_id=causal_parent_asr_event_id,
+                basr_mono_ingress_at=basr_mono_ingress_at,
+                transport_id=transport_id,
             )
             return
         return

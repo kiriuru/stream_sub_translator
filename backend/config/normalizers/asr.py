@@ -77,7 +77,13 @@ def normalize_asr_config(payload: Any, *, defaults: dict[str, Any]) -> dict[str,
         model_load_mode = "auto"
     model_revision = str(asr.get("model_revision", defaults.get("model_revision", "")) or "").strip()
 
-    return {
+    profile_lock = str(asr.get("desktop_profile_lock", "") or "").strip().lower()
+    if profile_lock != "browser_speech":
+        profile_lock = ""
+    elif asr_mode not in {"browser_google", "browser_google_experimental"}:
+        asr_mode = "browser_google"
+
+    normalized: dict[str, Any] = {
         "mode": asr_mode,
         "provider_preference": provider_preference,
         "prefer_gpu": bool(asr.get("prefer_gpu", True)),
@@ -90,3 +96,6 @@ def normalize_asr_config(payload: Any, *, defaults: dict[str, Any]) -> dict[str,
         "browser": normalize_browser_asr_config(asr.get("browser", {}), defaults=defaults["browser"]),
         "realtime": normalize_realtime_asr_config(asr.get("realtime", {}), defaults=defaults["realtime"]),
     }
+    if profile_lock:
+        normalized["desktop_profile_lock"] = profile_lock
+    return normalized

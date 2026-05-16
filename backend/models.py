@@ -137,10 +137,16 @@ class TranscriptSegment(SchemaModel):
     parakeet_transcribe_started_at_ms: int | None = None
     parakeet_transcribe_done_at_ms: int | None = None
     provider_result_created_at_ms: int | None = None
+    # Domain B → Domain A reference (optional; not a merged causal graph).
+    asr_operational_event_id: str | None = None
+    causal_parent_asr_event_id: str | None = None
+    # Domain C preview / lineage (optional reference to Domain B key).
+    translation_preview_lineage_key: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class SettingsSaveRequest(SchemaModel):
-    payload: dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any]
 
 
 class SettingsSaveResponse(SchemaModel):

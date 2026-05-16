@@ -12,6 +12,8 @@ import {
   getSimpleTuningLabel,
   getSimpleTuningOption,
   isBrowserRecognitionMode,
+  isDesktopBrowserQuickStartLocked,
+  syncRecognitionModeSelectLock,
   parseSecondsToMs,
   setElementVisibility,
   t,
@@ -147,11 +149,13 @@ export function mountAsrPanel(root, { store, actions, logger }) {
     if (!config) {
       return;
     }
+    const quickStartLocked = isDesktopBrowserQuickStartLocked(config);
     const mode = config.asr?.mode || "local";
     const browserMode = isBrowserRecognitionMode(mode);
     const localProvider = config.asr?.provider_preference || "official_eu_parakeet_low_latency";
     if (elements.modeSelect) {
-      elements.modeSelect.value = mode;
+      syncRecognitionModeSelectLock(elements.modeSelect, quickStartLocked);
+      elements.modeSelect.value = browserMode ? mode : quickStartLocked ? "browser_google" : mode;
     }
     if (elements.languageSelect) {
       elements.languageSelect.value = config.asr?.browser?.recognition_language || "ru-RU";
@@ -168,17 +172,25 @@ export function mountAsrPanel(root, { store, actions, logger }) {
     if (elements.workerBrowserWebNote) {
       elements.workerBrowserWebNote.textContent = t("overview.recognition.worker_browser.web_hint");
     }
-    setElementVisibility(elements.localAsrProviderRow, !browserMode);
+    setElementVisibility(elements.localAsrProviderRow, !browserMode && !quickStartLocked);
     if (elements.localAsrProviderSelect) {
       elements.localAsrProviderSelect.value = localProvider;
+      elements.localAsrProviderSelect.disabled = quickStartLocked || browserMode;
     }
     if (elements.modeHint) {
-      if (browserMode) {
-        elements.modeHint.textContent = mode === "browser_google_experimental"
+      if (quickStartLocked) {
+        elements.modeHint.textContent = t("overview.recognition.hint.browser_quick_start_locked");
+        setElementVisibility(elements.modeHint, true);
+      } else if (browserMode) {
+        const browserHint = mode === "browser_google_experimental"
           ? t("overview.recognition.hint.browser_google_experimental")
           : t("overview.recognition.hint.browser_google");
+        elements.modeHint.textContent = browserHint;
+        setElementVisibility(elements.modeHint, Boolean(browserHint));
       } else {
-        elements.modeHint.textContent = t("overview.recognition.hint.local");
+        const localHint = t("overview.recognition.hint.local");
+        elements.modeHint.textContent = localHint;
+        setElementVisibility(elements.modeHint, Boolean(localHint));
       }
     }
     if (elements.audioInputSelect) {
@@ -270,8 +282,14 @@ export function mountAsrPanel(root, { store, actions, logger }) {
   }
 
   elements.modeSelect?.addEventListener("change", () => {
+    const nextMode = elements.modeSelect.value || "local";
+    if (isDesktopBrowserQuickStartLocked(store.getState().config) && nextMode === "local") {
+      const fallback = store.getState().config?.asr?.mode || "browser_google";
+      elements.modeSelect.value = isBrowserRecognitionMode(fallback) ? fallback : "browser_google";
+      logger("[asr] local Parakeet is locked for this desktop quick start profile");
+      return;
+    }
     actions.mutateConfig((draft) => {
-      const nextMode = elements.modeSelect.value || "local";
       draft.asr.mode = nextMode;
     });
     logger(`[asr] mode -> ${getRecognitionModeLabel(elements.modeSelect.value)}`);
@@ -294,6 +312,10 @@ export function mountAsrPanel(root, { store, actions, logger }) {
     logger(label);
   });
   elements.localAsrProviderSelect?.addEventListener("change", () => {
+    if (isDesktopBrowserQuickStartLocked(store.getState().config)) {
+      logger("[asr] backend provider selection is locked for this desktop quick start profile");
+      return;
+    }
     actions.mutateConfig((draft) => {
       const nextProvider = elements.localAsrProviderSelect.value || "official_eu_parakeet_low_latency";
       draft.asr.provider_preference = nextProvider;
@@ -352,7 +374,11 @@ export function mountAsrPanel(root, { store, actions, logger }) {
     render(store.getState());
   };
   window.addEventListener("sst:locale-changed", onLocaleChanged);
-  const onDesktopContext = () => {
+  const onDesktopContext = (event) => {
+    const detail = event?.detail;
+    if (detail && window.AppState) {
+      window.AppState.desktop = { ...window.AppState.desktop, ...detail };
+    }
     render(store.getState());
   };
   window.addEventListener("sst:desktop-context", onDesktopContext);

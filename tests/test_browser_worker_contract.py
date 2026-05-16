@@ -33,6 +33,15 @@ class BrowserWorkerContractTests(unittest.TestCase):
         cls.desktop_js = DESKTOP_JS.read_text(encoding="utf-8")
         cls.source_text_replacement_panel_js = SOURCE_TEXT_REPLACEMENT_PANEL_JS.read_text(encoding="utf-8")
 
+    def test_asr_panel_locks_local_parakeet_for_desktop_browser_quick_start(self) -> None:
+        lock_js = (PROJECT_ROOT / "frontend" / "js" / "dashboard" / "desktop-profile-lock.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("syncRecognitionModeSelectLock", self.asr_panel_js)
+        self.assertIn("localOption.remove()", lock_js)
+        self.assertIn("overview.recognition.hint.browser_quick_start_locked", self.asr_panel_js)
+        self.assertIn("waitForPywebviewApi", self.desktop_js)
+
     def test_hidden_or_minimized_window_warning_is_present(self) -> None:
         self.assertIn("hidden or minimized", self.html)
         self.assertIn("recognition can stall", self.html)
@@ -239,7 +248,10 @@ class BrowserWorkerContractTests(unittest.TestCase):
         local_provider_block = self.index_html[local_select_pos:local_select_end]
         self.assertNotIn('value="auto"', local_provider_block)
         self.assertNotIn("_".join(["google", "legacy", "http"]), self.index_html)
-        self.assertIn("setElementVisibility(elements.localAsrProviderRow, !browserMode)", self.asr_panel_js)
+        self.assertIn(
+            "setElementVisibility(elements.localAsrProviderRow, !browserMode && !quickStartLocked)",
+            self.asr_panel_js,
+        )
         self.assertIn('draft.asr.mode = "local";', self.asr_panel_js)
         self.assertNotIn("_".join(["google", "legacy", "http"]), self.asr_panel_js)
         self.assertIn("if (result?.runtime && mode !== \"local\")", self.runtime_panel_js)

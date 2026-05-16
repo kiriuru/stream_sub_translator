@@ -31,6 +31,7 @@ class WebSocketManagerTests(unittest.TestCase):
             await manager.connect(dead)
 
             await manager.broadcast({"type": "runtime_update", "payload": {"status": "listening"}})
+            await asyncio.sleep(0.05)
 
             self.assertEqual(len(live.messages), 1)
             self.assertEqual(manager.diagnostics()["ws_events_send_failures"], 1)

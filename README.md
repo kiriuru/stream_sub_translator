@@ -1,8 +1,8 @@
-# SST Desktop 0.3.2
+# SST Desktop 0.4.0
 
 SST Desktop is a local Windows application for real-time speech recognition, optional translation, subtitle routing, and OBS-ready output.
 
-This README describes the current desktop product surface for the `0.3.2` code line.
+This README describes the current desktop product surface for the `0.4.0` code line.
 
 ## Language
 
@@ -10,45 +10,52 @@ This README describes the current desktop product surface for the `0.3.2` code l
 
 ## Technical Documentation
 
-- Full technical architecture document: [docs/TECHNICAL_ARCHITECTURE.md](./docs/TECHNICAL_ARCHITECTURE.md)
+- Full technical architecture document: [docs/TECHNICAL_ARCHITECTURE.md](./docs/TECHNICAL_ARCHITECTURE.md) (includes browser ASR observability §11.4, WebSocket/replay contracts §9, translation preview supersession §12.2)
 - Unified changelog: [docs/CHANGELOG.md](./docs/CHANGELOG.md)
-- `0.3.2` delta notes: [docs/DESKTOP_RELEASE_CHANGELOG_0.3.2.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.3.2.md)
-- Previous delta (`0.3.1`): [docs/DESKTOP_RELEASE_CHANGELOG_0.3.1.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.3.1.md)
-- Current branch follow-up notes (after `0.3.2`): `docs/CHANGELOG.md` → `Unreleased`
+- `0.4.0` delta notes: [docs/DESKTOP_RELEASE_CHANGELOG_0.4.0.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.4.0.md)
+- Previous delta (`0.3.2`): [docs/DESKTOP_RELEASE_CHANGELOG_0.3.2.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.3.2.md)
+- Full history: [docs/CHANGELOG.md](./docs/CHANGELOG.md)
 
 ## Release Highlights
 
-`0.3.2` ships optional **post-ASR word replacement** before translation and on-screen output (Tools & Data), bumps saved config to **`config_version` 7** with new `source_text_replacement` settings, continues **Web Speech** reliability work (policy module + session manager), adds **subtitle style presets** (`accessibility_high_contrast`, `dark_cinema`, `meeting_soft`), and expands **`docs/TECHNICAL_ARCHITECTURE.md`** with a full **local Parakeet** chapter (audio capture, RNNoise, VAD, segment queue, quality vs low-latency model paths). Public HTTP routes stay the same; older configs pick up defaults on load.
+`0.4.0` adds **Browser Speech observability and resilience** on the backend (structured `basr.*` events, monotonic timekeeping, L2 ingress, operational FSM + recovery policy, JSONL replay, bounded WebSocket queues, preview translation supersession) and **desktop packaging/UX**: optional **`Stream Subtitle Translator Only Web.exe`**, **Browser Speech quick start profile lock** (`asr.desktop_profile_lock`), and **non-blocking dashboard** boot. Public HTTP routes and subtitle lifecycle invariants are unchanged; `config_version` stays **7**.
 
-The `0.3.1` stabilization baseline still applies (modular runtime controllers, `SubtitleRouter` split, `backend/translation/providers`, atomic config + corrupt rotation, translation slot cards `translation_1..translation_5`, Chrome worker window hardening, `POST /api/updates/check`, OpenAI model helper routes, Help tab, subtitle entrance effects, logs under `logs/`). See the `0.3.1` delta doc for that narrative.
+The **`0.3.2`** baseline still applies (post-ASR word replacement, Web Speech policy/session manager, subtitle style presets, Parakeet architecture chapter). See [docs/DESKTOP_RELEASE_CHANGELOG_0.3.2.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.3.2.md).
 
-- `backend/versioning.py::PROJECT_VERSION = "0.3.2"` is the single source of truth.
-- Optional **word replacement** layer: `backend/core/source_text_replacement.py`, bundled pairs `backend/data/source_text_builtin_pairs.json`, Tools & Data UI (`source-text-replacement-panel.js`: word/replacement fields, add list, checkbox multi-select + single remove-selected, global Save to apply live), wired through `TranscriptController` so subtitles, translation, and OBS captions see the filtered text.
-- **Web Speech:** `frontend/js/browser-web-speech-recognition-policy.js`; further `browser-asr-session-manager.js` improvements (buddy `SpeechRecognition`, Chrome error recovery).
-- **Styles:** additional built-in presets in `backend/core/subtitle_style.py`.
-- **Docs / tests:** architecture doc refresh; `298` unit tests, `OK`, including `tests/test_source_text_replacement.py`.
+- `backend/versioning.py::PROJECT_VERSION = "0.4.0"` is the single source of truth.
+- **Browser ASR observability:** `backend/core/runtime/browser_asr_*.py`, `timekeeping.py`.
+- **Desktop:** `Only Web.exe`, profile lock, `frontend/js/dashboard/desktop-profile-lock.js`, non-blocking `main.js` / `desktop.js`.
+- **Tests:** full suite **336** tests, `OK` (including `tests/test_browser_asr_observability.py`, `tests/test_desktop_profile_lock.py`).
 
 ## Release Package
 
-The primary desktop release ships as:
+The desktop release ships as one or both public executables:
 
-- `Stream Subtitle Translator.exe`
+- `Stream Subtitle Translator.exe` — full splash with startup profiles
+- `Stream Subtitle Translator Only Web.exe` — Web Speech-only variant (optional second artifact in the same release folders)
 
 On first launch the bootstrap launcher extracts the managed runtime next to itself and then starts the desktop runtime from disk.
 
 ## Quick Start
+
+**Standard launcher** (`Stream Subtitle Translator.exe`):
 
 1. Extract the archive to a writable folder.
 2. Confirm `Stream Subtitle Translator.exe` is present.
 3. Launch `Stream Subtitle Translator.exe`.
 4. Wait for the bootstrap launcher to extract the managed runtime on first start.
 5. In the splash launcher choose one startup profile:
-   - `Quick Start (Web Speech)`
+   - `Quick Start (Web Speech)` — locks out Local Parakeet for this install profile until you pick GPU/CPU on a later launch
    - `NVIDIA GPU (CUDA)`
    - `CPU-only`
    - `Remote Controller`
    - `Remote Worker`
-6. Wait for the local dashboard to open.
+6. The dashboard opens as soon as the shell loads; settings finish loading in the background.
+
+**Web Speech-only launcher** (`Stream Subtitle Translator Only Web.exe`):
+
+1. Same extract/first-run bootstrap steps as above.
+2. No profile picker — goes straight into Web Speech quick start with the same Parakeet lock behavior.
 
 ## Bootstrap Launcher
 
@@ -78,20 +85,19 @@ Current extracted layout:
 - app logs: `logs/`
 - local models: `user-data/models/`
 
-Build it from source with:
+Build from source:
 
-- `build-bootstrap-launcher.bat`
-
-Bootstrap output:
-
-- `dist\bootstrap-launcher\Stream Subtitle Translator.exe`
+- Standard: `build-bootstrap-launcher.bat` → `dist\bootstrap-launcher\Stream Subtitle Translator.exe`
+- Web Speech-only: `build-bootstrap-launcher-web-only.bat` → `dist\bootstrap-launcher-web-only\Stream Subtitle Translator Only Web.exe`
+- Publish both to release folders: `publish-desktop-releases.ps1` and `publish-desktop-releases-web-only.ps1`
 
 ## Startup Profiles
 
 - `Quick Start (Web Speech)`:
   - fastest startup path;
   - keeps recognition in the browser worker window;
-  - skips local AI dependency installation.
+  - skips local AI dependency installation;
+  - sets `asr.desktop_profile_lock = browser_speech` in `user-data/config.json` so the dashboard cannot switch to Local Parakeet until a GPU/CPU profile is chosen on a later launch.
 - `NVIDIA GPU (CUDA)`:
   - provisions the local CUDA PyTorch stack;
   - intended for NVIDIA systems.
@@ -306,6 +312,7 @@ Visual layout was not redesigned in the `0.3.x` line; major work remains interna
 
 ### Web Speech
 
+- After **Quick Start (Web Speech)** or **Only Web**, the dashboard enforces `asr.desktop_profile_lock = browser_speech`: Recognition mode has no Local Parakeet entry, and save/load keeps `asr.mode` on `browser_google` until you launch with **NVIDIA GPU** or **CPU-only** (launcher clears the lock). Implementation: `frontend/js/dashboard/desktop-profile-lock.js`, `desktop/launcher.py`, `backend/config/normalizers/asr.py`, `backend/schemas/config_schema.py` (`AsrConfig.desktop_profile_lock`).
 - Uses a separate dedicated **Google Chrome** worker window (`/google-asr`).
 - On desktop, Overview → Recognition can pick **Auto** or **Google Chrome** for that worker (`asr.browser.worker_launch_browser`: `auto` or `google_chrome`); both resolve to launching Chrome. The launcher reads this from `config.json` each time the worker URL is opened. The same control is hidden in the web-only dashboard (`start.bat` in a normal browser), where `window.open` always follows the OS default browser.
 - Desktop behavior is fixed:
@@ -444,7 +451,7 @@ Overlay remains a separate lightweight page for OBS Browser Source and auto-reco
 - legacy language-based `subtitle_output.display_order` values are migrated to slot ids like `translation_1`;
 - `/api/runtime/start` can apply an optional normalized `config_payload` snapshot for runtime-only changes without persisting `user-data/config.json` (tracked via `active_config_source = runtime_start_snapshot`, `active_config_persisted = false`, `active_config_hash`);
 - config writes are atomic on Windows (temporary file in the same folder + `os.replace()`); a corrupt `user-data/config.json` is rotated into `*.corrupt-<timestamp>.json` and defaults are restored;
-- `backend/versioning.py` (`PROJECT_VERSION = "0.3.2"`) remains the single source of truth for the app version.
+- `backend/versioning.py` (`PROJECT_VERSION = "0.4.0"`) remains the single source of truth for the app version.
 
 ## Remote Notes
 
@@ -526,14 +533,16 @@ To update SST Desktop:
 - Provision the local dev runtime with `start.bat`.
 - Build the desktop one-folder package with `build-desktop.bat`.
 - Build the bootstrap one-file launcher with `build-bootstrap-launcher.bat`.
-- Publish clean release folders with `publish-desktop-releases.ps1`.
+- Build the Web Speech-only bootstrap with `build-bootstrap-launcher-web-only.bat`.
+- Publish clean release folders with `publish-desktop-releases.ps1` and `publish-desktop-releases-web-only.ps1`.
 
 Build output:
 
 - `dist\Stream Subtitle Translator\`
-- bootstrap launcher:
-  - `dist\bootstrap-launcher\`
-- publish script defaults:
+- bootstrap launchers:
+  - `dist\bootstrap-launcher\Stream Subtitle Translator.exe`
+  - `dist\bootstrap-launcher-web-only\Stream Subtitle Translator Only Web.exe`
+- publish script defaults (both exes end up in each folder):
   - `F:\AI\stream-sub-translator-desktop-release`
   - `F:\AI\stream-sub-translator-desktop-release-clean`
 
@@ -567,7 +576,7 @@ Run the current regression suite with:
 
 - `.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`
 
-The current `0.3.2` verification run used:
+The current `0.4.0` verification run used:
 
 - `python -m compileall backend desktop tests`
 - `.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"`
@@ -575,15 +584,13 @@ The current `0.3.2` verification run used:
 - `cmd /c build-bootstrap-launcher.bat`
 - `powershell -NoProfile -ExecutionPolicy Bypass -File .\publish-desktop-releases.ps1`
 
-Result:
+Result for `0.4.0`:
 
-- `298 tests`
-- `OK`
+- **336** tests, `OK`
 - release artifacts refreshed:
-  - `dist\Stream Subtitle Translator\Stream Subtitle Translator.exe`
   - `dist\bootstrap-launcher\Stream Subtitle Translator.exe`
-  - `F:\AI\stream-sub-translator-desktop-release\Stream Subtitle Translator.exe`
-  - `F:\AI\stream-sub-translator-desktop-release-clean\Stream Subtitle Translator.exe`
+  - `dist\bootstrap-launcher-web-only\Stream Subtitle Translator Only Web.exe`
+  - both exes under `F:\AI\stream-sub-translator-desktop-release` and `-clean`
 
 ## Privacy and Runtime Scope
 
@@ -593,5 +600,5 @@ Result:
 
 ## Release Version
 
-- `0.3.2`
+- `0.4.0`
 - Single runtime source of truth: `backend/versioning.py` (`PROJECT_VERSION`).

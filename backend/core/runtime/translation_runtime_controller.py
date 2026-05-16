@@ -76,11 +76,18 @@ class TranslationRuntimeController:
     def apply_live_settings(self) -> None:
         self._engine.apply_live_settings(self._translation_config())
 
-    async def submit_final(self, *, sequence: int, source_text: str, source_lang: str) -> None:
+    async def submit_final(
+        self, *, sequence: int, source_text: str, source_lang: str, preview_lineage_key: str | None = None
+    ) -> None:
         if self._dispatcher is None:
             # Be tolerant: runtime might submit before start() in some test harnesses.
             self._dispatcher = self._build_dispatcher()
-        await self._dispatcher.submit_final(sequence=sequence, source_text=source_text, source_lang=source_lang)
+        await self._dispatcher.submit_final(
+            sequence=sequence,
+            source_text=source_text,
+            source_lang=source_lang,
+            preview_lineage_key=preview_lineage_key,
+        )
 
     def diagnostics(self) -> TranslationDiagnostics:
         return summarize_translation_diagnostics(

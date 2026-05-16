@@ -36,6 +36,7 @@ class FrontendArchitectureTests(unittest.TestCase):
             JS_ROOT / "panels" / "style-editor-panel.js",
             JS_ROOT / "panels" / "profiles-panel.js",
             JS_ROOT / "panels" / "remote-panel.js",
+            JS_ROOT / "dashboard" / "desktop-profile-lock.js",
             JS_ROOT / "normalizers" / "config-normalizer.js",
             JS_ROOT / "normalizers" / "runtime-normalizer.js",
             JS_ROOT / "normalizers" / "translation-normalizer.js",

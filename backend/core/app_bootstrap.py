@@ -76,6 +76,7 @@ def initialize_app_state(app: FastAPI) -> None:
 
     app.state.asr_service = AsrService(app)
     app.state.browser_asr_service = BrowserAsrService(app)
+    runtime_orchestrator.set_browser_asr_transport_probe(lambda: app.state.browser_asr_service.has_active_transport())
     app.state.translation_service = TranslationService(app)
     app.state.overlay_service = OverlayService(app)
     app.state.export_service = ExportService(app)

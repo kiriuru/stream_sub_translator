@@ -6,6 +6,7 @@ import json
 import unittest
 import zipfile
 from unittest import mock
+from unittest.mock import ANY
 
 from fastapi.testclient import TestClient
 
@@ -193,6 +194,10 @@ class ApiAndWebSocketTests(unittest.TestCase):
                         "session_id": None,
                         "client_segment_id": None,
                         "forced_final": False,
+                        "asr_operational_event_id": ANY,
+                        "causal_parent_asr_event_id": None,
+                        "basr_mono_ingress_at": ANY,
+                        "transport_id": ANY,
                     }
                 ],
             )

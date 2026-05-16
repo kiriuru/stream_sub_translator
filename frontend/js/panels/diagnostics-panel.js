@@ -1,21 +1,5 @@
 import { subscribe } from "../core/store.js";
-import { appendTextLog, formatMetric, formatOptionalMetric, t } from "../dashboard/helpers.js";
-
-function renderLogBox(logBox, logs) {
-  if (!logBox) {
-    return;
-  }
-  if (logBox.__sstRenderFrame) {
-    cancelAnimationFrame(logBox.__sstRenderFrame);
-  }
-  logBox.__sstRenderFrame = requestAnimationFrame(() => {
-    if (!logBox.isConnected || logBox.closest(".tab-panel")?.classList.contains("active") === false) {
-      return;
-    }
-    logBox.value = Array.isArray(logs) ? logs.join("\n") : "";
-    logBox.scrollTop = logBox.scrollHeight;
-  });
-}
+import { formatMetric, formatOptionalMetric, t } from "../dashboard/helpers.js";
 
 export function mountDiagnosticsPanel(root, { store, actions, events }) {
   const elements = {
@@ -26,7 +10,6 @@ export function mountDiagnosticsPanel(root, { store, actions, events }) {
     browserWorkerDiagnosticsText: root.querySelector("#browser-worker-diagnostics-text"),
     obsCcDiagnosticsText: root.querySelector("#obs-cc-diagnostics-text"),
     logsDiscoverabilityText: root.querySelector("#logs-discoverability-text"),
-    logBox: root.querySelector("#log-box"),
     configSaveBtn: root.querySelector("#config-save-btn"),
     configExportBtn: root.querySelector("#config-export-btn"),
     diagnosticsExportBtn: root.querySelector("#diagnostics-export-btn"),
@@ -116,7 +99,6 @@ export function mountDiagnosticsPanel(root, { store, actions, events }) {
     if (elements.configJson && snapshot.config) {
       elements.configJson.value = JSON.stringify(snapshot.config, null, 2);
     }
-    renderLogBox(elements.logBox, snapshot.ui.logs);
   }
 
   elements.configSaveBtn?.addEventListener("click", () => {
@@ -127,7 +109,7 @@ export function mountDiagnosticsPanel(root, { store, actions, events }) {
   });
   elements.diagnosticsExportBtn?.addEventListener("click", () => {
     actions.exportDiagnostics().catch(() => {
-      appendTextLog(elements.logBox, t("tools.runtime.export_failed"));
+      // export failure is surfaced by save/status flows; live events panel was removed
     });
   });
   elements.configImportBtn?.addEventListener("click", async () => {

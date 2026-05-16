@@ -8,7 +8,8 @@ import time
 from typing import Any, Awaitable, Callable
 
 from backend.core.structured_runtime_logger import StructuredRuntimeLogger
-from backend.core.translation_engine import PreparedTranslationLine, PreparedTranslationRequest, TranslationEngine
+from backend.core.runtime.translation_preview_lineage import TranslationPreviewLineage
+from backend.core.translation_engine import PreparedTranslationRequest, TranslationEngine
 from backend.models import TranslationEvent, TranslationItem
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,8 @@ class _QueuedJob:
     source_text: str
     source_lang: str
     submitted_at_monotonic: float
+    preview_lineage_key: str | None = None
+    preview_generation: int = 0
 
 
 @dataclass(slots=True)
@@ -61,9 +64,10 @@ class TranslationDispatcher:
         self._is_sequence_relevant = is_sequence_relevant
         self._metrics_callback = metrics_callback
         self._structured_logger = structured_logger
-        self._queue: deque[_QueuedJob] = deque()
+        self._preview_lineage = TranslationPreviewLineage()
         self._queue_event = asyncio.Event()
         self._lock = asyncio.Lock()
+        self._queue: deque[_QueuedJob] = deque()
         self._worker_task: asyncio.Task | None = None
         self._active_jobs: dict[int, _ActiveJob] = {}
         self._next_job_id = 0
@@ -73,6 +77,7 @@ class TranslationDispatcher:
             "translation_jobs_started": 0,
             "translation_jobs_cancelled": 0,
             "translation_stale_results_dropped": 0,
+            "translation_provider_skipped_before_call": 0,
             "translation_queue_latency_ms": None,
             "translation_provider_latency_ms": None,
             "translation_last_runtime_reason": None,
@@ -86,16 +91,23 @@ class TranslationDispatcher:
         self._provider_rate_lock = asyncio.Lock()
         self._provider_next_allowed_at: dict[str, float] = {}
 
+    def _is_preview_superseded(self, job: _QueuedJob) -> bool:
+        if not job.preview_lineage_key:
+            return False
+        return self._preview_lineage.generation(job.preview_lineage_key) > job.preview_generation
+
     async def submit_final(
         self,
         *,
         sequence: int,
         source_text: str,
         source_lang: str,
+        preview_lineage_key: str | None = None,
     ) -> None:
         if self._stopped:
             return
         self._ensure_worker_started()
+        gen = self._preview_lineage.supersede(preview_lineage_key) if preview_lineage_key else 0
         await self.cancel_older_than(sequence)
         await self._enqueue(
             _QueuedJob(
@@ -104,6 +116,8 @@ class TranslationDispatcher:
                 source_text=source_text,
                 source_lang=source_lang,
                 submitted_at_monotonic=time.perf_counter(),
+                preview_lineage_key=preview_lineage_key,
+                preview_generation=gen,
             )
         )
 
@@ -409,6 +423,21 @@ class TranslationDispatcher:
                     reason="job_not_relevant",
                 )
                 return
+            if job.preview_lineage_key:
+                if self._preview_lineage.generation(job.preview_lineage_key) > job.preview_generation:
+                    async with self._lock:
+                        self._increment_metric_locked("translation_stale_results_dropped", 1)
+                        self._set_runtime_reason_locked("stale:preview_superseded")
+                        self._emit_metrics_locked()
+                    self._log_event(
+                        "translation_preview_superseded",
+                        job_id=job.job_id,
+                        sequence=job.sequence,
+                        preview_lineage_key=job.preview_lineage_key,
+                        job_generation=job.preview_generation,
+                        current_generation=self._preview_lineage.generation(job.preview_lineage_key),
+                    )
+                    return
             timeout_seconds = self._provider_timeout_seconds()
             timeout_ms = int(timeout_seconds * 1000)
             line_tasks = [
@@ -441,6 +470,27 @@ class TranslationDispatcher:
                 )
             for task in asyncio.as_completed(line_tasks):
                 result = await task
+                if result.outcome == "provider_skipped":
+                    async with self._lock:
+                        self._increment_metric_locked("translation_provider_skipped_before_call", 1)
+                        self._emit_metrics_locked()
+                    self._log_event(
+                        "translation_provider_call_skipped",
+                        job_id=job.job_id,
+                        sequence=job.sequence,
+                        source_lang=job.source_lang,
+                        source_text_len=len(job.source_text),
+                        slot_id=result.item.slot_id,
+                        reason=result.reason or "provider_skipped",
+                        preview_lineage_key=job.preview_lineage_key,
+                        job_generation=job.preview_generation,
+                        current_generation=(
+                            self._preview_lineage.generation(job.preview_lineage_key)
+                            if job.preview_lineage_key
+                            else None
+                        ),
+                    )
+                    continue
                 item = result.item
                 provider_latency_ms = round(result.provider_latency_ms, 2)
                 status_message = result.status_message
@@ -530,6 +580,25 @@ class TranslationDispatcher:
                         reason="stale_result",
                     )
                     continue
+                if self._is_preview_superseded(job):
+                    async with self._lock:
+                        self._increment_metric_locked("translation_stale_results_dropped", 1)
+                        self._set_runtime_reason_locked("stale:preview_superseded")
+                        self._emit_metrics_locked()
+                    self._log_event(
+                        "translation_preview_superseded",
+                        job_id=job.job_id,
+                        sequence=job.sequence,
+                        preview_lineage_key=job.preview_lineage_key,
+                        job_generation=job.preview_generation,
+                        current_generation=self._preview_lineage.generation(job.preview_lineage_key),
+                        slot_id=item.slot_id,
+                        label=item.label,
+                        target_lang=item.target_lang,
+                        provider=item.provider,
+                        stage="after_translate",
+                    )
+                    continue
                 event = TranslationEvent(
                     sequence=job.sequence,
                     source_text=job.source_text,
@@ -562,6 +631,17 @@ class TranslationDispatcher:
                     reason="target_result",
                 )
             final_relevant = self._is_sequence_relevant(job.sequence)
+            if self._is_preview_superseded(job):
+                self._log_event(
+                    "translation_preview_superseded",
+                    job_id=job.job_id,
+                    sequence=job.sequence,
+                    preview_lineage_key=job.preview_lineage_key,
+                    job_generation=job.preview_generation,
+                    current_generation=self._preview_lineage.generation(job.preview_lineage_key or ""),
+                    stage="completion",
+                )
+                return
             if self._stopped or not final_relevant:
                 self._log_event(
                     "translation_publish_skipped",
@@ -692,6 +772,36 @@ class TranslationDispatcher:
         line: PreparedTranslationLine,
         timeout_seconds: float,
     ) -> _TargetResult:
+        """Translate one line; may skip the provider call if the job is already stale."""
+        skip_item = TranslationItem(
+            target_lang=line.target_lang,
+            text="",
+            provider=line.provider_name,
+            slot_id=line.slot_id,
+            label=line.label,
+            provider_group=line.provider_group,
+            experimental=line.experimental,
+            local_provider=line.local_provider,
+            cached=False,
+            success=False,
+            error=None,
+        )
+        if not self._is_sequence_relevant(job.sequence):
+            return _TargetResult(
+                item=skip_item,
+                provider_latency_ms=0.0,
+                status_message=None,
+                outcome="provider_skipped",
+                reason="sequence_not_relevant_before_provider",
+            )
+        if self._is_preview_superseded(job):
+            return _TargetResult(
+                item=skip_item,
+                provider_latency_ms=0.0,
+                status_message=None,
+                outcome="provider_skipped",
+                reason="preview_superseded_before_provider",
+            )
         started_at = time.perf_counter()
         try:
             semaphore = self._provider_semaphore(line.provider_name)

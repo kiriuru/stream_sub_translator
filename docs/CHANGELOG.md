@@ -6,7 +6,63 @@
 
 ## Unreleased
 
-Изменений после фиксации релиза `0.3.2` в этом журнале пока нет.
+Изменений после релиза `0.4.0` в этом журнале пока нет.
+
+## 0.4.0
+
+### Версия
+
+- `backend/versioning.py`: `PROJECT_VERSION = "0.4.0"` (источник правды для `GET /api/version` и проверки обновлений).
+- `config_version` **не менялся** (остаётся `7`); публичные HTTP-маршруты и контракт субтитров/overlay сохранены.
+
+### Browser ASR observability (backend)
+
+- Новые модули: `backend/core/timekeeping.py` (`MonotonicClock`), `backend/core/runtime/browser_asr_observability.py`, `browser_asr_trace.py`, `browser_asr_normalized_event.py`, `browser_asr_operational_fsm.py`, `browser_asr_recovery_policy.py`, `browser_asr_replay.py`, `translation_preview_lineage.py`.
+- Интеграция в `browser_asr_service.py`, `browser_speech_source.py`, `runtime_orchestrator.py`, `browser_asr_gateway.py`, `app_bootstrap.py`.
+- L2 ingress: отсев stale transport / speech_source, overlap, структурированные reject-логи с `basr_event_id` / `basr_causal_parent_id`.
+- L4 operational FSM + recovery policy (advisory actions, audit accepted/rejected).
+- L6 JSONL recorder + operational replay (`tests/fixtures/browser_asr_replay_min.jsonl`, `tests/test_browser_asr_observability.py`).
+- Опциональные trace/lineage поля на `TranscriptSegment` (`backend/models.py`).
+
+### WebSocket и перевод
+
+- `backend/ws_manager.py`: bounded per-connection queues, drop-oldest; `replay_last` в обход очереди (см. `docs/TECHNICAL_ARCHITECTURE.md` §9).
+- `backend/core/translation_dispatcher.py`: preview supersession (pre-provider skip + отброс устаревшего результата после вычисления); метрика `translation_provider_skipped_before_call`.
+
+### Desktop: Web Speech-only bootstrap (отдельный exe)
+
+- **`Stream Subtitle Translator Only Web.exe`** — one-file bootstrap без выбора профиля на splash; сразу Web Speech quick start (`--web-speech-only`).
+- `desktop/bootstrap_launcher_web_only.py`, `Stream Subtitle Translator Bootstrap Web Only.spec`.
+- Сборка: `build-bootstrap-launcher-web-only.bat` → `dist\bootstrap-launcher-web-only\`.
+- Публикация: `publish-desktop-releases-web-only.ps1` (копирует Only Web exe в те же release-папки, что и стандартный launcher).
+- `desktop/launcher.py`: `web_speech_only`, пропуск ожидания выбора профиля; компактный splash (`SPLASH_WINDOW_WEB_ONLY` в `desktop/splash_screen.py`).
+
+### Desktop: блокировка Local Parakeet в Browser Speech quick start
+
+- **`asr.desktop_profile_lock`** (`""` | `"browser_speech"`) в `backend/schemas/config_schema.py` — сохраняется через `ConfigSchema` / `LocalConfigManager`.
+- Launcher при **Quick Start (Web Speech)** и **Only Web** пишет lock + `asr.mode: browser_google`; при **NVIDIA GPU** / **CPU-only** снимает lock и возвращает `asr.mode: local`.
+- `backend/config/normalizers/asr.py`, `frontend/js/dashboard/desktop-profile-lock.js`, `asr-panel.js`, `actions.js`, `config-normalizer.js`.
+
+### Desktop: неблокирующий старт dashboard
+
+- `frontend/js/main.js` — панели сразу; `getContext()` и `loadInitialData()` в фоне.
+- `frontend/js/desktop.js` — `immediateDesktopContext()`, `scheduleContextRefresh()`; без блокировки UI на `pywebviewready`.
+
+### Исправления
+
+- Восстановлен публичный `RuntimeOrchestrator.browser_asr_worker_connected()` (регрессия ломала WebSocket worker сразу после connect).
+- Регрессии: `tests/test_browser_asr_service.py`, `tests/test_ws_manager.py`, `tests/test_translation_dispatcher.py`, `tests/test_api_and_websockets.py`.
+- Desktop profile lock и UI boot: `tests/test_desktop_profile_lock.py`; расширены `tests/test_launcher.py`, `tests/test_browser_worker_contract.py`.
+
+### Документация
+
+- `docs/TECHNICAL_ARCHITECTURE.md`: §9 WebSocket/replay, §11.4 browser ASR observability, §12.2 preview supersession, §14–16 desktop (Only Web, profile lock, dashboard boot).
+- `AGENTS.md`: observability, preview supersession, desktop profile lock и packaging.
+- `README.md` / `README.ru.md`, `docs/DESKTOP_RELEASE_CHANGELOG_0.4.0.md`, `backend/data/config.example.json`.
+
+### Тесты
+
+- Полный прогон: `python -m unittest discover -s tests` — **336** тестов, `OK`.
 
 ## 0.3.2
 

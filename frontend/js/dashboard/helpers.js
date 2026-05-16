@@ -115,6 +115,17 @@ export function isExperimentalBrowserRecognitionMode(mode) {
   return String(mode || "").toLowerCase() === "browser_google_experimental";
 }
 
+export {
+  applyDesktopProfileLockToAsrConfig,
+  DESKTOP_PROFILE_LOCK_BROWSER_SPEECH,
+  isDesktopBrowserQuickStartLocked,
+  syncRecognitionModeSelectLock,
+} from "./desktop-profile-lock.js";
+
+export function getDesktopLaunchContext() {
+  return window.AppState?.desktop || {};
+}
+
 export function setElementVisibility(element, visible) {
   if (!element) {
     return;
