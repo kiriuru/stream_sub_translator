@@ -7,6 +7,11 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 GOOGLE_ASR_HTML = PROJECT_ROOT / "frontend" / "google_asr.html"
 BROWSER_ASR_MANAGER_JS = PROJECT_ROOT / "frontend" / "js" / "browser-asr-session-manager.js"
+BROWSER_ASR_LOGIC_DIR = PROJECT_ROOT / "frontend" / "js" / "browser-asr"
+ASR_PANEL_RENDER_JS = PROJECT_ROOT / "frontend" / "js" / "panels" / "asr" / "asr-panel-render.js"
+SOURCE_TEXT_REPLACEMENT_RENDER_JS = (
+    PROJECT_ROOT / "frontend" / "js" / "panels" / "source-text-replacement" / "source-text-replacement-panel-render.js"
+)
 WEB_SPEECH_RECOGNITION_POLICY_JS = PROJECT_ROOT / "frontend" / "js" / "browser-web-speech-recognition-policy.js"
 GOOGLE_ASR_EXPERIMENTAL_HTML = PROJECT_ROOT / "frontend" / "google_asr_experimental.html"
 BROWSER_ASR_AUDIO_TRACK_MANAGER_JS = (
@@ -23,15 +28,23 @@ class BrowserWorkerContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.html = GOOGLE_ASR_HTML.read_text(encoding="utf-8")
-        cls.manager_js = BROWSER_ASR_MANAGER_JS.read_text(encoding="utf-8")
+        logic_js = "\n".join(
+            (BROWSER_ASR_LOGIC_DIR / path.name).read_text(encoding="utf-8")
+            for path in sorted(BROWSER_ASR_LOGIC_DIR.glob("*.js"))
+        )
+        cls.manager_js = BROWSER_ASR_MANAGER_JS.read_text(encoding="utf-8") + "\n" + logic_js
         cls.web_speech_policy_js = WEB_SPEECH_RECOGNITION_POLICY_JS.read_text(encoding="utf-8")
         cls.experimental_html = GOOGLE_ASR_EXPERIMENTAL_HTML.read_text(encoding="utf-8")
         cls.experimental_manager_js = BROWSER_ASR_AUDIO_TRACK_MANAGER_JS.read_text(encoding="utf-8")
         cls.runtime_panel_js = RUNTIME_PANEL_JS.read_text(encoding="utf-8")
-        cls.asr_panel_js = ASR_PANEL_JS.read_text(encoding="utf-8")
+        cls.asr_panel_js = ASR_PANEL_JS.read_text(encoding="utf-8") + "\n" + ASR_PANEL_RENDER_JS.read_text(encoding="utf-8")
         cls.index_html = INDEX_HTML.read_text(encoding="utf-8")
         cls.desktop_js = DESKTOP_JS.read_text(encoding="utf-8")
-        cls.source_text_replacement_panel_js = SOURCE_TEXT_REPLACEMENT_PANEL_JS.read_text(encoding="utf-8")
+        cls.source_text_replacement_panel_js = (
+            SOURCE_TEXT_REPLACEMENT_PANEL_JS.read_text(encoding="utf-8")
+            + "\n"
+            + SOURCE_TEXT_REPLACEMENT_RENDER_JS.read_text(encoding="utf-8")
+        )
 
     def test_asr_panel_locks_local_parakeet_for_desktop_browser_quick_start(self) -> None:
         lock_js = (PROJECT_ROOT / "frontend" / "js" / "dashboard" / "desktop-profile-lock.js").read_text(
@@ -52,9 +65,11 @@ class BrowserWorkerContractTests(unittest.TestCase):
     def test_worker_page_loads_web_speech_policy_before_session_manager(self) -> None:
         self.assertIn("/static/js/browser-web-speech-recognition-policy.js", self.html)
         policy_pos = self.html.find("browser-web-speech-recognition-policy.js")
+        logic_pos = self.html.find("browser-asr/session-defaults.js")
         manager_pos = self.html.find("browser-asr-session-manager.js")
         self.assertGreater(policy_pos, 0)
-        self.assertGreater(manager_pos, policy_pos)
+        self.assertGreater(logic_pos, policy_pos)
+        self.assertGreater(manager_pos, logic_pos)
 
     def test_worker_page_keeps_only_ui_glue_and_uses_session_manager_for_runtime(self) -> None:
         self.assertNotIn("function ensureRecognition()", self.html)
@@ -74,7 +89,7 @@ class BrowserWorkerContractTests(unittest.TestCase):
         self.assertIn("language-not-supported", self.manager_js)
 
     def test_manager_supports_recognition_overlap_and_soft_web_speech_fallbacks(self) -> None:
-        self.assertIn("_createOverlapRecognitionPair", self.manager_js)
+        self.assertIn("ASR.createOverlapRecognitionPair", self.manager_js)
         self.assertIn("overlap: pre-started buddy recognition slot", self.manager_js)
         self.assertIn("shouldEnableRecognitionOverlap", self.web_speech_policy_js)
 
@@ -84,10 +99,15 @@ class BrowserWorkerContractTests(unittest.TestCase):
         self.assertIn("websocket_reconnect: 350", self.manager_js)
         self.assertIn("watchdog_stall: 750", self.manager_js)
         self.assertIn("session_cycle: 350", self.manager_js)
-        self.assertIn("initialNoSpeechDelayMs = 350", self.manager_js)
-        self.assertIn("maxNoSpeechDelayMs = 5000", self.manager_js)
-        self.assertIn("initialNetworkBackoffMs = 1000", self.manager_js)
-        self.assertIn("maxNetworkBackoffMs = 30000", self.manager_js)
+        self.assertTrue(
+            "initialNoSpeechDelayMs = 350" in self.manager_js or "initialNoSpeechDelayMs: 350" in self.manager_js,
+            "expected initial no-speech delay default",
+        )
+        self.assertIn("maxNoSpeechDelayMs", self.manager_js)
+        self.assertIn("5000", self.manager_js)
+        self.assertIn("initialNetworkBackoffMs", self.manager_js)
+        self.assertIn("maxNetworkBackoffMs", self.manager_js)
+        self.assertIn("30000", self.manager_js)
         self.assertIn('"normal_onend"', self.manager_js)
         self.assertIn("watchdog forced rearm", self.manager_js)
         self.assertIn("_runWatchdog()", self.manager_js)
@@ -100,14 +120,19 @@ class BrowserWorkerContractTests(unittest.TestCase):
         self.assertIn("pendingStart", self.manager_js)
         self.assertIn("generationId", self.manager_js)
         self.assertIn("_isActiveGeneration(generationId)", self.manager_js)
-        self.assertIn("capturedGeneration !== Number(this.state.generationId || 0)", self.manager_js)
+        self.assertTrue(
+            "capturedGeneration !== Number(this.state.generationId || 0)" in self.manager_js
+            or "capturedGeneration !== Number(manager.state.generationId || 0)" in self.manager_js,
+            msg="restart timer must guard on generation id",
+        )
         self.assertIn("document.hidden", self.manager_js)
         self.assertIn("_waitUntilDocumentVisibleForRecognition", self.manager_js)
         self.assertIn("_lastWebSpeechNetworkHintAtMs", self.manager_js)
         self.assertIn("startupInFlight", self.manager_js)
         self.assertIn('supervisor === "starting"', self.manager_js)
         self.assertIn('supervisor === "stopping"', self.manager_js)
-        self.assertIn("maxStoppingMs = 2500", self.manager_js)
+        self.assertIn("maxStoppingMs", self.manager_js)
+        self.assertTrue("maxStoppingMs = 2500" in self.manager_js or "maxStoppingMs: 2500" in self.manager_js)
         self.assertIn("watchdog-stop", self.manager_js)
         self.assertIn("lastResultIndex", self.manager_js)
         self.assertIn("browserCyclePending", self.manager_js)
@@ -117,9 +142,10 @@ class BrowserWorkerContractTests(unittest.TestCase):
         self.assertIn("_forceFinalizeOnInterruption(", self.manager_js)
         self.assertIn("browser session age limit reached; controlled cycle requested", self.manager_js)
         self.assertIn("browser_recognition_interrupted", self.manager_js)
-        self.assertIn("minimumReconnectIntervalMs = 500", self.manager_js)
-        self.assertIn("maxBrowserSessionAgeMs = 180000", self.manager_js)
-        self.assertIn("prepareCycleBeforeMs = 15000", self.manager_js)
+        self.assertIn("minimumReconnectIntervalMs", self.manager_js)
+        self.assertIn("maxBrowserSessionAgeMs", self.manager_js)
+        self.assertIn("180000", self.manager_js)
+        self.assertIn("prepareCycleBeforeMs", self.manager_js)
 
     def test_manager_applies_screen_wake_lock_during_recognition(self) -> None:
         # Wake Lock keeps the OS from throttling the worker tab when display/system

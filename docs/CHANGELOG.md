@@ -22,9 +22,10 @@
 - **Компактный дашборд:** `ui.layout` `standard` | `compact`; `compact-layout.css`, `layout/layout-controller.js`; ресайз окна desktop-shell при смене layout (~1440×940 vs ~400×844).
 - **Desktop exe:** второй bootstrap `Stream Subtitle Translator Only Web.exe` (Web Speech без splash профилей); в стандартном exe — payload 0.4.0 с теми же splash-профилями, что раньше.
 - **Web Speech quick start:** `asr.desktop_profile_lock` в схеме config и после save/load; Recognition без Local Parakeet до запуска с GPU/CPU (`desktop-profile-lock.js`, нормализаторы, packaged launcher).
-- **Desktop dashboard:** панели монтируются сразу; `desktop.js` / `main.js` не блокируют UI на `pywebviewready`.
+- **Desktop dashboard:** панели монтируются сразу; справка (`dashboard-help-topics.html`) и `loadInitialData()` — в фоне; `desktop.js` / `main.js` не блокируют UI на `pywebviewready`.
+- **Desktop launcher (pywebview):** переход на дашборд через `location.replace` вместо `load_url`; без `evaluate_js` в splash после навигации; ранний `GET /` + health в фоне; не вызывать `get_current_url()` из `loaded`-handler; профиль WebView2 в `runtime_root/pywebview-profile`.
 - **Fix:** `RuntimeOrchestrator.browser_asr_worker_connected()` — worker WS не обрывается сразу после connect.
-- **Тесты (GitHub):** `test_browser_asr_observability.py`, расширены ws/translation/browser contracts. Desktop packaging tests — только локально.
+- **Тесты (GitHub):** `test_browser_asr_observability.py`, `test_frontend_modular_vanilla.py`, расширены ws/translation/browser contracts. Desktop packaging tests — только локально (`test_desktop_launcher_startup.py`, `test_launcher.py`, …).
 
 ### Тесты
 

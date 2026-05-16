@@ -90,3 +90,26 @@ export function subscribe(listener) {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
+
+/**
+ * Subscribe to a derived slice; skips listener when selector result is unchanged (Object.is).
+ */
+export function subscribeSelector(selector, listener) {
+  let previous = selector(getState());
+  listener(previous, getState());
+  return subscribe((snapshot) => {
+    const next = selector(snapshot);
+    if (Object.is(previous, next)) {
+      return;
+    }
+    previous = next;
+    listener(next, snapshot);
+  });
+}
+
+export function patchUi(patch) {
+  if (!patch || typeof patch !== "object") {
+    return;
+  }
+  updateState({ ui: patch });
+}

@@ -1,4 +1,23 @@
 import { subscribe } from "../core/store.js";
+import { fillSelectOptions, setSelectMarkup } from "../core/dom.js";
+import {
+  buildTranslationResultsKey,
+  renderTranslationResults,
+} from "./translation/translation-results-view.js";
+import { createTranslationLineEditor } from "./translation/translation-line-editor-view.js";
+import {
+  CANONICAL_TRANSLATION_SLOTS,
+  buildProviderOptions,
+  ensureLine,
+  getLineBySlot,
+  getLineCards,
+  getMissingProviderFields,
+  getSelectedSlotId,
+  getSlotNumber,
+  getTranslationProviderSettingValue,
+  normalizeProviderName,
+  setTranslationProviderSettingValue,
+} from "./translation/translation-panel-shared.js";
 import { LANGUAGES, PROVIDERS } from "../dashboard/constants.js";
 import {
   escapeHtml,
@@ -10,222 +29,7 @@ import {
 } from "../dashboard/helpers.js";
 import { normalizeDisplayOrder } from "../normalizers/translation-normalizer.js";
 
-const CANONICAL_TRANSLATION_SLOTS = ["translation_1", "translation_2", "translation_3", "translation_4", "translation_5"];
-const REQUIRED_PROVIDER_FIELDS = {
-  google_translate_v2: ["api_key"],
-  google_cloud_translation_v3: ["api_key", "endpoint"],
-  google_gas_url: ["gas_url"],
-  azure_translator: ["api_key", "endpoint"],
-  deepl: ["api_key"],
-  openai: ["api_key", "model"],
-  openrouter: ["api_key", "model"],
-  lm_studio: ["base_url", "model"],
-  ollama: ["base_url", "model"],
-};
-const PROVIDER_SETTING_LABEL_KEYS = {
-  api_key: "translation.api_key",
-  base_url: "translation.base_url",
-  gas_url: "translation.gas_url",
-  endpoint: "translation.endpoint",
-  region: "translation.region",
-  api_url: "translation.provider_url",
-  model: "translation.model",
-};
-
-function normalizeProviderName(providerName, fallback = "google_translate_v2") {
-  const normalized = String(providerName || fallback).trim();
-  return PROVIDERS[normalized] ? normalized : fallback;
-}
-
-function getTranslationProviderSettingValue(providerName, providerSettings, fieldName) {
-  if (providerName === "google_cloud_translation_v3") {
-    if (fieldName === "api_key") {
-      return providerSettings.access_token || "";
-    }
-    if (fieldName === "endpoint") {
-      return providerSettings.project_id || "";
-    }
-    if (fieldName === "region") {
-      return providerSettings.location || "";
-    }
-  }
-  return providerSettings[fieldName] || "";
-}
-
-function setTranslationProviderSettingValue(providerName, targetSettings, fieldName, value) {
-  if (providerName === "google_cloud_translation_v3") {
-    if (fieldName === "api_key") {
-      targetSettings.access_token = String(value || "");
-      return;
-    }
-    if (fieldName === "endpoint") {
-      targetSettings.project_id = String(value || "");
-      return;
-    }
-    if (fieldName === "region") {
-      targetSettings.location = String(value || "");
-      return;
-    }
-  }
-  targetSettings[fieldName] = String(value || "");
-}
-
-function getLineMap(lines) {
-  const map = new Map();
-  (Array.isArray(lines) ? lines : []).forEach((line) => {
-    const slotId = String(line?.slot_id || "").toLowerCase();
-    if (slotId) {
-      map.set(slotId, line);
-    }
-  });
-  return map;
-}
-
-function getSlotNumber(slotId) {
-  const match = String(slotId || "").match(/(\d+)$/);
-  return match ? Number.parseInt(match[1], 10) : 0;
-}
-
-function getVirtualLine(config, slotId) {
-  const defaultProvider = normalizeProviderName(config?.translation?.provider, "google_translate_v2");
-  const targetLang = "en";
-  return {
-    slot_id: slotId,
-    enabled: false,
-    target_lang: targetLang,
-    provider: defaultProvider,
-    label: targetLang.toUpperCase(),
-  };
-}
-
-function getSelectedSlotId(snapshot) {
-  return String(snapshot?.ui?.selectedTranslationLanguage || "").trim().toLowerCase();
-}
-
-function getLineBySlot(config, slotId, { includeVirtual = false } = {}) {
-  if (!slotId) {
-    return null;
-  }
-  const line = getLineMap(config?.translation?.lines).get(slotId);
-  if (line) {
-    return line;
-  }
-  return includeVirtual && CANONICAL_TRANSLATION_SLOTS.includes(slotId) ? getVirtualLine(config, slotId) : null;
-}
-
-function getOrderedSlots(config) {
-  const displayOrder = Array.isArray(config?.subtitle_output?.display_order) ? config.subtitle_output.display_order : [];
-  const ordered = [];
-  displayOrder.forEach((item) => {
-    const slotId = String(item || "").toLowerCase();
-    if (CANONICAL_TRANSLATION_SLOTS.includes(slotId) && !ordered.includes(slotId)) {
-      ordered.push(slotId);
-    }
-  });
-  CANONICAL_TRANSLATION_SLOTS.forEach((slotId) => {
-    if (!ordered.includes(slotId)) {
-      ordered.push(slotId);
-    }
-  });
-  return ordered;
-}
-
-function getLineCards(config) {
-  const lineMap = getLineMap(config?.translation?.lines);
-  const configuredLineSlotIds = Array.from(lineMap.values())
-    .filter((line) => line && String(line.slot_id || "").trim())
-    .map((line) => String(line.slot_id || "").toLowerCase());
-
-  // Only show lines that were explicitly added by the user.
-  // Empty slots remain available via the "Add Line" action, but should not render as cards.
-  const ordered = getOrderedSlots(config).filter((slotId) => configuredLineSlotIds.includes(slotId));
-  const remaining = configuredLineSlotIds.filter((slotId) => !ordered.includes(slotId));
-  return [...ordered, ...remaining].map((slotId) => lineMap.get(slotId)).filter(Boolean);
-}
-
-function getFieldLabel(fieldName) {
-  return t(PROVIDER_SETTING_LABEL_KEYS[fieldName] || fieldName);
-}
-
-function getSlotDisplayLabel(slotId) {
-  const normalized = String(slotId || "").toLowerCase();
-  if (CANONICAL_TRANSLATION_SLOTS.includes(normalized)) {
-    return t(`obs.output.${normalized}`);
-  }
-  return normalized || "";
-}
-
-function getMissingProviderFields(providerName, providerSettings) {
-  const requiredFields = REQUIRED_PROVIDER_FIELDS[providerName] || [];
-  return requiredFields.filter((fieldName) => !String(getTranslationProviderSettingValue(providerName, providerSettings || {}, fieldName) || "").trim());
-}
-
-function buildProviderOptions() {
-  const groups = {};
-  Object.entries(PROVIDERS).forEach(([providerName]) => {
-    const meta = getProviderMeta(providerName);
-    groups[meta.group] = groups[meta.group] || [];
-    groups[meta.group].push({ providerName, meta });
-  });
-  return Object.entries(groups)
-    .map(([groupName, items]) => {
-      const options = items.map(({ providerName, meta }) => `<option value="${providerName}">${escapeHtml(meta.label)}</option>`).join("");
-      return `<optgroup label="${escapeHtml(groupName)}">${options}</optgroup>`;
-    })
-    .join("");
-}
-
-function ensureLine(draft, slotId, seed = {}) {
-  const lineMap = getLineMap(draft.translation.lines);
-  const existing = lineMap.get(slotId);
-  if (existing) {
-    return existing;
-  }
-  const targetLang = String(seed.target_lang || "en").trim().toLowerCase() || "en";
-  const nextLine = {
-    slot_id: slotId,
-    enabled: seed.enabled === true,
-    target_lang: targetLang,
-    provider: normalizeProviderName(seed.provider, draft.translation.provider),
-    label: String(seed.label || targetLang.toUpperCase()),
-  };
-  draft.translation.lines.push(nextLine);
-  return nextLine;
-}
-
-/** Stable key for translation line cards — excludes selected slot (handled separately). */
-function computeLineCardsFingerprint(snapshot) {
-  const config = snapshot.config;
-  if (!config) {
-    return "no-config";
-  }
-  const locale = getCurrentLocale();
-  const translation = config.translation || {};
-  const lines = getLineCards(config).map((line) => {
-    const slotId = String(line.slot_id || "").toLowerCase();
-    const providerName = normalizeProviderName(line.provider, translation.provider);
-    const providerSettings = translation.provider_settings?.[providerName] || {};
-    const missingFields =
-      line.enabled !== false ? getMissingProviderFields(providerName, providerSettings) : [];
-    return {
-      slot_id: slotId,
-      enabled: line.enabled !== false,
-      target_lang: String(line.target_lang || "").toLowerCase(),
-      provider: providerName,
-      label: String(line.label || ""),
-      missing: missingFields.length,
-    };
-  });
-  const order = Array.isArray(config.subtitle_output?.display_order)
-    ? config.subtitle_output.display_order.map((item) => String(item || "").toLowerCase())
-    : [];
-  return JSON.stringify({ locale, lines, order });
-}
-
 export function mountTranslationPanel(root, { store, actions, logger }) {
-  let manualSettingsProvider = null;
-  let lastLineCardsFingerprint = "";
-  let lastSelectedSlotForLines = "";
   let lastResultsRenderKey = "";
   let cachedProviderOptionsLocale = "";
   let lastLoadedModelsKey = "";
@@ -277,6 +81,8 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
     results: root.querySelector("#translation-results"),
   };
 
+  const lineEditor = createTranslationLineEditor({ elements, actions, store });
+
   function resolveProviderContext(snapshot) {
     const config = snapshot?.config;
     const translation = config?.translation || {};
@@ -284,7 +90,7 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
     const selectedSlotId = getSelectedSlotId(snapshot);
     const selectedLine = getLineBySlot(config, selectedSlotId, { includeVirtual: true });
     const providerBeingEdited = normalizeProviderName(
-      selectedLine?.provider || manualSettingsProvider || defaultProvider,
+      selectedLine?.provider || lineEditor.getManualSettingsProvider() || defaultProvider,
       defaultProvider
     );
     return {
@@ -318,205 +124,12 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
       return;
     }
     const entry = snapshot.translation?.currentEntry;
-    const resultsKey = !entry
-      ? "__empty__"
-      : JSON.stringify({
-          sequence: entry.sequence,
-          sourceText: entry.sourceText,
-          providerLabel: entry.providerLabel || "",
-          statusMessage: entry.statusMessage || "",
-          translations: (entry.translations || []).map((item) => ({
-            slot_id: item.slot_id,
-            target_lang: item.target_lang,
-            text: item.text,
-            success: item.success,
-            error: item.error || "",
-            cached: Boolean(item.cached),
-            provider: item.provider || "",
-          })),
-        });
+    const resultsKey = buildTranslationResultsKey(entry);
     if (resultsKey === lastResultsRenderKey) {
       return;
     }
     lastResultsRenderKey = resultsKey;
-    if (!entry) {
-      elements.results.innerHTML = `<p class="muted">${escapeHtml(t("translation.result.empty"))}</p>`;
-      return;
-    }
-    const translationsHtml = entry.translations.length
-      ? entry.translations
-          .map((item) => {
-            const providerMeta = item.provider ? getProviderMeta(item.provider) : null;
-            const languageLabel = item.label || getLanguageLabel(item.target_lang);
-            const slotLabel = item.slot_id ? ` | ${item.slot_id}` : "";
-            const providerLabel = providerMeta ? ` | ${providerMeta.label}` : "";
-            const meta = `${languageLabel}${slotLabel}${providerLabel}${item.cached ? ` (${t("translation.result.cached")})` : ""}`;
-            const content = item.success
-              ? escapeHtml(item.text)
-              : `<span class="translation-error">${escapeHtml(item.error || t("translation.result.failed"))}</span>`;
-            return `<p class="label">${escapeHtml(meta)}</p><p>${content}</p>`;
-          })
-          .join("")
-      : `<p class="muted">${escapeHtml(t("translation.result.disabled"))}</p>`;
-    elements.results.innerHTML = `
-      <div class="translation-card">
-        <h3>${escapeHtml(t("translation.segment", { sequence: entry.sequence }))}</h3>
-        <p class="label">${escapeHtml(t("common.source"))}</p>
-        <p>${escapeHtml(entry.sourceText)}</p>
-        ${entry.providerLabel ? `<p class="label">${escapeHtml(entry.providerLabel)}</p>` : ""}
-        ${entry.statusMessage ? `<p class="muted">${escapeHtml(entry.statusMessage)}</p>` : ""}
-        ${translationsHtml}
-      </div>
-    `;
-  }
-
-  function renderLineEditor(snapshot) {
-    if (!elements.languageOrder) {
-      return;
-    }
-    const config = snapshot.config;
-    const selectedSlotId = getSelectedSlotId(snapshot);
-    const translation = config.translation || {};
-    const providerOptions = buildProviderOptions();
-
-    elements.languageOrder.innerHTML = "";
-    getLineCards(config).forEach((line) => {
-      const slotId = String(line.slot_id || "").toLowerCase();
-      const lineNumber = getSlotNumber(slotId);
-      const providerName = normalizeProviderName(line.provider, translation.provider);
-      const providerMeta = getProviderMeta(providerName);
-      const providerSettings = translation.provider_settings?.[providerName] || {};
-      const missingFields = line.enabled !== false ? getMissingProviderFields(providerName, providerSettings) : [];
-      const summary = `${String(line.target_lang || "en").toUpperCase()} · ${providerMeta.label}`;
-      const row = document.createElement("li");
-      row.dataset.code = slotId;
-      row.className = "translation-line-card";
-      row.classList.toggle("active", slotId === selectedSlotId);
-      row.innerHTML = `
-        <div class="translation-line-head">
-          <div class="translation-line-title-block">
-            <div class="translation-line-title-row">
-              <strong class="translation-line-title">${escapeHtml(t("translation.line.title", { number: lineNumber }))}</strong>
-              <span class="translation-line-slot">${escapeHtml(getSlotDisplayLabel(slotId))}</span>
-            </div>
-            <p class="translation-line-summary">${escapeHtml(summary)}</p>
-          </div>
-          <div class="translation-line-badges">
-            <span class="translation-line-badge" data-tone="${line.enabled !== false ? "ready" : "muted"}">${escapeHtml(line.enabled !== false ? t("translation.line.state.enabled") : t("translation.line.state.disabled"))}</span>
-            ${missingFields.length ? `<span class="translation-line-badge" data-tone="warn">${escapeHtml(t("translation.line.missing_settings.short"))}</span>` : ""}
-          </div>
-        </div>
-        <label class="checkbox-row translation-line-enabled">
-          <input type="checkbox" data-role="enabled" ${line.enabled !== false ? "checked" : ""} />
-          <span>${escapeHtml(t("translation.line.enabled"))}</span>
-        </label>
-        <div class="translation-line-fields">
-          <label class="stack-field">
-            <span>${escapeHtml(t("translation.line.target_lang"))}</span>
-            <select data-role="target_lang">
-              ${LANGUAGES.map((item) => `<option value="${item.code}" ${item.code === line.target_lang ? "selected" : ""}>${escapeHtml(getLanguageLabel(item.code))}</option>`).join("")}
-            </select>
-          </label>
-          <label class="stack-field">
-            <span>${escapeHtml(t("translation.line.provider"))}</span>
-            <select data-role="provider">${providerOptions}</select>
-          </label>
-        </div>
-        ${missingFields.length ? `<p class="muted translation-line-note">${escapeHtml(t("translation.line.missing_settings", { fields: missingFields.map(getFieldLabel).join(", ") }))}</p>` : ""}
-      `;
-      row.addEventListener("click", (event) => {
-        const target = event?.target;
-        if (target instanceof Element) {
-          const interactive = target.closest("select, input, textarea, button, label, a");
-          if (interactive) {
-            return;
-          }
-        }
-        actions.updateTranslationSelection(slotId);
-      });
-
-      const enabledInput = row.querySelector('[data-role="enabled"]');
-      const targetLangInput = row.querySelector('[data-role="target_lang"]');
-      const providerInput = row.querySelector('[data-role="provider"]');
-      const labelInput = null;
-
-      if (providerInput) {
-        providerInput.value = providerName;
-      }
-
-      enabledInput?.addEventListener("change", (event) => {
-        event.stopPropagation();
-        actions.mutateConfig((draft) => {
-          const currentLine = ensureLine(draft, slotId, {
-            enabled: false,
-            target_lang: targetLangInput?.value || line.target_lang || "en",
-            provider: providerInput?.value || providerName,
-            label: String((line.label || targetLangInput?.value || line.target_lang || "en")).toUpperCase(),
-          });
-          currentLine.enabled = Boolean(enabledInput.checked);
-          currentLine.target_lang = String(targetLangInput?.value || currentLine.target_lang || "en").toLowerCase();
-          currentLine.provider = normalizeProviderName(providerInput?.value || currentLine.provider, draft.translation.provider);
-          currentLine.label = String(currentLine.label || currentLine.target_lang.toUpperCase());
-          if (currentLine.enabled) {
-            draft.subtitle_output.display_order = normalizeDisplayOrder([
-              ...draft.subtitle_output.display_order,
-              slotId,
-            ]);
-          } else {
-            draft.subtitle_output.display_order = draft.subtitle_output.display_order.filter((item) => item !== slotId);
-          }
-        });
-        actions.updateTranslationSelection(slotId);
-      });
-      targetLangInput?.addEventListener("change", (event) => {
-        event.stopPropagation();
-        actions.mutateConfig((draft) => {
-          const currentLine = ensureLine(draft, slotId, {
-            enabled: Boolean(enabledInput?.checked),
-            target_lang: targetLangInput.value || "en",
-            provider: providerInput?.value || providerName,
-            label: String(line.label || targetLangInput.value || "en").toUpperCase(),
-          });
-          const previousTarget = String(currentLine.target_lang || "").toUpperCase();
-          currentLine.target_lang = String(targetLangInput.value || "en").toLowerCase();
-          if (!String(currentLine.label || "").trim() || String(currentLine.label).trim().toUpperCase() === previousTarget) {
-            currentLine.label = currentLine.target_lang.toUpperCase();
-          }
-        });
-      });
-      providerInput?.addEventListener("change", (event) => {
-        event.stopPropagation();
-        actions.mutateConfig((draft) => {
-          const currentLine = ensureLine(draft, slotId, {
-            enabled: Boolean(enabledInput?.checked),
-            target_lang: targetLangInput?.value || line.target_lang || "en",
-            provider: providerInput.value,
-            label: String(line.label || targetLangInput?.value || line.target_lang || "en").toUpperCase(),
-          });
-          currentLine.provider = normalizeProviderName(providerInput.value, draft.translation.provider);
-        });
-        if (slotId === getSelectedSlotId(store.getState())) {
-          manualSettingsProvider = null;
-        }
-      });
-      // Note: line label is still supported in config/backend, but hidden in the UI for now.
-
-      elements.languageOrder.appendChild(row);
-    });
-  }
-
-  function updateLineCardActiveState(snapshot) {
-    if (!elements.languageOrder) {
-      return;
-    }
-    const selectedSlotId = getSelectedSlotId(snapshot);
-    elements.languageOrder.querySelectorAll(".translation-line-card").forEach((row) => {
-      if (!(row instanceof HTMLElement)) {
-        return;
-      }
-      const code = String(row.dataset.code || "").toLowerCase();
-      row.classList.toggle("active", code === selectedSlotId);
-    });
+    renderTranslationResults(elements.results, entry);
   }
 
   function ensureProviderSelectOptions() {
@@ -532,17 +145,17 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
     cachedProviderOptionsLocale = locale;
     const providerMarkup = buildProviderOptions();
     if (elements.defaultProvider) {
-      elements.defaultProvider.innerHTML = providerMarkup;
+      setSelectMarkup(elements.defaultProvider, providerMarkup, { selectedValue: elements.defaultProvider.value });
     }
     if (elements.settingsProvider) {
-      elements.settingsProvider.innerHTML = providerMarkup;
+      setSelectMarkup(elements.settingsProvider, providerMarkup, { selectedValue: elements.settingsProvider.value });
     }
     if (elements.languageSelect) {
-      const preserved = elements.languageSelect.value || "en";
-      elements.languageSelect.innerHTML = LANGUAGES.map(
-        (item) => `<option value="${item.code}">${escapeHtml(getLanguageLabel(item.code))}</option>`
-      ).join("");
-      elements.languageSelect.value = preserved;
+      fillSelectOptions(elements.languageSelect, LANGUAGES, {
+        getValue: (item) => item.code,
+        getLabel: (item) => getLanguageLabel(item.code),
+        selectedValue: elements.languageSelect.value || "en",
+      });
     }
   }
 
@@ -668,16 +281,7 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
         : "";
     }
 
-    const cardsKey = computeLineCardsFingerprint(snapshot);
-    const selectedSlotId = getSelectedSlotId(snapshot);
-    if (cardsKey !== lastLineCardsFingerprint) {
-      renderLineEditor(snapshot);
-      lastLineCardsFingerprint = cardsKey;
-      lastSelectedSlotForLines = selectedSlotId;
-    } else if (selectedSlotId !== lastSelectedSlotForLines) {
-      updateLineCardActiveState(snapshot);
-      lastSelectedSlotForLines = selectedSlotId;
-    }
+    lineEditor.renderLineEditor(snapshot);
     renderResults(snapshot);
   }
 
@@ -783,7 +387,7 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
       draft.translation.provider = normalizeProviderName(elements.defaultProvider.value, draft.translation.provider);
     });
     if (!getSelectedSlotId(store.getState())) {
-      manualSettingsProvider = null;
+      lineEditor.setManualSettingsProvider(null);
     }
     logger(`[translation] default provider -> ${elements.defaultProvider.value}`);
   });
@@ -799,11 +403,16 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
         });
         currentLine.provider = normalizeProviderName(elements.settingsProvider.value, draft.translation.provider);
       });
-      manualSettingsProvider = null;
+      lineEditor.setManualSettingsProvider(null);
       logger(`[translation] ${selectedSlotId} provider -> ${elements.settingsProvider.value}`);
       return;
     }
-    manualSettingsProvider = normalizeProviderName(elements.settingsProvider.value, store.getState().config?.translation?.provider || "google_translate_v2");
+    lineEditor.setManualSettingsProvider(
+      normalizeProviderName(
+        elements.settingsProvider.value,
+        store.getState().config?.translation?.provider || "google_translate_v2"
+      )
+    );
     render(store.getState());
     logger(`[translation] settings editor -> ${elements.settingsProvider.value}`);
   });
@@ -870,7 +479,7 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
     });
     if (addedSlotId) {
       actions.updateTranslationSelection(addedSlotId);
-      manualSettingsProvider = null;
+      lineEditor.setManualSettingsProvider(null);
       logger(`[translation] added line ${addedSlotId} -> ${code}`);
     }
   });

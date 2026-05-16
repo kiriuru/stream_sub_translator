@@ -1,4 +1,4 @@
-import { createEventBus } from "./core/events.js";
+import { createEventBus, DASHBOARD_EVENTS } from "./core/events.js";
 import { createApiClient, createDashboardApi } from "./core/api-client.js";
 import * as store from "./core/store.js";
 import { WsClient } from "./core/ws-client.js";
@@ -17,118 +17,12 @@ import { mountRuntimePanel } from "./panels/runtime-panel.js";
 import { mountStyleEditorPanel } from "./panels/style-editor-panel.js";
 import { mountTranslationPanel } from "./panels/translation-panel.js";
 import { mountLayoutController } from "./layout/layout-controller.js";
+import { loadDashboardHelpContent } from "./shell/help-content-loader.js";
+import { initializeHelpTopics } from "./shell/help-topics.js";
+import { initializeLocaleSwitcher } from "./shell/locale-switcher.js";
+import { initializeTabs } from "./shell/tabs.js";
 
 let actionsRef = null;
-
-function initializeLocaleSwitcher(actions) {
-  const selects = [...document.querySelectorAll("#ui-language-select, #ui-language-select-settings")];
-  if (!selects.length) {
-    return () => {};
-  }
-
-  const applyCurrentLocale = () => {
-    const locale = getCurrentLocale();
-    selects.forEach((select) => {
-      select.value = locale;
-    });
-  };
-
-  const onChange = (event) => {
-    actions.setUiLanguage(event.target?.value || "en");
-    actions.saveCurrentConfig();
-  };
-
-  selects.forEach((select) => select.addEventListener("change", onChange));
-  applyCurrentLocale();
-
-  return () => {
-    selects.forEach((select) => select.removeEventListener("change", onChange));
-  };
-}
-
-function initializeTabs(actions) {
-  const buttons = [...document.querySelectorAll("[data-tab-target]")];
-  const panels = [...document.querySelectorAll("[data-tab-panel]")];
-  const availableTabs = new Set(panels.map((panel) => panel.dataset.tabPanel));
-  const preferredTab = store.getState().ui.activeTab;
-  const initialTab = availableTabs.has(preferredTab)
-    ? preferredTab
-    : availableTabs.has("translation")
-      ? "translation"
-      : panels.find((panel) => panel.dataset.tabPanel !== "recognition")?.dataset.tabPanel
-        || panels[0]?.dataset.tabPanel
-        || "translation";
-
-  function applyActiveTab(tabName) {
-    if (!availableTabs.has(tabName)) {
-      return;
-    }
-    actions.setActiveTab(tabName);
-  }
-
-  buttons.forEach((button) => {
-    button.addEventListener("click", () => {
-      applyActiveTab(button.dataset.tabTarget);
-    });
-  });
-  applyActiveTab(initialTab);
-}
-
-function initializeHelpTopics() {
-  const buttons = [...document.querySelectorAll("[data-help-topic-target]")];
-  const panels = [...document.querySelectorAll("[data-help-topic-panel]")];
-  if (!buttons.length || !panels.length) {
-    return () => {};
-  }
-
-  const availableTopics = new Set(panels.map((panel) => panel.dataset.helpTopicPanel));
-  let activeTopic = buttons.find((button) => button.classList.contains("active"))?.dataset.helpTopicTarget;
-  if (!availableTopics.has(activeTopic)) {
-    activeTopic = panels[0]?.dataset.helpTopicPanel || "";
-  }
-
-  function applyHelpLocale() {
-    const locale = getCurrentLocale();
-    panels.forEach((panel) => {
-      const localizedBlocks = [...panel.querySelectorAll("[data-help-locale]")];
-      localizedBlocks.forEach((block) => {
-        const active = block.dataset.helpLocale === locale;
-        block.classList.toggle("active", active);
-      });
-      if (localizedBlocks.length && !localizedBlocks.some((block) => block.classList.contains("active"))) {
-        localizedBlocks[0].classList.add("active");
-      }
-    });
-  }
-
-  function applyHelpTopic(topicName) {
-    activeTopic = availableTopics.has(topicName) ? topicName : activeTopic;
-    buttons.forEach((button) => {
-      const active = button.dataset.helpTopicTarget === activeTopic;
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-selected", active ? "true" : "false");
-    });
-    panels.forEach((panel) => {
-      panel.classList.toggle("active", panel.dataset.helpTopicPanel === activeTopic);
-    });
-    applyHelpLocale();
-  }
-
-  const listeners = buttons.map((button) => {
-    const onClick = () => applyHelpTopic(button.dataset.helpTopicTarget);
-    button.addEventListener("click", onClick);
-    return () => button.removeEventListener("click", onClick);
-  });
-  const onLocaleChanged = () => applyHelpLocale();
-  window.addEventListener("sst:locale-changed", onLocaleChanged);
-
-  applyHelpTopic(activeTopic);
-
-  return () => {
-    listeners.forEach((destroy) => destroy());
-    window.removeEventListener("sst:locale-changed", onLocaleChanged);
-  };
-}
 
 async function bootstrap() {
   const events = createEventBus();
@@ -139,7 +33,7 @@ async function bootstrap() {
   });
   const api = createDashboardApi(client);
   const logger = createLogger({ store, events, api });
-  const actions = createDashboardActions({ store, api, logger });
+  const actions = createDashboardActions({ store, api, logger, events });
   actionsRef = actions;
 
   const ws = new WsClient({
@@ -157,9 +51,10 @@ async function bootstrap() {
   window.__persistDashboardLog = logger;
 
   const destroyLocaleSwitcher = initializeLocaleSwitcher(actions);
-  initializeTabs(actions);
+  initializeTabs(actions, store);
   const destroyLayoutController = mountLayoutController(document, { actions });
-  const destroyHelpTopics = initializeHelpTopics();
+
+  let destroyHelpTopics = () => {};
 
   window.addEventListener("sst:locale-changed", () => {
     const localeSelect = document.querySelector("#ui-language-select");
@@ -182,6 +77,20 @@ async function bootstrap() {
     mountRemotePanel(document, { store, actions, api, ws, logger, events }),
     mountModelManagerPanel(document, { store, actions, api, ws, logger, events }),
   ];
+
+  void (async () => {
+    try {
+      await loadDashboardHelpContent();
+      events.emit(DASHBOARD_EVENTS.HELP_CONTENT_LOADED);
+      destroyHelpTopics = initializeHelpTopics();
+    } catch (error) {
+      const root = document.querySelector("[data-help-content-mount]");
+      if (root) {
+        root.innerHTML = `<p class="muted">${getCurrentLocale() === "ru" ? "Не удалось загрузить справку." : "Failed to load help content."}</p>`;
+      }
+      logger(`[help] load failed -> ${error instanceof Error ? error.message : String(error)}`);
+    }
+  })();
 
   void window.DesktopBridge?.getContext?.()
     .then((context) => {

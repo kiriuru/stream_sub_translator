@@ -26,7 +26,20 @@ class FrontendArchitectureTests(unittest.TestCase):
             JS_ROOT / "core" / "redaction.js",
             JS_ROOT / "core" / "ws-client.js",
             JS_ROOT / "core" / "events.js",
+            JS_ROOT / "core" / "dom.js",
+            JS_ROOT / "core" / "panel-mount.js",
+            JS_ROOT / "core" / "selectors.js",
+            JS_ROOT / "dashboard" / "action-helpers.js",
+            JS_ROOT / "dashboard" / "actions" / "index.js",
+            JS_ROOT / "shell" / "help-content-loader.js",
             JS_ROOT / "panels" / "runtime-panel.js",
+            JS_ROOT / "panels" / "overlay" / "overlay-display-order-view.js",
+            JS_ROOT / "panels" / "translation" / "translation-panel-shared.js",
+            JS_ROOT / "panels" / "translation" / "translation-line-editor-view.js",
+            JS_ROOT / "panels" / "asr" / "asr-panel-render.js",
+            JS_ROOT / "panels" / "style" / "style-editor-panel-shared.js",
+            JS_ROOT / "panels" / "style" / "style-editor-panel-render.js",
+            JS_ROOT / "panels" / "source-text-replacement" / "source-text-replacement-panel-render.js",
             JS_ROOT / "panels" / "asr-panel.js",
             JS_ROOT / "panels" / "model-manager-panel.js",
             JS_ROOT / "panels" / "translation-panel.js",
@@ -116,10 +129,13 @@ class FrontendArchitectureTests(unittest.TestCase):
         self.assertNotIn('classList.remove("ok", "warn", "bad")', worker_js)
 
     def test_style_editor_rebuilds_preset_options_when_catalog_changes(self) -> None:
+        shared_js = (JS_ROOT / "panels" / "style" / "style-editor-panel-shared.js").read_text(encoding="utf-8")
+        render_js = (JS_ROOT / "panels" / "style" / "style-editor-panel-render.js").read_text(encoding="utf-8")
         panel_js = (JS_ROOT / "panels" / "style-editor-panel.js").read_text(encoding="utf-8")
-        self.assertIn("function buildPresetCatalogSignature", panel_js)
-        self.assertIn("lastPresetCatalogSignature", panel_js)
-        self.assertIn("shouldRebuildPresets", panel_js)
+        self.assertIn("export function buildPresetCatalogSignature", shared_js)
+        self.assertIn("lastPresetCatalogSignature", render_js)
+        self.assertIn("shouldRebuildPresets", render_js)
+        self.assertIn("createPanelMount", panel_js)
 
     def test_subtitle_style_renderer_maps_effect_ids_to_css_classes(self) -> None:
         renderer_js = (JS_ROOT / "subtitle-style.js").read_text(encoding="utf-8")

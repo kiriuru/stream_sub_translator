@@ -19,4 +19,12 @@ export function createEventBus() {
 export const DASHBOARD_EVENTS = {
   LOG: "log",
   WS_EVENT: "ws:event",
+  CONFIG_SAVED: "config:saved",
+  CONFIG_LOADED: "config:loaded",
+  RUNTIME_STARTED: "runtime:started",
+  RUNTIME_STOPPED: "runtime:stopped",
+  RUNTIME_STATUS: "runtime:status",
+  LOCALE_CHANGED: "locale:changed",
+  TAB_CHANGED: "tab:changed",
+  HELP_CONTENT_LOADED: "help:content-loaded",
 };

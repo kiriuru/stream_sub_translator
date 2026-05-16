@@ -1,34 +1,36 @@
-import { subscribe } from "../core/store.js";
-import { getCurrentLocale } from "../dashboard/helpers.js";
+import { collectElements, fillSelectOptions } from "../core/dom.js";
+import { createPanelMount } from "../core/panel-mount.js";
+import { selectConfig, selectProfiles } from "../core/selectors.js";
 
-export function mountProfilesPanel(root, { store, actions, api, logger }) {
-  const elements = {
-    select: root.querySelector("#profiles-select"),
-    loadBtn: root.querySelector("#profile-load-btn"),
-    saveBtn: root.querySelector("#profile-save-btn"),
-    deleteBtn: root.querySelector("#profile-delete-btn"),
-    nameInput: root.querySelector("#profile-name-input"),
-  };
+const collectProfilesElements = (root) =>
+  collectElements(root, {
+    select: "#profiles-select",
+    loadBtn: "#profile-load-btn",
+    saveBtn: "#profile-save-btn",
+    deleteBtn: "#profile-delete-btn",
+    nameInput: "#profile-name-input",
+  });
 
-  function render(snapshot) {
-    if (!elements.select) {
-      return;
-    }
-    const selected = elements.select.value;
-    elements.select.innerHTML = "";
-    (snapshot.profiles || []).forEach((name) => {
-      const option = document.createElement("option");
-      option.value = name;
-      option.textContent = name;
-      elements.select.appendChild(option);
-    });
-    elements.select.value = snapshot.config?.profile || selected || "";
-    if (elements.nameInput && snapshot.config?.profile) {
-      elements.nameInput.value = snapshot.config.profile;
-    }
+function renderProfiles(snapshot, elements) {
+  if (!elements.select) {
+    return;
   }
+  const profiles = selectProfiles(snapshot);
+  const config = selectConfig(snapshot);
+  fillSelectOptions(
+    elements.select,
+    profiles.map((name) => ({ value: name, label: name })),
+    { selectedValue: config?.profile || elements.select.value }
+  );
+  if (elements.nameInput && config?.profile) {
+    elements.nameInput.value = config.profile;
+  }
+}
 
-  elements.loadBtn?.addEventListener("click", async () => {
+function bindProfilesEvents(elements, { store, actions, api, logger }) {
+  const handlers = [];
+
+  const onLoad = async () => {
     const name = elements.select?.value;
     if (!name) {
       return;
@@ -38,9 +40,9 @@ export function mountProfilesPanel(root, { store, actions, api, logger }) {
     actions.setConfig(response.payload || data.payload);
     await actions.refreshProfiles();
     logger(`[profiles] loaded '${name}'`);
-  });
+  };
 
-  elements.saveBtn?.addEventListener("click", async () => {
+  const onSave = async () => {
     const name = elements.nameInput?.value?.trim();
     if (!name) {
       return;
@@ -52,9 +54,9 @@ export function mountProfilesPanel(root, { store, actions, api, logger }) {
     });
     await actions.refreshProfiles();
     logger(`[profiles] saved '${name}'`);
-  });
+  };
 
-  elements.deleteBtn?.addEventListener("click", async () => {
+  const onDelete = async () => {
     const name = elements.select?.value;
     if (!name) {
       return;
@@ -65,9 +67,30 @@ export function mountProfilesPanel(root, { store, actions, api, logger }) {
     }
     await actions.refreshProfiles();
     logger(`[profiles] deleted '${name}'`);
-  });
+  };
 
-  render(store.getState());
-  const unsubscribe = subscribe(render);
-  return () => unsubscribe();
+  if (elements.loadBtn) {
+    elements.loadBtn.addEventListener("click", onLoad);
+    handlers.push(() => elements.loadBtn.removeEventListener("click", onLoad));
+  }
+  if (elements.saveBtn) {
+    elements.saveBtn.addEventListener("click", onSave);
+    handlers.push(() => elements.saveBtn.removeEventListener("click", onSave));
+  }
+  if (elements.deleteBtn) {
+    elements.deleteBtn.addEventListener("click", onDelete);
+    handlers.push(() => elements.deleteBtn.removeEventListener("click", onDelete));
+  }
+
+  return () => handlers.forEach((off) => off());
+}
+
+const mountProfilesPanelImpl = createPanelMount({
+  collectElements: collectProfilesElements,
+  render: renderProfiles,
+  bindEvents: bindProfilesEvents,
+});
+
+export function mountProfilesPanel(root, context) {
+  return mountProfilesPanelImpl(root, context);
 }

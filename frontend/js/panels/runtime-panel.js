@@ -1,4 +1,6 @@
-import { subscribe } from "../core/store.js";
+import { collectElements } from "../core/dom.js";
+import { createPanelMount } from "../core/panel-mount.js";
+import { selectAsrMode } from "../core/selectors.js";
 import {
   applyStatusDataset,
   getCurrentLocale,
@@ -8,7 +10,7 @@ import {
   t,
 } from "../dashboard/helpers.js";
 
-function renderProgress(runtime, elements, { mode } = {}) {
+function renderProgress(runtime, elements, mode) {
   const message = String(runtime?.status_message || "").trim();
   const card = elements.progressCard;
   if (!card) {
@@ -30,163 +32,178 @@ function renderProgress(runtime, elements, { mode } = {}) {
   }
   card.classList.remove("is-compact");
   const percentMatch = message.match(/(\d+(?:\.\d+)?)%/);
-  const percent = percentMatch ? Number.parseFloat(percentMatch[1]) : (runtime?.status === "starting" ? 12 : 0);
+  const percent = percentMatch ? Number.parseFloat(percentMatch[1]) : runtime?.status === "starting" ? 12 : 0;
   elements.progressTitle.textContent = t("runtime.progress.title");
   elements.progressPercent.textContent = Number.isFinite(percent) ? `${Math.round(percent)}%` : "...";
   elements.progressText.textContent = message || t("runtime.progress.preparing");
   elements.progressFill.style.width = `${Math.max(0, Math.min(100, percent || 0))}%`;
 }
 
-export function mountRuntimePanel(root, { store, actions }) {
-  const elements = {
-    healthBadge: root.querySelector("#health-badge"),
-    runtimeBadge: root.querySelector("#runtime-badge"),
-    asrProviderBadge: root.querySelector("#asr-provider-badge"),
-    asrDeviceBadge: root.querySelector("#asr-device-badge"),
-    asrPartialsBadge: root.querySelector("#asr-partials-badge"),
-    asrModeBadge: root.querySelector("#asr-mode-badge"),
-    translationStatusBadge: root.querySelector("#translation-status-badge"),
-    obsCcBadge: root.querySelector("#obs-cc-badge"),
-    startBtn: root.querySelector("#start-btn"),
-    stopBtn: root.querySelector("#stop-btn"),
-    saveStatusText: root.querySelector("#save-status-text"),
-    runtimeStates: [...root.querySelectorAll(".state-pill")],
-    overlayUrl: root.querySelector("#overlay-url"),
-    overlayLink: root.querySelector("#overlay-link"),
-    progressCard: root.querySelector("#runtime-progress-card"),
-    progressTitle: root.querySelector("#runtime-progress-title"),
-    progressPercent: root.querySelector("#runtime-progress-percent"),
-    progressText: root.querySelector("#runtime-progress-text"),
-    progressFill: root.querySelector("#runtime-progress-fill"),
-    versionTag: root.querySelector(".project-version-tag"),
-    globalSaveBtn: root.querySelector("#global-save-btn"),
-    globalSaveBtnToolbar: root.querySelector("#global-save-btn-toolbar"),
-  };
+function renderRuntimePanel(snapshot, elements) {
+  const runtime = snapshot.runtime || { status: "idle", is_running: false };
+  const diagnostics = snapshot.diagnostics?.asr || {};
+  const translationDiagnostics = snapshot.diagnostics?.translation || {};
+  const obsDiagnostics = snapshot.diagnostics?.obs || {};
+  const mode = selectAsrMode(snapshot);
+  const healthStatus = normalizeUiStatus(snapshot.diagnostics?.healthStatus, "unknown");
+  const runtimeStatus = resolveRuntimeUiStatus(runtime);
+  const translationStatus = normalizeUiStatus(
+    translationDiagnostics.status || (translationDiagnostics.enabled ? "ready" : "disabled"),
+    translationDiagnostics.enabled ? "ready" : "disabled"
+  );
+  const asrStatus = runtime.last_error
+    ? "error"
+    : diagnostics.degraded_mode
+      ? "degraded"
+      : diagnostics.provider
+        ? "ready"
+        : "unknown";
+  const deviceStatus =
+    diagnostics.cpu_fallback_reason || diagnostics.fallback_reason
+      ? "degraded"
+      : diagnostics.selected_device || diagnostics.selected_execution_provider
+        ? "ready"
+        : "unknown";
+  const obsStatus = obsDiagnostics.last_error ? "error" : obsDiagnostics.enabled ? "ready" : "disabled";
 
+  if (elements.healthBadge) {
+    elements.healthBadge.textContent = t("runtime.badge.health", { value: healthStatus });
+    applyStatusDataset(elements.healthBadge, healthStatus);
+  }
+  if (elements.runtimeBadge) {
+    elements.runtimeBadge.textContent = t("runtime.badge.runtime", { value: runtimeStatus });
+    elements.runtimeBadge.title = [runtime.status, runtime.status_message, runtime.last_error].filter(Boolean).join(" | ");
+    applyStatusDataset(elements.runtimeBadge, runtimeStatus);
+  }
+  if (elements.asrProviderBadge) {
+    elements.asrProviderBadge.textContent = t("runtime.badge.asr", { value: diagnostics.provider || "unknown" });
+    applyStatusDataset(elements.asrProviderBadge, asrStatus);
+  }
+  if (elements.asrDeviceBadge) {
+    const value = diagnostics.selected_device || diagnostics.selected_execution_provider || "unknown";
+    elements.asrDeviceBadge.textContent = t("runtime.badge.device", { value });
+    applyStatusDataset(elements.asrDeviceBadge, deviceStatus);
+  }
+  if (elements.asrPartialsBadge) {
+    elements.asrPartialsBadge.textContent = t("runtime.badge.partials", {
+      value: diagnostics.partials_supported
+        ? getCurrentLocale() === "ru"
+          ? "вкл"
+          : "on"
+        : getCurrentLocale() === "ru"
+          ? "выкл"
+          : "off",
+    });
+    applyStatusDataset(elements.asrPartialsBadge, diagnostics.partials_supported ? "ready" : "disabled");
+  }
+  if (elements.asrModeBadge) {
+    elements.asrModeBadge.textContent = t("runtime.badge.mode", {
+      value: diagnostics.provider_mode_kind || diagnostics.provider || "unknown",
+    });
+    applyStatusDataset(elements.asrModeBadge, asrStatus);
+  }
+  if (elements.translationStatusBadge) {
+    elements.translationStatusBadge.textContent = t("runtime.badge.translation", { value: translationStatus });
+    applyStatusDataset(elements.translationStatusBadge, translationStatus);
+  }
+  if (elements.obsCcBadge) {
+    const value = obsStatus === "ready" ? obsDiagnostics.output_mode || "ready" : obsStatus;
+    elements.obsCcBadge.textContent = t("runtime.badge.obs_cc", { value });
+    applyStatusDataset(elements.obsCcBadge, obsStatus);
+  }
+  if (elements.startBtn) {
+    elements.startBtn.disabled = runtime.is_running || snapshot.ui.runtimeBusy;
+    elements.startBtn.textContent = runtime.status === "starting" ? t("common.starting") : t("common.start");
+  }
+  if (elements.stopBtn) {
+    elements.stopBtn.disabled = !runtime.is_running || snapshot.ui.runtimeBusy;
+  }
+  if (elements.globalSaveBtn) {
+    elements.globalSaveBtn.disabled = snapshot.ui.saving;
+    elements.globalSaveBtn.textContent = snapshot.ui.saving
+      ? getCurrentLocale() === "ru"
+        ? "Сохранение..."
+        : "Saving..."
+      : t("common.save");
+  }
+  if (elements.saveStatusText) {
+    elements.saveStatusText.textContent = snapshot.ui.saveStatus || t("save.status.default");
+    if (snapshot.ui.saveTone && snapshot.ui.saveTone !== "info") {
+      elements.saveStatusText.dataset.tone = snapshot.ui.saveTone;
+    } else {
+      delete elements.saveStatusText.dataset.tone;
+    }
+  }
+  elements.runtimeStates.forEach((pill) => {
+    pill.classList.toggle("active", pill.dataset.state === runtime.status);
+  });
+  if (elements.overlayUrl && snapshot.overlay?.url) {
+    elements.overlayUrl.textContent = snapshot.overlay.url;
+  }
+  if (elements.overlayLink && snapshot.overlay?.url) {
+    elements.overlayLink.textContent = snapshot.overlay.url;
+    elements.overlayLink.href = snapshot.overlay.url;
+  }
+  if (elements.versionTag && snapshot.versionInfo?.current_version) {
+    elements.versionTag.textContent = `v${snapshot.versionInfo.current_version}`;
+    elements.versionTag.title = snapshot.versionInfo.current_version;
+  }
+  renderProgress(runtime, elements, mode);
+}
+
+const collectRuntimeElements = (root) =>
+  collectElements(root, {
+    healthBadge: "#health-badge",
+    runtimeBadge: "#runtime-badge",
+    asrProviderBadge: "#asr-provider-badge",
+    asrDeviceBadge: "#asr-device-badge",
+    asrPartialsBadge: "#asr-partials-badge",
+    asrModeBadge: "#asr-mode-badge",
+    translationStatusBadge: "#translation-status-badge",
+    obsCcBadge: "#obs-cc-badge",
+    startBtn: "#start-btn",
+    stopBtn: "#stop-btn",
+    saveStatusText: "#save-status-text",
+    runtimeStates: [".state-pill"],
+    overlayUrl: "#overlay-url",
+    overlayLink: "#overlay-link",
+    progressCard: "#runtime-progress-card",
+    progressTitle: "#runtime-progress-title",
+    progressPercent: "#runtime-progress-percent",
+    progressText: "#runtime-progress-text",
+    progressFill: "#runtime-progress-fill",
+    versionTag: ".project-version-tag",
+    globalSaveBtn: "#global-save-btn",
+    globalSaveBtnToolbar: "#global-save-btn-toolbar",
+  });
+
+function bindRuntimeEvents(elements, { store, actions }) {
   async function onStart() {
     const result = await actions.startRuntime();
-    const mode = store.getState().config?.asr?.mode || "local";
+    const mode = selectAsrMode(store.getState());
     if (result?.runtime && mode !== "local") {
       await actions.navigateBrowserAsrWindow();
     }
   }
 
-  function render(snapshot) {
-    const runtime = snapshot.runtime || { status: "idle", is_running: false };
-    const diagnostics = snapshot.diagnostics?.asr || {};
-    const translationDiagnostics = snapshot.diagnostics?.translation || {};
-    const obsDiagnostics = snapshot.diagnostics?.obs || {};
-    const mode = snapshot.config?.asr?.mode || "local";
-    const healthStatus = normalizeUiStatus(snapshot.diagnostics?.healthStatus, "unknown");
-    const runtimeStatus = resolveRuntimeUiStatus(runtime);
-    const translationStatus = normalizeUiStatus(
-      translationDiagnostics.status || (translationDiagnostics.enabled ? "ready" : "disabled"),
-      translationDiagnostics.enabled ? "ready" : "disabled"
-    );
-    const asrStatus = runtime.last_error
-      ? "error"
-      : diagnostics.degraded_mode
-        ? "degraded"
-        : diagnostics.provider
-          ? "ready"
-          : "unknown";
-    const deviceStatus = diagnostics.cpu_fallback_reason || diagnostics.fallback_reason
-      ? "degraded"
-      : diagnostics.selected_device || diagnostics.selected_execution_provider
-        ? "ready"
-        : "unknown";
-    const obsStatus = obsDiagnostics.last_error
-      ? "error"
-      : obsDiagnostics.enabled
-        ? "ready"
-        : "disabled";
-    if (elements.healthBadge) {
-      elements.healthBadge.textContent = t("runtime.badge.health", { value: healthStatus });
-      applyStatusDataset(elements.healthBadge, healthStatus);
-    }
-    if (elements.runtimeBadge) {
-      elements.runtimeBadge.textContent = t("runtime.badge.runtime", { value: runtimeStatus });
-      elements.runtimeBadge.title = [runtime.status, runtime.status_message, runtime.last_error].filter(Boolean).join(" | ");
-      applyStatusDataset(elements.runtimeBadge, runtimeStatus);
-    }
-    if (elements.asrProviderBadge) {
-      elements.asrProviderBadge.textContent = t("runtime.badge.asr", { value: diagnostics.provider || "unknown" });
-      applyStatusDataset(elements.asrProviderBadge, asrStatus);
-    }
-    if (elements.asrDeviceBadge) {
-      const value = diagnostics.selected_device || diagnostics.selected_execution_provider || "unknown";
-      elements.asrDeviceBadge.textContent = t("runtime.badge.device", { value });
-      applyStatusDataset(elements.asrDeviceBadge, deviceStatus);
-    }
-    if (elements.asrPartialsBadge) {
-      elements.asrPartialsBadge.textContent = t("runtime.badge.partials", {
-        value: diagnostics.partials_supported ? (getCurrentLocale() === "ru" ? "вкл" : "on") : (getCurrentLocale() === "ru" ? "выкл" : "off"),
-      });
-      applyStatusDataset(elements.asrPartialsBadge, diagnostics.partials_supported ? "ready" : "disabled");
-    }
-    if (elements.asrModeBadge) {
-      elements.asrModeBadge.textContent = t("runtime.badge.mode", { value: diagnostics.provider_mode_kind || diagnostics.provider || "unknown" });
-      applyStatusDataset(elements.asrModeBadge, asrStatus);
-    }
-    if (elements.translationStatusBadge) {
-      elements.translationStatusBadge.textContent = t("runtime.badge.translation", {
-        value: translationStatus,
-      });
-      applyStatusDataset(elements.translationStatusBadge, translationStatus);
-    }
-    if (elements.obsCcBadge) {
-      const value = obsStatus === "ready" ? (obsDiagnostics.output_mode || "ready") : obsStatus;
-      elements.obsCcBadge.textContent = t("runtime.badge.obs_cc", { value });
-      applyStatusDataset(elements.obsCcBadge, obsStatus);
-    }
-    if (elements.startBtn) {
-      elements.startBtn.disabled = runtime.is_running || snapshot.ui.runtimeBusy;
-      elements.startBtn.textContent = runtime.status === "starting" ? t("common.starting") : t("common.start");
-    }
-    if (elements.stopBtn) {
-      elements.stopBtn.disabled = !runtime.is_running || snapshot.ui.runtimeBusy;
-    }
-    if (elements.globalSaveBtn) {
-      elements.globalSaveBtn.disabled = snapshot.ui.saving;
-      elements.globalSaveBtn.textContent = snapshot.ui.saving
-        ? (getCurrentLocale() === "ru" ? "Сохранение..." : "Saving...")
-        : t("common.save");
-    }
-    if (elements.saveStatusText) {
-      elements.saveStatusText.textContent = snapshot.ui.saveStatus || t("save.status.default");
-      if (snapshot.ui.saveTone && snapshot.ui.saveTone !== "info") {
-        elements.saveStatusText.dataset.tone = snapshot.ui.saveTone;
-      } else {
-        delete elements.saveStatusText.dataset.tone;
-      }
-    }
-    elements.runtimeStates.forEach((pill) => {
-      pill.classList.toggle("active", pill.dataset.state === runtime.status);
-    });
-    if (elements.overlayUrl && snapshot.overlay?.url) {
-      elements.overlayUrl.textContent = snapshot.overlay.url;
-    }
-    if (elements.overlayLink && snapshot.overlay?.url) {
-      elements.overlayLink.textContent = snapshot.overlay.url;
-      elements.overlayLink.href = snapshot.overlay.url;
-    }
-    if (elements.versionTag && snapshot.versionInfo?.current_version) {
-      elements.versionTag.textContent = `v${snapshot.versionInfo.current_version}`;
-      elements.versionTag.title = snapshot.versionInfo.current_version;
-    }
-    renderProgress(runtime, elements, { mode });
-  }
-
-  elements.startBtn?.addEventListener("click", onStart);
-  elements.stopBtn?.addEventListener("click", () => {
-    actions.stopRuntime();
-  });
   const onGlobalSave = () => {
     actions.saveCurrentConfig();
   };
-  elements.globalSaveBtn?.addEventListener("click", onGlobalSave);
-  elements.globalSaveBtnToolbar?.addEventListener("click", onGlobalSave);
-  elements.overlayLink?.addEventListener("click", async (event) => {
+
+  const handlers = [];
+  const add = (element, event, handler) => {
+    if (!element) {
+      return;
+    }
+    element.addEventListener(event, handler);
+    handlers.push(() => element.removeEventListener(event, handler));
+  };
+
+  add(elements.startBtn, "click", onStart);
+  add(elements.stopBtn, "click", () => actions.stopRuntime());
+  add(elements.globalSaveBtn, "click", onGlobalSave);
+  add(elements.globalSaveBtnToolbar, "click", onGlobalSave);
+  add(elements.overlayLink, "click", async (event) => {
     if (!window.DesktopBridge?.isDesktopMode?.()) {
       return;
     }
@@ -194,7 +211,15 @@ export function mountRuntimePanel(root, { store, actions }) {
     await window.DesktopBridge.openExternalUrl(elements.overlayLink.href);
   });
 
-  render(store.getState());
-  const unsubscribe = subscribe(render);
-  return () => unsubscribe();
+  return () => handlers.forEach((off) => off());
+}
+
+const mountRuntimePanelImpl = createPanelMount({
+  collectElements: collectRuntimeElements,
+  render: renderRuntimePanel,
+  bindEvents: bindRuntimeEvents,
+});
+
+export function mountRuntimePanel(root, context) {
+  return mountRuntimePanelImpl(root, context);
 }

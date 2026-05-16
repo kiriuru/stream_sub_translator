@@ -18,7 +18,7 @@ This README describes the current desktop product surface for the `0.4.0` code l
 
 ## Release Highlights
 
-`0.4.0` — see [docs/DESKTOP_RELEASE_CHANGELOG_0.4.0.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.4.0.md) (same bullet style as [v0.2.9.2](https://github.com/kiriuru/stream_sub_translator/releases/tag/v0.2.9.2)): compact dashboard + window resize, Browser ASR observability, Web Speech quick-start Parakeet lock, non-blocking dashboard boot, second installer **Only Web.exe**. `PROJECT_VERSION = "0.4.0"`; `config_version` stays **7**; public `/api` and subtitle contracts unchanged.
+`0.4.0` — see [docs/DESKTOP_RELEASE_CHANGELOG_0.4.0.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.4.0.md) (same bullet style as [v0.2.9.2](https://github.com/kiriuru/stream_sub_translator/releases/tag/v0.2.9.2)): compact dashboard + window resize, Browser ASR observability, Web Speech quick-start Parakeet lock, non-blocking dashboard boot (panels first; launcher uses in-page navigation so the shell does not stall ~20 s on pywebviewready), second installer **Only Web.exe**. `PROJECT_VERSION = "0.4.0"`; `config_version` stays **7**; public `/api` and subtitle contracts unchanged.
 
 Prior release: [docs/DESKTOP_RELEASE_CHANGELOG_0.3.2.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.3.2.md). Full history: [docs/CHANGELOG.md](./docs/CHANGELOG.md).
 
@@ -45,7 +45,7 @@ On first launch the bootstrap launcher extracts the managed runtime next to itse
    - `CPU-only`
    - `Remote Controller`
    - `Remote Worker`
-6. The dashboard opens as soon as the shell loads; settings finish loading in the background.
+6. After you pick a profile, the dashboard shell appears as soon as `GET /` is ready (full health check continues in the background). Panels are interactive immediately; settings, help topics, and desktop context finish loading in the background.
 
 **Web Speech-only launcher** (`Stream Subtitle Translator Only Web.exe`):
 
@@ -544,6 +544,7 @@ Build output:
 - bootstrap launchers:
   - `dist\bootstrap-launcher\Stream Subtitle Translator.exe`
   - `dist\bootstrap-launcher-web-only\Stream Subtitle Translator Only Web.exe`
+- versioned release bundle (local): `dist\desktop-releases\v0.4.0\` (`01-bootstrap-onefile\`, `01-bootstrap-web-only-onefile\`, `02-managed-app-onefolder\`, `03-installers-both\`, `README.txt`)
 - publish script defaults (both exes end up in each folder):
   - `F:\AI\stream-sub-translator-desktop-release`
   - `F:\AI\stream-sub-translator-desktop-release-clean`
@@ -565,6 +566,10 @@ Build output:
     - run `POST /api/updates/check` (persists `updates.latest_known_version` + `updates.last_checked_utc`).
 - UI is unreachable:
   - ensure local port `8765` is not occupied by another process.
+- Dashboard stays blank or unclickable for ~20 s after splash (fixed in `0.4.0` launcher builds):
+  - replace the bootstrap exe with a current `0.4.0` build from `dist\desktop-releases\v0.4.0\03-installers-both\` or your publish folder;
+  - in `logs\desktop-launcher.log`, CSS/JS requests should follow `GET /?desktop=1` within about a second — not ~20 s later;
+  - if the gap persists, run `--repair` or `--reset-runtime` so `app-runtime/` matches the new launcher payload.
 - Web Speech returns no text:
   - grant microphone permission in the browser;
   - keep the worker window open and visible;
