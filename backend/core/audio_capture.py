@@ -9,6 +9,9 @@ from dataclasses import dataclass
 import numpy as np
 import sounddevice as sd
 
+from backend.core.pipeline_trace_log import pipeline_trace
+from backend.core.pipeline_trace_sampler import PipelineTraceSampler
+
 
 @dataclass
 class AudioChunk:
@@ -220,6 +223,8 @@ class AudioCapture:
         self._queue: queue.Queue[AudioChunk] = queue.Queue()
         self._stream: sd.RawInputStream | None = None
         self._ring_buffer = AudioRingBuffer()
+        self._callback_chunks = 0
+        self._callback_sampler = PipelineTraceSampler(min_interval_ms=250.0)
 
     @property
     def ring_buffer(self) -> AudioRingBuffer:
@@ -227,7 +232,14 @@ class AudioCapture:
 
     def _callback(self, indata: bytes, frames: int, _time: object, status: sd.CallbackFlags) -> None:
         if status:
-            return
+            pipeline_trace(
+                "portaudio_callback",
+                "audio_capture",
+                "callback_status",
+                status=str(status),
+                frames=frames,
+                queue_depth=self._queue.qsize(),
+            )
         chunk_bytes = bytes(indata)
         if not chunk_bytes:
             return
@@ -241,11 +253,29 @@ class AudioCapture:
         )
         self._ring_buffer.append(chunk_bytes)
         self._queue.put(chunk)
+        self._callback_chunks += 1
+        if self._callback_sampler.should_emit("callback_tick"):
+            pipeline_trace(
+                "portaudio_callback",
+                "audio_capture",
+                "callback_tick",
+                level=round(level, 4),
+                frames=frames,
+                queue_depth=self._queue.qsize(),
+                callback_chunks_total=self._callback_chunks,
+            )
 
     def start(self, device_id: str | None = None) -> None:
         if self._stream is not None:
+            pipeline_trace(
+                "capture",
+                "audio_capture",
+                "start_skipped_already_open",
+                device_id=device_id,
+            )
             return
         device: int | None = int(device_id) if device_id not in (None, "") else None
+        self._callback_chunks = 0
         self._stream = sd.RawInputStream(
             samplerate=self.sample_rate,
             blocksize=self.blocksize,
@@ -255,6 +285,16 @@ class AudioCapture:
             callback=self._callback,
         )
         self._stream.start()
+        pipeline_trace(
+            "capture",
+            "audio_capture",
+            "stream_started",
+            device_id=device_id,
+            resolved_device_index=device,
+            sample_rate=self.sample_rate,
+            blocksize=self.blocksize,
+            channels=self.channels,
+        )
 
     def read_chunk(self, timeout: float = 0.25) -> AudioChunk | None:
         try:
@@ -264,6 +304,13 @@ class AudioCapture:
 
     def stop(self) -> None:
         if self._stream is not None:
+            pipeline_trace(
+                "capture",
+                "audio_capture",
+                "stream_stopping",
+                callback_chunks_total=self._callback_chunks,
+                queue_depth=self._queue.qsize(),
+            )
             self._stream.stop()
             self._stream.close()
             self._stream = None

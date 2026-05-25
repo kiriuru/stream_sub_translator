@@ -7,6 +7,7 @@ import { clone, getCurrentLocale, normalizeSupportedUiLanguage } from "../helper
 import {
   buildSaveStatusMessage,
   getRestartRequiredReasons,
+  mergeFontCatalogPreservingSystem,
   mirrorBrowserWorkerSettingsToLocalStorage,
 } from "../action-helpers.js";
 import { isBrowserRecognitionMode } from "../helpers.js";
@@ -87,7 +88,7 @@ export function createConfigActions({ store, api, logger, events }) {
       const restartReasons = getRestartRequiredReasons(previousPayload, savedPayload);
       store.updateState({
         subtitleStylePresets: response.subtitle_style_presets || snapshot.subtitleStylePresets,
-        fontCatalog: response.font_catalog || snapshot.fontCatalog,
+        fontCatalog: mergeFontCatalogPreservingSystem(response.font_catalog, snapshot.fontCatalog),
       });
       setConfig(savedPayload);
       mirrorBrowserWorkerSettingsToLocalStorage(savedPayload);
@@ -156,7 +157,7 @@ export function createConfigActions({ store, api, logger, events }) {
     const response = await api.saveSettings(payload);
     store.updateState({
       subtitleStylePresets: response.subtitle_style_presets || store.getState().subtitleStylePresets,
-      fontCatalog: response.font_catalog || store.getState().fontCatalog,
+      fontCatalog: mergeFontCatalogPreservingSystem(response.font_catalog, store.getState().fontCatalog),
     });
     const importedPayload = response.payload || payload;
     setConfig(importedPayload);

@@ -49,9 +49,17 @@ class ExportService:
         asr_diagnostics = runtime_payload.get("asr_diagnostics") or {}
 
         model_manifest_path = self._resolve_model_manifest_path(asr_diagnostics)
-        latest_session_log = self._app.state.paths.logs_dir / "session-latest.jsonl"
-        backend_log = self._app.state.paths.logs_dir / "backend.log"
-        runtime_events_log = self._app.state.paths.logs_dir / "runtime-events.log"
+        logs_dir = self._app.state.paths.logs_dir
+        latest_session_log = logs_dir / "session-latest.jsonl"
+        backend_log = logs_dir / "backend.log"
+        runtime_events_log = logs_dir / "runtime-events.log"
+        trace_logs = (
+            ("pipeline-trace.jsonl", logs_dir / "pipeline-trace.jsonl"),
+            ("api-trace.jsonl", logs_dir / "api-trace.jsonl"),
+            ("ui-trace.jsonl", logs_dir / "ui-trace.jsonl"),
+            ("subprocess-trace.jsonl", logs_dir / "subprocess-trace.jsonl"),
+            ("startup-journey.jsonl", logs_dir / "startup-journey.jsonl"),
+        )
 
         with zipfile.ZipFile(bundle_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("runtime_status.json", self._json_text(runtime_payload))
@@ -65,6 +73,8 @@ class ExportService:
             self._write_file_if_present(archive, latest_session_log, "latest_session.jsonl")
             self._write_file_if_present(archive, runtime_events_log, "runtime-events.log")
             self._write_file_if_present(archive, backend_log, "backend.log")
+            for archive_name, source_path in trace_logs:
+                self._write_file_if_present(archive, source_path, archive_name)
 
         self._app.state.structured_runtime_logger.log(
             "runtime_metrics",
@@ -239,6 +249,11 @@ class ExportService:
                 "backend.log": "backend log, redacted, normal verbosity",
                 "runtime-events.log": "structured runtime events, compact text lines, redacted",
                 "session-latest.jsonl": "readable session timeline, raw bounded ring buffer",
+                "pipeline-trace.jsonl": "capture/VAD/ASR/runtime lifecycle trace (high frequency)",
+                "api-trace.jsonl": "HTTP and websocket API trace",
+                "ui-trace.jsonl": "dashboard/desktop UI trace",
+                "subprocess-trace.jsonl": "desktop bootstrap and subprocess trace",
+                "startup-journey.jsonl": "startup journey milestones",
                 "config_redacted.json": "redacted config snapshot",
                 "runtime_status.json": "runtime status snapshot",
                 "preflight_report.json": "preflight and environment report",

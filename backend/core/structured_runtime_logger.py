@@ -5,9 +5,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from backend.core.compact_log_line import format_structured_runtime_line
+from backend.core.compact_log_line import format_structured_runtime_line, structured_event_level
+from backend.core.diagnostic_flags import is_runtime_events_verbose_enabled
 from backend.core.redaction import redact_mapping
 from backend.core.structured_log_compact import compact_mapping_for_runtime_log
+
+# Severity levels that always reach disk. DBG/VRB events (~95% of runtime
+# noise on a real session — browser ASR FSM transitions, browser worker
+# status heartbeats, translation queue depth ticks) are filtered unless
+# SST_DEEP_DIAGNOSTICS / SST_TRACE_RUNTIME_EVENTS_VERBOSE is set.
+_RUNTIME_EVENT_DEFAULT_LEVELS: frozenset[str] = frozenset({"INF", "WRN", "ERR", "CRT"})
 
 
 class StructuredRuntimeLogger:
@@ -57,6 +64,14 @@ class StructuredRuntimeLogger:
     ) -> None:
         normalized_event = str(event or "").strip()
         if not normalized_event:
+            return
+        # Drop high-frequency DBG/VRB lines unless the user opted into verbose
+        # runtime events. Matches the 0.4.1 footprint on user installs while
+        # still allowing full triage via SST_DEEP_DIAGNOSTICS.
+        if (
+            structured_event_level(normalized_event) not in _RUNTIME_EVENT_DEFAULT_LEVELS
+            and not is_runtime_events_verbose_enabled()
+        ):
             return
         record: dict[str, Any] = {
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),

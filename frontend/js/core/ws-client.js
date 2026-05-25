@@ -42,7 +42,12 @@ export class WsClient {
       }
       this.backoffMs = 1000;
       this.onStatus("connected");
-      this.logger("[ws] connected", { source: "ws" });
+      this.logger("[ws] connected", {
+        source: "ws",
+        tracePhase: "ws",
+        traceEvent: "client_connected",
+        details: { url: targetUrl },
+      });
       this.socket?.send("ping");
     });
 
@@ -58,7 +63,11 @@ export class WsClient {
         return;
       }
       this.onStatus("disconnected");
-      this.logger("[ws] disconnected; reconnecting...", { source: "ws" });
+      this.logger("[ws] disconnected; reconnecting...", {
+        source: "ws",
+        tracePhase: "ws",
+        traceEvent: "client_disconnected",
+      });
       this.socket = null;
       if (!this.manualClose) {
         this.scheduleReconnect();
@@ -147,7 +156,26 @@ export class WsClient {
         return;
       }
       if (this.isStale(type, message?.payload)) {
+        this.logger("[ws] dropped stale event", {
+          source: "ws",
+          persist: false,
+          uiTrace: true,
+          tracePhase: "ws",
+          traceEvent: "stale_drop",
+          details: { type },
+        });
         return;
+      }
+      if (type === "runtime_status") {
+        const nextStatus = String(message?.payload?.status || "").trim().toLowerCase();
+        if (nextStatus) {
+          this.logger(`[runtime] status -> ${nextStatus}`, {
+            source: "ws",
+            tracePhase: "runtime",
+            traceEvent: "ws_status",
+            details: { status: nextStatus },
+          });
+        }
       }
       this.onMessage({
         ...message,

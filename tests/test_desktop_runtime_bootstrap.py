@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,6 +13,7 @@ from desktop.runtime_bootstrap import (
     detect_runtime_paths,
     ensure_runtime_layout,
     normalize_install_profile,
+    quiet_import_check_snippet,
     _project_runtime_root,
 )
 
@@ -94,12 +97,24 @@ class BuildRuntimeEnvironmentTests(unittest.TestCase):
         self.assertEqual(env["TEMP"], str(paths.temp_root))
         self.assertEqual(env["SST_PROJECT_ROOT"], str(paths.project_root))
         self.assertEqual(env["SST_BUNDLE_ROOT"], str(paths.bundle_root))
-        self.assertNotIn("SST_PYTHONPATH_ROOT", env)
+        if (paths.bundle_root / "backend").is_dir():
+            self.assertEqual(env.get("SST_PYTHONPATH_ROOT"), str(paths.bundle_root))
+        else:
+            self.assertNotIn("SST_PYTHONPATH_ROOT", env)
 
     def test_environment_attaches_pythonpath_when_requested(self) -> None:
         paths = detect_runtime_paths()
         env = build_runtime_environment(paths, pythonpath_root=paths.project_root)
         self.assertEqual(env["SST_PYTHONPATH_ROOT"], str(paths.project_root))
+
+    def test_environment_defaults_pythonpath_to_bundle_when_backend_present(self) -> None:
+        from dataclasses import replace
+
+        paths = detect_runtime_paths()
+        if not (paths.bundle_root / "backend").is_dir():
+            self.skipTest("bundle backend tree not present in this workspace")
+        env = build_runtime_environment(paths)
+        self.assertEqual(env["SST_PYTHONPATH_ROOT"], str(paths.bundle_root))
 
 
 class EnsureRuntimeLayoutTests(unittest.TestCase):
@@ -135,6 +150,30 @@ class EnsureRuntimeLayoutTests(unittest.TestCase):
             self.assertTrue((fake_paths.data_dir / "exports").exists())
             self.assertTrue((fake_paths.data_dir / "models").exists())
             self.assertTrue(fake_paths.fonts_dir.exists())
+
+
+class QuietImportCheckSnippetTests(unittest.TestCase):
+    def test_missing_import_exits_one_without_traceback(self) -> None:
+        snippet = quiet_import_check_snippet("import definitely_not_a_real_module_xyz")
+        completed = subprocess.run(
+            [sys.executable, "-c", snippet],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        self.assertEqual(completed.returncode, 1)
+        combined = f"{completed.stdout}\n{completed.stderr}"
+        self.assertNotIn("Traceback", combined)
+
+    def test_present_import_exits_zero(self) -> None:
+        snippet = quiet_import_check_snippet("import os")
+        completed = subprocess.run(
+            [sys.executable, "-c", snippet],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        self.assertEqual(completed.returncode, 0)
 
 
 if __name__ == "__main__":

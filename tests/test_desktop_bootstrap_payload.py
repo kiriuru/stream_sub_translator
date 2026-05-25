@@ -117,6 +117,71 @@ class PayloadManifestRoundTripTests(unittest.TestCase):
             self.assertFalse(ok_after_tamper)
             self.assertTrue(any("sha256" in entry or "size" in entry for entry in tamper_issues))
 
+    def test_verify_detects_marker_version_mismatch(self) -> None:
+        """A previous install with a different exe must be flagged for repair."""
+        with TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            payload_root = tmp / "payload-root"
+            install_root = tmp / "install"
+            (payload_root / BOOTSTRAP_RUNTIME_DIR).mkdir(parents=True, exist_ok=True)
+            (payload_root / BOOTSTRAP_RUNTIME_HIDDEN_EXE).write_bytes(b"runtime-exe-stub")
+            (payload_root / BOOTSTRAP_RUNTIME_DIR / "asset.txt").write_text("hello", encoding="utf-8")
+            (payload_root / BOOTSTRAP_RUNTIME_DIR / BOOTSTRAP_INSTALL_MARKER).write_text(
+                "0.4.2\n", encoding="utf-8"
+            )
+
+            manifest = build_payload_manifest(payload_root, app_version="0.4.2", release_track="stable")
+            archive_path = tmp / "payload.zip"
+            create_payload_archive(payload_root, archive_path, manifest)
+            install_root.mkdir(parents=True, exist_ok=True)
+            verified, mismatches = install_or_repair_runtime(install_root, manifest, archive_path)
+            self.assertTrue(verified, msg=f"initial install failed: {mismatches}")
+
+            # Simulate a leftover marker from a previous install with the same files.
+            marker_path = install_root / BOOTSTRAP_RUNTIME_DIR / BOOTSTRAP_INSTALL_MARKER
+            marker_path.write_text("0.4.1\n", encoding="utf-8")
+            verified, mismatches = verify_runtime_files(install_root, manifest)
+            self.assertFalse(verified)
+            self.assertTrue(
+                any(entry.startswith("version-marker:") for entry in mismatches),
+                msg=f"expected version-marker in mismatches: {mismatches}",
+            )
+
+    def test_verify_detects_stale_runtime_files(self) -> None:
+        """Files left over inside app-runtime/ that aren't in the new manifest trigger repair."""
+        with TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            payload_root = tmp / "payload-root"
+            install_root = tmp / "install"
+            (payload_root / BOOTSTRAP_RUNTIME_DIR).mkdir(parents=True, exist_ok=True)
+            (payload_root / BOOTSTRAP_RUNTIME_HIDDEN_EXE).write_bytes(b"runtime-exe-stub")
+            (payload_root / BOOTSTRAP_RUNTIME_DIR / "asset.txt").write_text("hello", encoding="utf-8")
+            (payload_root / BOOTSTRAP_RUNTIME_DIR / BOOTSTRAP_INSTALL_MARKER).write_text(
+                "0.4.2\n", encoding="utf-8"
+            )
+
+            manifest = build_payload_manifest(payload_root, app_version="0.4.2", release_track="stable")
+            archive_path = tmp / "payload.zip"
+            create_payload_archive(payload_root, archive_path, manifest)
+            install_root.mkdir(parents=True, exist_ok=True)
+            verified, mismatches = install_or_repair_runtime(install_root, manifest, archive_path)
+            self.assertTrue(verified, msg=f"initial install failed: {mismatches}")
+
+            # Pretend a previous payload left an obsolete native extension behind.
+            stale_file = install_root / BOOTSTRAP_RUNTIME_DIR / "obsolete.pyd"
+            stale_file.write_bytes(b"stale-binary")
+            verified, mismatches = verify_runtime_files(install_root, manifest)
+            self.assertFalse(verified)
+            self.assertTrue(
+                any(entry == "stale: app-runtime/obsolete.pyd" for entry in mismatches),
+                msg=f"expected stale entry in mismatches: {mismatches}",
+            )
+
+            # And the install_or_repair flow restores a clean state.
+            verified, mismatches = install_or_repair_runtime(install_root, manifest, archive_path)
+            self.assertTrue(verified, msg=f"repair did not wipe stale file: {mismatches}")
+            self.assertFalse(stale_file.exists())
+
     def test_extract_payload_archive_skips_manifest_file(self) -> None:
         with TemporaryDirectory() as raw:
             tmp = Path(raw)

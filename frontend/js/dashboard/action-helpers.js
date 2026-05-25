@@ -4,6 +4,24 @@ import { formatList, getCurrentLocale } from "./helpers.js";
 export const BROWSER_WORKER_SETTINGS_STORAGE_KEY = "sst.browser_worker.settings.v1";
 export const BROWSER_WORKER_EXPERIMENTAL_SETTINGS_STORAGE_KEY = "sst.browser_worker.experimental.settings.v1";
 
+// System fonts come from the browser's Local Font Access API, not the backend.
+// When we merge a fresh server `font_catalog` into the store after save/reload
+// we have to preserve any system entries the user has already enumerated, or
+// they vanish from the selector and the previously chosen value can't be
+// re-resolved (#fonts-system-bug).
+export function mergeFontCatalogPreservingSystem(serverCatalog, currentCatalog) {
+  const fallback = currentCatalog && typeof currentCatalog === "object" ? currentCatalog : {};
+  if (!serverCatalog || typeof serverCatalog !== "object") {
+    return fallback;
+  }
+  const systemFromServer = Array.isArray(serverCatalog.system) ? serverCatalog.system : null;
+  const systemFromCurrent = Array.isArray(fallback.system) ? fallback.system : [];
+  return {
+    ...serverCatalog,
+    system: systemFromServer && systemFromServer.length ? systemFromServer : systemFromCurrent,
+  };
+}
+
 export function mirrorBrowserWorkerSettingsToLocalStorage(savedPayload) {
   try {
     const mode = String(savedPayload?.asr?.mode || "local");

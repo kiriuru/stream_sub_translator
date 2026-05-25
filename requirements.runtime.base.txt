@@ -9,3 +9,4 @@ webrtcvad-wheels==2.0.14
 httpx==0.28.1
 python-dotenv==1.2.2
 fsspec==2024.12.0
+pywebview==6.2.1

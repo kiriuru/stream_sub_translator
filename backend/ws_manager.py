@@ -7,6 +7,9 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from backend.core.api_trace_log import api_trace
+from backend.core.pipeline_trace_log import pipeline_trace
+
 logger = logging.getLogger(__name__)
 
 # Bounded per-connection outbound queue (broadcast/backpressure). See docs/plans browser ASR roadmap §7.
@@ -50,8 +53,23 @@ class WebSocketManager:
             self._connections.add(websocket)
             self._out_queues[websocket] = q
             self._send_locks[websocket] = send_lock
-            self._sender_tasks[websocket] = asyncio.create_task(self._connection_sender(websocket, q))
+            sender = asyncio.create_task(self._connection_sender(websocket, q), name="sst-ws-sender")
+            self._sender_tasks[websocket] = sender
             self._diagnostics["ws_events_connections_active"] = len(self._connections)
+            pipeline_trace(
+                "asyncio_event_loop",
+                "ws_manager",
+                "connection_open",
+                connections_active=len(self._connections),
+                outbound_queue_max=self._outbound_queue_max,
+                sender_task_id=id(sender),
+            )
+            api_trace(
+                "ws",
+                "manager_connection_open",
+                connections_active=len(self._connections),
+                outbound_queue_max=self._outbound_queue_max,
+            )
 
     async def _send_json_locked(self, websocket: WebSocket, message: dict[str, Any]) -> None:
         """Send one JSON message to a single socket, serialized via the per-connection mutex.
@@ -100,6 +118,18 @@ class WebSocketManager:
                     self._diagnostics["ws_events_dead_connections_removed"]
                 ) + 1
             self._diagnostics["ws_events_connections_active"] = len(self._connections)
+        pipeline_trace(
+            "asyncio_event_loop",
+            "ws_manager",
+            "connection_closed",
+            connections_active=len(self._connections),
+        )
+        api_trace(
+            "ws",
+            "manager_connection_closed",
+            connections_active=len(self._connections),
+            dead_removed=bool(removed),
+        )
 
     def _enqueue_to_connection(self, connection: WebSocket, message: dict[str, Any]) -> None:
         """Enqueue outbound JSON; drop-oldest on pressure.
@@ -112,10 +142,26 @@ class WebSocketManager:
             return
         try:
             q.put_nowait(message)
+            depth = q.qsize()
+            if depth >= max(1, self._outbound_queue_max - 4):
+                pipeline_trace(
+                    "asyncio_event_loop",
+                    "ws_manager",
+                    "outbound_queue_pressure",
+                    queue_depth=depth,
+                    queue_max=self._outbound_queue_max,
+                    message_type=str(message.get("type") or message.get("event") or ""),
+                )
         except asyncio.QueueFull:
             try:
                 _ = q.get_nowait()
                 self._diagnostics["ws_events_dropped_oldest"] = int(self._diagnostics["ws_events_dropped_oldest"]) + 1
+                pipeline_trace(
+                    "asyncio_event_loop",
+                    "ws_manager",
+                    "outbound_queue_drop_oldest",
+                    message_type=str(message.get("type") or message.get("event") or ""),
+                )
             except asyncio.QueueEmpty:
                 pass
             try:
@@ -135,6 +181,13 @@ class WebSocketManager:
         async with self._lock:
             connections = list(self._connections)
         self._diagnostics["ws_events_broadcast_count"] = int(self._diagnostics["ws_events_broadcast_count"]) + 1
+        if message_type and message_type != "runtime_update":
+            api_trace(
+                "ws",
+                "manager_broadcast",
+                message_type=message_type,
+                connection_count=len(connections),
+            )
         stale: list[WebSocket] = []
         for connection in connections:
             if connection in self._out_queues:
@@ -155,6 +208,12 @@ class WebSocketManager:
                     self._diagnostics["ws_events_dead_connections_removed"]
                 ) + len(stale)
                 self._diagnostics["ws_events_connections_active"] = len(self._connections)
+            api_trace(
+                "ws",
+                "manager_broadcast_stale_removed",
+                message_type=message_type or None,
+                stale_count=len(stale),
+            )
 
     async def replay_last(self, websocket: WebSocket, *, message_types: list[str]) -> None:
         """

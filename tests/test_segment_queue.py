@@ -31,6 +31,37 @@ class SegmentQueueTests(unittest.TestCase):
         self.assertEqual(item.audio, b"final")
         self.assertIsNone(queue.pop(timeout=0.01))
 
+    def test_empty_delta_final_waits_behind_pending_partials(self) -> None:
+        queue = SegmentQueue()
+        queue.push(
+            AsrWorkItem(
+                kind="partial",
+                audio=b"pcm",
+                duration_ms=100,
+                segment_id="seg-1",
+                audio_is_delta=True,
+            )
+        )
+        queue.push(
+            AsrWorkItem(
+                kind="final",
+                audio=b"",
+                duration_ms=200,
+                segment_id="seg-1",
+                audio_is_delta=True,
+            )
+        )
+
+        first = queue.pop(timeout=0.01)
+        second = queue.pop(timeout=0.01)
+
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        assert first is not None
+        assert second is not None
+        self.assertEqual((first.kind, first.audio), ("partial", b"pcm"))
+        self.assertEqual((second.kind, second.audio), ("final", b""))
+
     def test_final_for_one_segment_keeps_other_segment_work_items(self) -> None:
         queue = SegmentQueue()
         queue.push(AsrWorkItem(kind="partial", audio=b"keep", duration_ms=80, segment_id="seg-2"))

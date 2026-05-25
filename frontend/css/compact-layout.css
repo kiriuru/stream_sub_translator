@@ -272,6 +272,79 @@ body.sst-layout-compact .overview-layout {
 
 
 
+/* Safety net: in compact mode the live snapshot preview must never render,
+   even if .overview-preview-card is later promoted outside .overview-layout. */
+
+body.sst-layout-compact .overview-preview-card {
+
+  display: none !important;
+
+}
+
+
+
+/* ----------------------------------------------------------------------
+   Compact mode: aggressively trim explanatory copy from tab panels.
+   Strategy: show only interactive controls (selects, inputs, buttons,
+   live status placeholders); hide decorative eyebrow labels and static
+   documentation copy that just consumes vertical screen space.
+
+   Technical panels are intentionally excluded — Recognition, Tuning, and
+   ASR Advanced expose Parakeet-specific knobs (latency presets, partial
+   emit mode, VAD, min-speech, etc.) whose meaning is non-obvious without
+   the eyebrow titles and inline notes. The 0.4.1 desktop release shipped
+   those hints visible in compact mode too; do not strip them again here.
+
+   Kept visible elsewhere:
+     - <p> with an id   -> JS-driven runtime status (e.g. font-source-status,
+                            ui-theme-status, overlay-preset-hint, translation
+                            provider hints/status).
+     - .save-status     -> the small one-line save state under runtime card.
+   --------------------------------------------------------------------- */
+
+/* (a) Decorative eyebrow labels inside non-technical tab panels */
+
+body.sst-layout-compact
+  .tab-panel:not([data-tab-panel="recognition"]):not([data-tab-panel="tuning"]):not([data-tab-panel="asr_advanced"])
+  .eyebrow {
+
+  display: none !important;
+
+}
+
+/* (b) Documentation <p class="muted"> living under section / panel / surface
+       headings (subtitle text directly under titles), non-technical panels only */
+
+body.sst-layout-compact
+  .tab-panel:not([data-tab-panel="recognition"]):not([data-tab-panel="tuning"]):not([data-tab-panel="asr_advanced"])
+  .section-heading .muted,
+
+body.sst-layout-compact
+  .tab-panel:not([data-tab-panel="recognition"]):not([data-tab-panel="tuning"]):not([data-tab-panel="asr_advanced"])
+  .panel-header .muted,
+
+body.sst-layout-compact
+  .tab-panel:not([data-tab-panel="recognition"]):not([data-tab-panel="tuning"]):not([data-tab-panel="asr_advanced"])
+  .surface-header > div > .muted {
+
+  display: none !important;
+
+}
+
+/* (c) Standalone static <p class="muted" data-i18n="..."> notes without an
+       id (id'd paragraphs are runtime status placeholders), non-technical
+       panels only */
+
+body.sst-layout-compact
+  .tab-panel:not([data-tab-panel="recognition"]):not([data-tab-panel="tuning"]):not([data-tab-panel="asr_advanced"])
+  p.muted[data-i18n]:not([id]) {
+
+  display: none !important;
+
+}
+
+
+
 body.sst-layout-compact .compact-tab-hint {
 
   margin: 0 0 12px;
@@ -417,6 +490,10 @@ body.sst-layout-compact .runtime-actions {
   gap: 8px;
 
   width: 100%;
+
+  position: relative;
+
+  z-index: 80;
 
 }
 
@@ -982,13 +1059,12 @@ body.sst-layout-standard .compact-recognition-anchor {
 
 
 
-body.sst-layout-compact .dashboard-recognition-panel .dashboard-hint-text,
+/* Trim only generic prose hints in compact mode. Technical hints inside
+   Recognition / Tuning / ASR Advanced are intentionally kept (see the
+   "Technical panels" section above) because they document what each
+   numeric field means, e.g. "def:3 safer:2", "word_growth recommended". */
 
-body.sst-layout-compact .dashboard-prose-hint,
-
-body.sst-layout-compact .asr-advanced-notes,
-
-body.sst-layout-compact [data-tab-panel="asr_advanced"] .inline-field-note {
+body.sst-layout-compact .dashboard-prose-hint {
 
   display: none !important;
 

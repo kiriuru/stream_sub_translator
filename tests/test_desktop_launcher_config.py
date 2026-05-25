@@ -116,6 +116,15 @@ class ApplyStartupModeToConfigTests(unittest.TestCase):
             self.assertFalse(payload["remote"]["enabled"])
             self.assertFalse(payload["remote"]["lan"]["bind_enabled"])
 
+    def test_local_mode_builds_default_config_when_missing(self) -> None:
+        with TemporaryDirectory() as raw:
+            launcher = _build_launcher_with_fake_paths(Path(raw))
+            launcher._apply_startup_mode_to_config(STARTUP_MODE_LOCAL, install_profile=LAUNCH_OPTION_NVIDIA)
+            payload = json.loads((launcher._paths.data_dir / "config.json").read_text(encoding="utf-8"))
+            self.assertIsInstance(payload.get("asr"), dict)
+            self.assertEqual(payload["asr"]["mode"], STARTUP_MODE_LOCAL)
+            self.assertTrue(payload["asr"]["prefer_gpu"])
+
     def test_local_mode_clears_profile_lock_and_sets_gpu(self) -> None:
         with TemporaryDirectory() as raw:
             launcher = _build_launcher_with_fake_paths(Path(raw))

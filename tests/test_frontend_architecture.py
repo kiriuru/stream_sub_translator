@@ -157,7 +157,13 @@ class FrontendArchitectureTests(unittest.TestCase):
         renderer_js = (JS_ROOT / "subtitle-style.js").read_text(encoding="utf-8")
         self.assertIn("function effectClassName(effect)", renderer_js)
         self.assertIn('replace(/_/g, "-")', renderer_js)
-        self.assertIn("effectClassName(lineStyle.effect || effectiveStyle.effect", renderer_js)
+        # Effect resolution now goes through a `slotEffect` local that captures
+        # `lineStyle.effect || effectiveStyle.effect || "none"`, then we feed it
+        # into effectClassName() for either the surface (completed entries) or
+        # the fresh-suffix span (partial entries). Assert the resolution chain
+        # is still present without coupling to a specific call site.
+        self.assertIn("lineStyle.effect || effectiveStyle.effect", renderer_js)
+        self.assertIn("effectClassName(slotEffect)", renderer_js)
 
     def test_subtitle_style_renderer_does_not_reanimate_partial_or_existing_rows(self) -> None:
         renderer_js = (JS_ROOT / "subtitle-style.js").read_text(encoding="utf-8")
@@ -176,6 +182,127 @@ class FrontendArchitectureTests(unittest.TestCase):
         overlay_js = (OVERLAY_ROOT / "overlay.js").read_text(encoding="utf-8")
         self.assertIn("signature !== overlayState.lastRenderSignature", overlay_js)
         self.assertIn("applyClasses();\n      return;", overlay_js)
+
+    def test_parakeet_tuning_controls_visible_outside_browser_speech_lock(self) -> None:
+        """Parakeet-specific tuning controls (latency preset, incremental
+        streaming decode, partial_emit_mode, partial_min_new_words) must remain
+        visible whenever the install can run Parakeet at all — even if the user
+        is currently in browser_google mode. They only get hidden when the
+        install is locked to Web Speech via desktop_profile_lock (Browser Speech
+        quick-start profile or desktop web_speech_only context).
+
+        Regression: previously the controls were also hidden whenever
+        config.asr.mode === "browser_google", which made them unreachable to
+        users who wanted to pre-tune Parakeet before switching modes.
+        """
+        render_js = (JS_ROOT / "panels" / "asr" / "asr-panel-render.js").read_text(encoding="utf-8")
+        # The visibility helper must key off the lock, not the current mode.
+        self.assertIn("function isLocalParakeetTuningAvailable(config)", render_js)
+        self.assertIn("!isDesktopBrowserQuickStartLocked(config)", render_js)
+        # Visibility wiring must reference the new helper, not the legacy
+        # isLocalParakeetMode that conflates "currently in local" with
+        # "Parakeet tuning is available".
+        self.assertIn("isLocalParakeetTuningAvailable(config)", render_js)
+        self.assertIn(
+            "setElementVisibility(elements.parakeetLatencyPresetRow, parakeetTuningVisible)",
+            render_js,
+        )
+        self.assertIn(
+            "setElementVisibility(elements.rtToolsLocalParakeetExtras, parakeetTuningVisible)",
+            render_js,
+        )
+
+    def test_compact_layout_hides_decorative_labels_and_static_notes_in_tab_panels(self) -> None:
+        """Compact layout strategy is 'control-only': decorative eyebrow labels
+        and static documentation paragraphs inside tab panels must be hidden,
+        while runtime status placeholders (id'd paragraphs that JS mutates) must
+        keep their normal visibility. These rules are the contract that lets us
+        keep the compact dashboard short on small/vertical windows.
+
+        IMPORTANT: technical panels (recognition / tuning / asr_advanced) are
+        intentionally excluded — they expose Parakeet-specific knobs whose
+        meaning is non-obvious without eyebrow titles and inline notes.
+        The 0.4.1 release kept those hints visible in compact mode too.
+        """
+        compact_css = (FRONTEND_ROOT / "css" / "compact-layout.css").read_text(encoding="utf-8")
+
+        technical_exclusion = (
+            ':not([data-tab-panel="recognition"])'
+            ':not([data-tab-panel="tuning"])'
+            ':not([data-tab-panel="asr_advanced"])'
+        )
+
+        required_substrings = (
+            # (a) eyebrow labels in non-technical tab panels
+            f".tab-panel{technical_exclusion}",
+            ".eyebrow",
+            # (b) notes under section/panel/surface headings
+            ".section-heading .muted",
+            ".panel-header .muted",
+            ".surface-header > div > .muted",
+            # (c) standalone static <p class="muted" data-i18n="..."> without an id
+            'p.muted[data-i18n]:not([id])',
+        )
+        for fragment in required_substrings:
+            self.assertIn(
+                fragment,
+                compact_css,
+                msg=f"compact-layout.css must contain fragment: {fragment}",
+            )
+
+        # Technical hints must NOT be stripped wholesale in compact mode.
+        # These selectors used to exist and have been deliberately removed.
+        forbidden_strip_selectors = (
+            'body.sst-layout-compact .dashboard-recognition-panel .dashboard-hint-text',
+            'body.sst-layout-compact .asr-advanced-notes',
+            'body.sst-layout-compact [data-tab-panel="asr_advanced"] .inline-field-note',
+        )
+        for selector in forbidden_strip_selectors:
+            self.assertNotIn(
+                selector,
+                compact_css,
+                msg=(
+                    f"compact-layout.css must NOT bulk-hide technical hint surface: "
+                    f"{selector}. These Parakeet/VAD hints existed in 0.4.1 and must "
+                    f"stay visible in compact mode too."
+                ),
+            )
+
+        # The :not([id]) clause is load-bearing: removing it would also hide
+        # runtime status placeholders like #font-source-status / #ui-theme-status
+        # which JS uses to surface live state.
+        self.assertIn(":not([id])", compact_css)
+
+    def test_overview_preview_card_sits_under_completed_transcript_and_hides_in_compact(self) -> None:
+        """The live snapshot ('Текущий срез') sits inside the left overview column
+        right after the completed transcript block, and compact layout must keep it
+        hidden via a dedicated CSS rule even if the DOM is later restructured.
+        """
+        index_html = (FRONTEND_ROOT / "index.html").read_text(encoding="utf-8")
+        compact_css = (FRONTEND_ROOT / "css" / "compact-layout.css").read_text(encoding="utf-8")
+
+        final_pre_pos = index_html.find('id="final-transcript"')
+        preview_pos = index_html.find('id="subtitle-output-preview"')
+        right_column_pos = index_html.find('class="overview-right-column"')
+        self.assertGreater(final_pre_pos, 0, "completed transcript block must exist")
+        self.assertGreater(preview_pos, 0, "subtitle preview block must exist")
+        self.assertLess(
+            final_pre_pos,
+            preview_pos,
+            "preview must appear after the completed-transcript pre",
+        )
+        if right_column_pos > 0:
+            self.assertLess(
+                preview_pos,
+                right_column_pos,
+                "preview must live in the left overview column, before the right column",
+            )
+
+        self.assertIn("body.sst-layout-compact .overview-preview-card", compact_css)
+        # The rule must use `display: none !important` so it survives DOM moves.
+        rule_anchor = compact_css.index("body.sst-layout-compact .overview-preview-card")
+        rule_window = compact_css[rule_anchor : rule_anchor + 200]
+        self.assertIn("display: none !important", rule_window)
 
     def test_dashboard_ws_client_treats_timestamp_as_authoritative_freshness_signal(self) -> None:
         # Regression: dashboards sit on a long-lived /ws/events connection while

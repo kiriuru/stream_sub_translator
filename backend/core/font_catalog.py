@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from pathlib import Path
 from urllib.parse import quote
+
+
+_CAMEL_TO_SPACE_RE = re.compile(
+    r"(?<=[a-z])(?=[A-Z])"  # camelCase boundary (Open|Sans, Jet|Brains).
+    r"|(?<=[A-Z])(?=[A-Z][a-z])"  # acronym + TitleCase (PT|Mono, NASA|Sans).
+    r"|(?<=[a-z])(?=\d)"  # name + version digits (Source|Sans3 → Source Sans 3).
+    r"|(?<=\d)(?=[A-Z])"  # post-digit camel (Source3|Bold).
+)
 
 
 _FONT_EXTENSIONS: dict[str, str] = {
@@ -66,6 +75,11 @@ _FALLBACK_FONT_CATALOG: list[dict[str, str]] = [
 
 def _project_font_family_name(path: Path) -> str:
     stem = path.stem.replace("_", " ").replace("-", " ").strip()
+    # Split CamelCase / PascalCase boundaries so bundled fonts like
+    # "OpenSans-Regular" or "JetBrainsMono-Bold" surface as readable labels
+    # ("Open Sans Regular", "Jet Brains Mono Bold") in the dropdown and stay
+    # consistent with the @font-face family the stylesheet declares.
+    stem = _CAMEL_TO_SPACE_RE.sub(" ", stem)
     return " ".join(stem.split()) or path.stem
 
 

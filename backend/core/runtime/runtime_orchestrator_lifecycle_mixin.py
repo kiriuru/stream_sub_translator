@@ -7,6 +7,7 @@ from pathlib import Path
 
 from backend.core.asr_provider_selection import BROWSER_GOOGLE_EXPERIMENTAL_MODE
 from backend.core.audio_capture import AudioCapture
+from backend.core.pipeline_trace_log import pipeline_trace
 from backend.core.remote_mode import REMOTE_ROLE_WORKER
 from backend.models import RuntimeState
 
@@ -41,7 +42,22 @@ class RuntimeOrchestratorLifecycleMixin:
         await self._local_asr_pipeline.run_asr_loop()
 
     async def start(self, *, has_audio_inputs: bool, device_id: str | None) -> RuntimeState:
+        pipeline_trace(
+            "runtime_api",
+            "runtime_orchestrator",
+            "orchestrator_start_enter",
+            has_audio_inputs=has_audio_inputs,
+            device_id=device_id,
+            already_running=self._state.is_running,
+            status=self._state.status,
+        )
         if self._state.is_running:
+            pipeline_trace(
+                "runtime_api",
+                "runtime_orchestrator",
+                "orchestrator_start_ignored_already_running",
+                status=self._state.status,
+            )
             return self._state
 
         asr_mode = self._current_asr_mode()
@@ -133,9 +149,24 @@ class RuntimeOrchestratorLifecycleMixin:
             raise RuntimeError(asr_status.message)
 
     async def stop(self) -> RuntimeState:
+        pipeline_trace(
+            "runtime_api",
+            "runtime_orchestrator",
+            "orchestrator_stop_enter",
+            status=self._state.status,
+            is_running=self._state.is_running,
+        )
         export_error = await self._lifecycle.stop()
         if export_error:
             self._state = self._state.model_copy(update={"last_error": f"Export error: {export_error}"})
+        pipeline_trace(
+            "runtime_api",
+            "runtime_orchestrator",
+            "orchestrator_stop_complete",
+            status=self._state.status,
+            is_running=self._state.is_running,
+            export_error=export_error,
+        )
         return self._state
 
     async def _safe_stop_audio(self) -> None:
@@ -178,16 +209,40 @@ class RuntimeOrchestratorLifecycleMixin:
     async def _start_audio_capture_impl(self) -> None:
         if not hasattr(self, "_audio_capture_ctl") or self._audio_capture_ctl is None:  # type: ignore[attr-defined]
             if self._audio_capture is not None:
+                pipeline_trace(
+                    "capture",
+                    "runtime_orchestrator",
+                    "start_audio_capture_skipped_legacy_already_open",
+                    device_id=self._local_audio_device_id,
+                )
                 return
             device_id = self._local_audio_device_id
             if device_id is None:
+                pipeline_trace(
+                    "capture",
+                    "runtime_orchestrator",
+                    "start_audio_capture_skipped_legacy_no_device",
+                )
                 return
             self._audio_capture = AudioCapture()
             self._audio_capture.start(device_id=device_id)
+            pipeline_trace(
+                "capture",
+                "runtime_orchestrator",
+                "start_audio_capture_legacy_opened",
+                device_id=device_id,
+            )
             return
         self._audio_capture_ctl.set_device_id(self._local_audio_device_id)  # type: ignore[attr-defined]
         self._audio_capture_ctl.start_if_needed()  # type: ignore[attr-defined]
         self._audio_capture = self._audio_capture_ctl.capture  # type: ignore[attr-defined]
+        pipeline_trace(
+            "capture",
+            "runtime_orchestrator",
+            "start_audio_capture_controller",
+            device_id=self._local_audio_device_id,
+            capture_open=self._audio_capture is not None,
+        )
 
     async def _stop_audio_capture_impl(self) -> None:
         await self._safe_stop_audio()

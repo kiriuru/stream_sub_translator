@@ -19,7 +19,9 @@ from backend.api.routes_updates import router as updates_router
 from backend.api.routes_version import router as version_router
 from backend.config import settings
 from backend.core.api_errors import register_api_error_handlers
+from backend.core.api_trace_log import api_trace
 from backend.core.app_bootstrap import initialize_app_state
+from backend.core.http_api_trace_middleware import http_api_trace_middleware
 from backend.core.font_catalog import build_project_fonts_stylesheet
 from backend.core.remote_signaling import RemoteSignalingManager
 from backend.models import HealthResponse
@@ -28,6 +30,7 @@ from backend.versioning import PROJECT_VERSION
 app = FastAPI(title=settings.app_name, version=PROJECT_VERSION)
 initialize_app_state(app)
 register_api_error_handlers(app)
+app.middleware("http")(http_api_trace_middleware)
 
 FRONTEND_DIR = app.state.paths.frontend_root
 OVERLAY_DIR = app.state.paths.overlay_root
@@ -137,9 +140,19 @@ async def overlay() -> FileResponse:
 @app.websocket("/ws/events")
 async def ws_events(websocket: WebSocket) -> None:
     manager = websocket.app.state.ws_manager
+    client = websocket.client
+    api_trace(
+        "ws",
+        "endpoint_accept",
+        path="/ws/events",
+        client_host=client.host if client else None,
+        client_port=client.port if client else None,
+    )
     await manager.connect(websocket)
     if not await manager.send_direct(websocket, {"type": "hello", "message": "connected"}):
+        api_trace("ws", "endpoint_hello_failed", path="/ws/events")
         return
+    api_trace("ws", "endpoint_hello_sent", path="/ws/events")
     await manager.replay_last(
         websocket,
         message_types=[
@@ -148,23 +161,34 @@ async def ws_events(websocket: WebSocket) -> None:
             "overlay_update",
         ],
     )
+    api_trace("ws", "endpoint_replay_complete", path="/ws/events")
     try:
         while True:
             _ = await websocket.receive_text()
     except WebSocketDisconnect:
-        pass
+        api_trace("ws", "endpoint_disconnect", path="/ws/events", reason="WebSocketDisconnect")
     finally:
         await manager.disconnect(websocket)
+        api_trace("ws", "endpoint_closed", path="/ws/events")
 
 
 @app.websocket("/ws/asr_worker")
 async def ws_asr_worker(websocket: WebSocket) -> None:
     asr_service = websocket.app.state.asr_service
     browser_asr_service = websocket.app.state.browser_asr_service
+    client = websocket.client
+    api_trace(
+        "ws",
+        "endpoint_accept",
+        path="/ws/asr_worker",
+        client_host=client.host if client else None,
+    )
     await websocket.accept()
     transport_id = await browser_asr_service.register_connection(websocket)
+    api_trace("ws", "endpoint_registered", path="/ws/asr_worker", transport_id=transport_id)
     await browser_asr_service.worker_connected()
     if not await browser_asr_service.send_hello(websocket):
+        api_trace("ws", "endpoint_hello_failed", path="/ws/asr_worker", transport_id=transport_id)
         # send_hello already routed cleanup through ``disconnect`` on failure;
         # bail out so the endpoint does not race a partially-disconnected state.
         return
@@ -183,9 +207,10 @@ async def ws_asr_worker(websocket: WebSocket) -> None:
             if message_type == "browser_asr_heartbeat":
                 await browser_asr_service.handle_status(transport_id, message)
     except WebSocketDisconnect:
-        pass
+        api_trace("ws", "endpoint_disconnect", path="/ws/asr_worker", transport_id=transport_id)
     finally:
         await browser_asr_service.disconnect(transport_id)
+        api_trace("ws", "endpoint_closed", path="/ws/asr_worker", transport_id=transport_id)
 
 
 @app.websocket("/ws/remote/signaling")

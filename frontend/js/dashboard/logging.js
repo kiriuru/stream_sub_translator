@@ -1,5 +1,6 @@
 import { DASHBOARD_EVENTS } from "../core/events.js";
 import { getCurrentLocale } from "./helpers.js";
+import { traceUi } from "./ui-trace.js";
 
 export function shouldPersistDashboardLog(message) {
   const normalized = String(message || "").trim().toLowerCase();
@@ -10,6 +11,9 @@ export function shouldPersistDashboardLog(message) {
     return [
       "[runtime] status -> idle",
       "[runtime] status -> starting",
+      "[runtime] status -> listening",
+      "[runtime] status -> transcribing",
+      "[runtime] status -> translating",
       "[runtime] status -> error",
     ].includes(normalized);
   }
@@ -18,6 +22,7 @@ export function shouldPersistDashboardLog(message) {
     "[asr]",
     "[translation]",
     "[ui]",
+    "[runtime]",
     "[browser-asr]",
     "[overlay]",
     "[obs-cc]",
@@ -69,6 +74,13 @@ export function createLogger({ store, events, api }) {
       };
       if (options.details && typeof options.details === "object") {
         payload.details = window.SSTRedaction?.redactObject ? window.SSTRedaction.redactObject(options.details) : options.details;
+      }
+      if (options.uiTrace !== false) {
+        traceUi("dashboard", options.tracePhase || "ui", options.traceEvent || "log_line", {
+          source: payload.source,
+          message: payload.message,
+          details: payload.details || null,
+        });
       }
       api.postClientLog(payload).then((result) => {
         if (result?.logged === false) {

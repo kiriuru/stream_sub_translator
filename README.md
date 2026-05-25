@@ -1,8 +1,8 @@
-# SST Desktop 0.4.1
+# SST Desktop 0.4.2
 
 SST Desktop is a local Windows application for real-time speech recognition, optional translation, subtitle routing, and OBS-ready output.
 
-This README describes the current desktop product surface for the `0.4.1` code line.
+This README describes the current desktop product surface for the `0.4.2` code line.
 
 ## Language
 
@@ -17,9 +17,24 @@ This README describes the current desktop product surface for the `0.4.1` code l
 
 ## Release Highlights
 
-**`0.4.1`** — see [docs/DESKTOP_RELEASE_CHANGELOG_0.4.1.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.4.1.md): Parakeet incremental streaming + word-growth partials, `LocalAsrPipeline`, Tuning latency presets with slider alignment, runtime summary strip, Tools fields for `streaming_decode` / emit mode / min words, single low-latency Parakeet provider in UI, `AsrDiagnostics` echo fields. `PROJECT_VERSION = "0.4.1"`; `config_version` stays **7**; public `/api` and subtitle contracts unchanged.
+**`0.4.2`** — see [docs/CHANGELOG.md](./docs/CHANGELOG.md#042) for full delta:
 
-**Unreleased (engineering, same version line)** — see [docs/CHANGELOG.md](./docs/CHANGELOG.md#unreleased): thin `RuntimeOrchestrator` facade + mixins, WebSocket/browser ASR send serialization, dashboard store/panel UX hardening (no caret resets), desktop log rotation, expanded regression tests (**462** collected).
+- Parakeet integrity SHA-256 cache (one hash per process instead of per `/api/runtime/status` / `/api/health`, fixes 3–10 s idle latency on fresh installs with sha256-bearing model manifests).
+- Drop-in exe upgrade now wipes stale `app-runtime/` contents before extracting the new payload, so a managed runtime tree is always clean after replacing the bootstrap exe.
+- Vendored `antlr4-python3-runtime==4.9.3` wheel (`vendor/python-wheels/`) + `backend/bootstrap_pip_pins.py` — removes the flaky NeMo sdist build on Windows installs.
+- Subtitle renderer: incremental effects only animate freshly typed characters (existing partial text stays static); shape-signature fast path keeps the wrapper/stage/row/surface DOM alive between partial frames; transient→completed transitions consolidate in place; slow path reuses completed source surface when a translation arrives.
+- Subtitle style presets fully reworked (10 distinct themes: anime stream, fallout terminal, retro terminal, cyberpunk neon, noir caption, comic burst, cinema plate, max contrast, …) with Cyrillic-safe font fallback chains.
+- 28 bundled Google Fonts shipped directly in `fonts/` (no first-launch font download required); `system` font catalog entries are now preserved across save/import.
+- Style editor UI fixes: font dropdown displays the actual primary family of the active preset, and a per-slot "Apply preset" selector copies a preset's base style to a single line slot override.
+- Browser Speech worker window reloads `/api/settings/load` before save, so clicking "Save" no longer overwrites dashboard edits made between window-open and save.
+- Compact-layout audit: technical panels (Recognition / Tuning / ASR Advanced) keep their hints, eyebrow labels, and inline notes visible in compact mode; only decorative copy is trimmed.
+- Parakeet tuning controls (`latency preset`, `streaming_decode`, `partial_emit_mode`, `partial_min_new_words`) stay visible regardless of current `asr.mode` — only `desktop_profile_lock="browser_speech"` (Web-Speech-only install) hides them now.
+- Opt-in deep diagnostics: JSONL traces (`api-trace.jsonl`, `pipeline-trace.jsonl`, `ui-trace.jsonl`, `startup-journey.jsonl`) and `runtime_lifecycle.*` events are now off by default and gated on `SST_DEEP_DIAGNOSTICS=1` (or per-channel `SST_TRACE_*=1`). See [docs/ETALON_RUNTIME_VERIFICATION.md](./docs/ETALON_RUNTIME_VERIFICATION.md#31-enabling-deep-traces).
+- Thin `RuntimeOrchestrator` facade + mixins, WebSocket/browser ASR send serialization, dashboard store/panel UX hardening (no caret resets), desktop log rotation, expanded regression tests.
+
+`PROJECT_VERSION = "0.4.2"`; `config_version` stays **7**; public `/api` and subtitle contracts unchanged.
+
+**`0.4.1`** — see [docs/DESKTOP_RELEASE_CHANGELOG_0.4.1.md](./docs/DESKTOP_RELEASE_CHANGELOG_0.4.1.md): Parakeet incremental streaming + word-growth partials, `LocalAsrPipeline`, Tuning latency presets with slider alignment, runtime summary strip, Tools fields for `streaming_decode` / emit mode / min words, single low-latency Parakeet provider in UI, `AsrDiagnostics` echo fields. `PROJECT_VERSION = "0.4.1"`; `config_version` stays **7**; public `/api` and subtitle contracts unchanged.
 
 **`0.4.0` and earlier** — see [docs/CHANGELOG.md](./docs/CHANGELOG.md) (compact dashboard, Browser ASR observability, **Only Web.exe**, desktop profile lock, and prior lines).
 
@@ -27,7 +42,7 @@ This README describes the current desktop product surface for the `0.4.1` code l
 
 GitHub releases attach bootstrap **exe** (built locally; sources under `desktop/` are not in the public repo):
 
-- `Stream Subtitle Translator.exe` — standard bootstrap (payload tracks `PROJECT_VERSION`, currently **0.4.1** when built from this tree)
+- `Stream Subtitle Translator.exe` — standard bootstrap (payload tracks `PROJECT_VERSION`, currently **0.4.2** when built from this tree)
 - `Stream Subtitle Translator Only Web.exe` — Web Speech only (introduced in 0.4.0; still supported)
 
 On first launch the bootstrap launcher extracts the managed runtime next to itself and then starts the desktop runtime from disk.
@@ -456,7 +471,7 @@ Overlay remains a separate lightweight page for OBS Browser Source and auto-reco
 - legacy language-based `subtitle_output.display_order` values are migrated to slot ids like `translation_1`;
 - `/api/runtime/start` can apply an optional normalized `config_payload` snapshot for runtime-only changes without persisting `user-data/config.json` (tracked via `active_config_source = runtime_start_snapshot`, `active_config_persisted = false`, `active_config_hash`);
 - config writes are atomic on Windows (temporary file in the same folder + `os.replace()`); a corrupt `user-data/config.json` is rotated into `*.corrupt-<timestamp>.json` and defaults are restored;
-- `backend/versioning.py` (`PROJECT_VERSION = "0.4.1"`) remains the single source of truth for the app version.
+- `backend/versioning.py` (`PROJECT_VERSION = "0.4.2"`) remains the single source of truth for the app version.
 
 ## Remote Notes
 
@@ -550,7 +565,7 @@ Build output:
 - bootstrap launchers:
   - `dist\bootstrap-launcher\Stream Subtitle Translator.exe`
   - `dist\bootstrap-launcher-web-only\Stream Subtitle Translator Only Web.exe`
-- versioned release bundle (local): `dist\desktop-releases\v0.4.1\` (`01-bootstrap-onefile\`, `01-bootstrap-web-only-onefile\`, `02-managed-app-onefolder\`, `03-installers-both\`, `README.txt`) when publishing this line; older trees may still show `v0.4.0\`.
+- versioned release bundle (local): `dist\desktop-releases\v0.4.2\` (`01-bootstrap-onefile\`, `01-bootstrap-web-only-onefile\`, `02-managed-app-onefolder\`, `03-installers-both\`, `README.txt`) when publishing this line; older trees may still show `v0.4.1\` or `v0.4.0\`.
 - publish script defaults (both exes end up in each folder):
   - `F:\AI\stream-sub-translator-desktop-release`
   - `F:\AI\stream-sub-translator-desktop-release-clean`
@@ -591,7 +606,7 @@ GitHub-tracked suite:
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
 ```
 
-For `0.4.1`: run `python -m unittest discover -s tests` after changes; the public repo runs the tracked subset (includes `tests/test_browser_asr_observability.py`). Bootstrap build verification is local-only — see [docs/TECHNICAL_ARCHITECTURE.md](./docs/TECHNICAL_ARCHITECTURE.md) §20.
+For `0.4.2`: run `python -m unittest discover -s tests` after changes; the public repo runs the tracked subset (includes `tests/test_browser_asr_observability.py`). Bootstrap build verification is local-only — see [docs/TECHNICAL_ARCHITECTURE.md](./docs/TECHNICAL_ARCHITECTURE.md) §20.
 
 ## Privacy and Runtime Scope
 
@@ -601,6 +616,7 @@ For `0.4.1`: run `python -m unittest discover -s tests` after changes; the publi
 
 ## Release Version
 
-- `0.4.1` (current code line)
+- `0.4.2` (current code line)
+- `0.4.1`
 - `0.4.0`
 - Single runtime source of truth: `backend/versioning.py` (`PROJECT_VERSION`).

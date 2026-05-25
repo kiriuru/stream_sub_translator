@@ -4,6 +4,7 @@ import * as store from "./core/store.js";
 import { WsClient } from "./core/ws-client.js";
 import { createDashboardActions } from "./dashboard/actions.js";
 import { createLogger } from "./dashboard/logging.js";
+import { configureUiTrace, traceUi } from "./dashboard/ui-trace.js";
 import { getCurrentLocale } from "./dashboard/helpers.js";
 import { mountAsrPanel } from "./panels/asr-panel.js";
 import { mountDiagnosticsPanel } from "./panels/diagnostics-panel.js";
@@ -32,6 +33,7 @@ async function bootstrap() {
     },
   });
   const api = createDashboardApi(client);
+  configureUiTrace((payload) => api.postUiTrace(payload));
   const logger = createLogger({ store, events, api });
   const actions = createDashboardActions({ store, api, logger, events });
   actionsRef = actions;
@@ -49,6 +51,13 @@ async function bootstrap() {
   window.Api = api;
   window.__appLog = logger;
   window.__persistDashboardLog = logger;
+  void window.DesktopBridge?.getContext?.().then((context) => {
+    traceUi("dashboard", "ui", "bootstrap", {
+      desktop_mode: Boolean(context?.desktop_mode),
+      startup_mode: context?.startup_mode || null,
+      install_profile: context?.install_profile || null,
+    });
+  });
 
   const destroyLocaleSwitcher = initializeLocaleSwitcher(actions);
   initializeTabs(actions, store);
@@ -101,7 +110,19 @@ async function bootstrap() {
         logger(
           getCurrentLocale() === "ru"
             ? `[desktop] desktop launcher активен | startup=${context.startup_mode || "local"} | remote_role=${context.remote_role || "disabled"}`
-            : `[desktop] desktop launcher active | startup=${context.startup_mode || "local"} | remote_role=${context.remote_role || "disabled"}`
+            : `[desktop] desktop launcher active | startup=${context.startup_mode || "local"} | remote_role=${context.remote_role || "disabled"}`,
+          {
+            source: "desktop",
+            details: {
+              install_profile: context.install_profile || null,
+              web_speech_only: Boolean(context.web_speech_only),
+              profile_name: context.profile_name || null,
+              base_url: context.base_url || null,
+              project_root: context.project_root || null,
+              data_dir: context.data_dir || null,
+              worker_launch_browser: context.worker_launch_browser || null,
+            },
+          }
         );
       }
     })
@@ -122,6 +143,14 @@ async function bootstrap() {
     actions.pollRuntimeStatus().catch(() => null);
   }, 1200);
   ws.connect();
+
+  window.addEventListener("keydown", (event) => {
+    if (!(event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "s")) {
+      return;
+    }
+    event.preventDefault();
+    void actions.stopRuntime();
+  });
 
   window.addEventListener("beforeunload", () => {
     destroyLocaleSwitcher();

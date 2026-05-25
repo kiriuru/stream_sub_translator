@@ -22,6 +22,15 @@ OFFICIAL_EU_PARAKEET_URL = (
 _MODEL_INSTALL_LOCK = threading.Lock()
 ProgressCallback = Callable[[str], None]
 
+# Memoize integrity verification so that frequently polled diagnostics
+# (e.g. /api/runtime/status, /api/health) do not re-hash the multi-GB
+# Parakeet .nemo file on every call. The cache key includes file mtime,
+# size, and the expected sha from manifest so any underlying change
+# (re-download, manifest update, file corruption) naturally bypasses
+# the cached entry.
+_INTEGRITY_CACHE_LOCK = threading.Lock()
+_INTEGRITY_CACHE: dict[tuple[str, int, int, str], tuple[str, str | None]] = {}
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -50,22 +59,69 @@ def read_official_eu_parakeet_manifest(models_dir: Path) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
+def invalidate_official_eu_parakeet_integrity_cache() -> None:
+    """Drop every cached integrity verdict.
+
+    Called after fresh downloads to flush any 'checksum_unknown' entry that
+    may have been cached after the file appeared but before the manifest
+    finished being written. Also used by tests for isolation.
+    """
+    with _INTEGRITY_CACHE_LOCK:
+        _INTEGRITY_CACHE.clear()
+
+
 def official_eu_parakeet_integrity_state(models_dir: Path) -> tuple[str, str | None]:
     target_dir = models_dir / OFFICIAL_EU_PARAKEET_LOCAL_DIRNAME
     target_file = target_dir / OFFICIAL_EU_PARAKEET_FILENAME
-    if not target_file.exists():
+    try:
+        stat = target_file.stat()
+    except (FileNotFoundError, OSError):
         return "missing", None
     manifest = read_official_eu_parakeet_manifest(models_dir) or {}
     expected_sha = str(manifest.get("sha256", "") or "").strip().lower()
+    cache_key = (
+        str(target_file),
+        int(stat.st_mtime_ns),
+        int(stat.st_size),
+        expected_sha,
+    )
+    with _INTEGRITY_CACHE_LOCK:
+        cached = _INTEGRITY_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     if not expected_sha:
-        return "checksum_unknown", None
+        result: tuple[str, str | None] = ("checksum_unknown", None)
+        with _INTEGRITY_CACHE_LOCK:
+            _INTEGRITY_CACHE[cache_key] = result
+        return result
     try:
         actual_sha = _sha256_file(target_file)
     except Exception as exc:
+        # Surface transient I/O failures fresh on the next call; do not cache.
         return "corrupt", f"checksum read failed: {type(exc).__name__}: {exc}"
     if actual_sha != expected_sha:
-        return "corrupt", "sha256 mismatch"
-    return "valid", None
+        result = ("corrupt", "sha256 mismatch")
+    else:
+        result = ("valid", None)
+    with _INTEGRITY_CACHE_LOCK:
+        _INTEGRITY_CACHE[cache_key] = result
+    return result
+
+
+def _cleanup_stale_part_downloads(target_dir: Path) -> None:
+    """Remove interrupted download fragments so a fresh install is not confused by stale .part files."""
+    if not target_dir.exists():
+        return
+    for part_path in target_dir.glob(f"{OFFICIAL_EU_PARAKEET_FILENAME}.part"):
+        try:
+            part_path.unlink()
+        except OSError:
+            pass
+    for part_path in target_dir.glob(f"*{OFFICIAL_EU_PARAKEET_FILENAME}.part"):
+        try:
+            part_path.unlink()
+        except OSError:
+            pass
 
 
 def ensure_official_eu_parakeet_model(
@@ -76,6 +132,7 @@ def ensure_official_eu_parakeet_model(
 ) -> Path:
     target_dir = models_dir / OFFICIAL_EU_PARAKEET_LOCAL_DIRNAME
     target_dir.mkdir(parents=True, exist_ok=True)
+    _cleanup_stale_part_downloads(target_dir)
     target_file = target_dir / OFFICIAL_EU_PARAKEET_FILENAME
     manifest_file = target_dir / "manifest.json"
 
@@ -166,6 +223,7 @@ def ensure_official_eu_parakeet_model(
                     "download_url": OFFICIAL_EU_PARAKEET_URL,
                 }
                 manifest_file.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+                invalidate_official_eu_parakeet_integrity_cache()
                 print(f"[asr-model] Installed official model to {target_file}")
                 if progress_callback is not None:
                     progress_callback("Parakeet model download completed.")
@@ -204,6 +262,7 @@ __all__ = [
     "OFFICIAL_EU_PARAKEET_URL",
     "ProgressCallback",
     "official_eu_parakeet_integrity_state",
+    "invalidate_official_eu_parakeet_integrity_cache",
     "read_official_eu_parakeet_manifest",
     "ensure_official_eu_parakeet_model",
 ]

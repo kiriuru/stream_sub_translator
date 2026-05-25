@@ -11,6 +11,7 @@ from unittest.mock import ANY
 from fastapi.testclient import TestClient
 
 from backend import app as app_module
+from backend.models import AudioInputDevice
 from helpers import AppStateSandbox
 
 
@@ -329,6 +330,35 @@ class ApiAndWebSocketTests(unittest.TestCase):
             self.assertTrue(app_module.app.state.active_config_state.persisted)
             self.assertEqual(sandbox.config_manager.payload["source_lang"], "ja")
 
+    def test_api_trace_middleware_logs_health_request(self) -> None:
+        with AppStateSandbox() as sandbox, TestClient(app_module.app) as client:
+            response = client.get("/api/health")
+            trace_path = sandbox.paths.logs_dir / "api-trace.jsonl"
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(trace_path.exists())
+            text = trace_path.read_text(encoding="utf-8")
+            self.assertIn("request_begin", text)
+            self.assertIn("request_complete", text)
+            self.assertIn("/api/health", text)
+
+    def test_ui_trace_endpoint_writes_jsonl(self) -> None:
+        with AppStateSandbox() as sandbox, TestClient(app_module.app) as client:
+            response = client.post(
+                "/api/logs/ui-trace",
+                json={
+                    "surface": "dashboard",
+                    "phase": "ui",
+                    "event": "visual_state",
+                    "fields": {"visual": {"runtime_status": "listening"}},
+                },
+            )
+            trace_path = sandbox.paths.logs_dir / "ui-trace.jsonl"
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {"ok": True, "logged": True, "reason": None})
+            self.assertTrue(trace_path.exists())
+            record = json.loads(trace_path.read_text(encoding="utf-8").strip().splitlines()[-1])
+            self.assertEqual(record["event"], "visual_state")
+
     def test_client_event_logging_returns_ok_when_logger_reports_write_failure(self) -> None:
         with AppStateSandbox() as sandbox, TestClient(app_module.app) as client:
             with mock.patch.object(
@@ -371,6 +401,68 @@ class ApiAndWebSocketTests(unittest.TestCase):
         latest_payload = records[-1]["payload"]
         self.assertNotIn("super-secret-key", str(latest_payload))
         self.assertIn("[redacted]", str(latest_payload))
+
+    def test_runtime_start_resolves_local_device_from_config_when_request_device_is_null(self) -> None:
+        config = {
+            "source_lang": "ru",
+            "asr": {"mode": "local", "provider_preference": "official_eu_parakeet_low_latency"},
+            "translation": {"enabled": False, "target_languages": []},
+            "subtitle_output": {"show_source": True, "show_translations": False},
+            "audio": {"input_device_id": "mic-2"},
+            "remote": {"enabled": False, "role": "disabled"},
+        }
+        with AppStateSandbox(config=config) as sandbox, TestClient(app_module.app) as client:
+            sandbox.audio_device_manager.devices = [
+                AudioInputDevice(
+                    id="mic-1",
+                    name="Default Mic",
+                    is_default=True,
+                    max_input_channels=1,
+                    default_samplerate=48000.0,
+                ),
+                AudioInputDevice(
+                    id="mic-2",
+                    name="Headset",
+                    is_default=False,
+                    max_input_channels=1,
+                    default_samplerate=48000.0,
+                ),
+            ]
+            response = client.post("/api/runtime/start", json={"device_id": None})
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(sandbox.runtime_orchestrator.start_calls[-1]["device_id"], "mic-2")
+
+    def test_runtime_start_emits_structured_lifecycle_trace(self) -> None:
+        config = {
+            "source_lang": "ru",
+            "asr": {"mode": "local", "provider_preference": "official_eu_parakeet_low_latency"},
+            "translation": {"enabled": False, "target_languages": []},
+            "subtitle_output": {"show_source": True, "show_translations": False},
+            "audio": {"input_device_id": "mic-2"},
+            "remote": {"enabled": False, "role": "disabled"},
+        }
+        # runtime_lifecycle.* rows are opt-in (see backend/core/diagnostic_flags.py);
+        # the contract here is that *when the flag is on*, the orchestrator emits the
+        # expected lifecycle events. The 0.4.1 baseline is asserted separately by
+        # tests/test_diagnostic_flags.py::RuntimeTraceGateTests.
+        with mock.patch.dict("os.environ", {"SST_TRACE_RUNTIME_LIFECYCLE": "1"}, clear=False):
+            with AppStateSandbox(config=config) as sandbox, TestClient(app_module.app) as client:
+                sandbox.audio_device_manager.devices = [
+                    AudioInputDevice(
+                        id="mic-2",
+                        name="Headset",
+                        is_default=True,
+                        max_input_channels=1,
+                        default_samplerate=48000.0,
+                    ),
+                ]
+                response = client.post("/api/runtime/start", json={"device_id": "mic-2"})
+                self.assertEqual(response.status_code, 200)
+                events = [record["event"] for record in sandbox.structured_runtime_logger.records]
+                self.assertIn("runtime_start_request", events)
+                self.assertIn("runtime_start_device_resolved", events)
+                self.assertIn("runtime_start_complete", events)
 
 
 if __name__ == "__main__":

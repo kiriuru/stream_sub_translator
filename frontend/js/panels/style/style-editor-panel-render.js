@@ -2,6 +2,7 @@ import { getCurrentLocale } from "../../dashboard/helpers.js";
 import {
   buildFontCatalogSignature,
   buildPresetCatalogSignature,
+  extractPrimaryFontFamily,
   getLineSlotNames,
   getUiThemePresets,
   inheritLabel,
@@ -20,9 +21,12 @@ export function collectStyleEditorElements(root) {
     deleteCustomBtn: root.querySelector("#subtitle-style-delete-custom-btn"),
     description: root.querySelector("#subtitle-style-preset-description"),
     status: root.querySelector("#subtitle-style-custom-status"),
-    fontRefreshBtn: root.querySelector("#font-refresh-btn"),
-    projectFontsDir: root.querySelector("#project-fonts-dir"),
-    fontSourceStatus: root.querySelector("#font-source-status"),
+    // The Fonts surface lives in the Settings tab (separate root) so we look it
+    // up against the document. IDs are unique app-wide; resolved references stay
+    // stable for the lifetime of the panel.
+    fontRefreshBtn: document.querySelector("#font-refresh-btn"),
+    projectFontsDir: document.querySelector("#project-fonts-dir"),
+    fontSourceStatus: document.querySelector("#font-source-status"),
     uiTheme: {
       preset: root.querySelector("#ui-theme-preset"),
       mode: root.querySelector("#ui-theme-mode"),
@@ -57,6 +61,7 @@ export function collectStyleEditorElements(root) {
       enabled: root.querySelector("#style-line-slot-enabled"),
       tabs: root.querySelector("#style-line-slot-tabs"),
       description: root.querySelector("#style-line-slot-description"),
+      applyPreset: root.querySelector("#style-line-slot-apply-preset"),
       fieldsContainer: root.querySelector("#style-line-slot-fields"),
       details: root.querySelector("#style-line-slot-details"),
       fields: {
@@ -132,7 +137,12 @@ function ensureFontPickers(elements, snapshot, style, catalogState) {
 
   setSelectOptions(elements.fields.font_family, baseOptions);
   if (elements.fields.font_family && style.base?.font_family) {
-    elements.fields.font_family.value = String(style.base.font_family);
+    // The preset's font_family is a full chain ("Mochiy Pop One Regular",
+    // "Comfortaa Bold", ...) but each dropdown option is a single quoted
+    // family. Pick the first name in the chain so the dropdown actually
+    // reflects what the preset asked for; otherwise it stays blank and
+    // the user can't tell which font is in use.
+    elements.fields.font_family.value = extractPrimaryFontFamily(style.base.font_family);
   }
 
   const slotOptions = [{ value: "", label: inheritLabel() }, ...baseOptions];
@@ -238,6 +248,13 @@ export function renderStyleEditorPanel(snapshot, elements, { actions }, catalogS
     if (shouldSkipStyleControlRenderSync(element)) {
       return;
     }
+    if (key === "font_family") {
+      // Mirror ensureFontPickers: collapse the preset's font-family chain
+      // down to its primary family so the dropdown option that represents
+      // the *registered* face actually matches and gets highlighted.
+      element.value = extractPrimaryFontFamily(style.base?.font_family);
+      return;
+    }
     element.value = String(style.base?.[key] ?? "");
   });
 
@@ -273,7 +290,42 @@ export function renderStyleEditorPanel(snapshot, elements, { actions }, catalogS
       return;
     }
     const raw = slotStyle?.[key];
-    element.value = normalizeOverrideFieldValue(raw);
+    if (key === "font_family") {
+      // Slot overrides can also carry a full chain (when "Apply preset to
+      // this slot" is used). Normalise to the primary family so the slot
+      // dropdown matches one of its registered options instead of
+      // silently going blank.
+      element.value = raw ? extractPrimaryFontFamily(raw) : "";
+    } else {
+      element.value = normalizeOverrideFieldValue(raw);
+    }
     element.disabled = !slotEnabled;
   });
+
+  // Build the "Apply preset to this slot" dropdown. It mirrors the base
+  // preset list (so users can copy any preset's base style onto a single
+  // line slot) and stays disabled while the slot override itself is off.
+  if (elements.lineSlots.applyPreset) {
+    const slotPresetSignature = buildPresetCatalogSignature(presets);
+    const slotPresetSignatureKey = `slot:${slotPresetSignature}`;
+    if (catalogState.lastLineSlotPresetSignature !== slotPresetSignatureKey) {
+      catalogState.lastLineSlotPresetSignature = slotPresetSignatureKey;
+      const placeholderLabel =
+        getCurrentLocale() === "ru" ? "— выбрать пресет —" : "— pick preset —";
+      const presetOptions = [
+        { value: "", label: placeholderLabel },
+        ...Object.entries(presets).map(([presetName, preset]) => ({
+          value: presetName,
+          label: preset?.label || presetName,
+        })),
+      ];
+      setSelectOptions(elements.lineSlots.applyPreset, presetOptions);
+    }
+    // The selector is one-shot: applying a preset writes its base into the
+    // slot, then we reset it back to the placeholder so the field doesn't
+    // pretend the slot is "bound" to that preset (the slot is a free-form
+    // override after application).
+    elements.lineSlots.applyPreset.value = "";
+    elements.lineSlots.applyPreset.disabled = !slotEnabled;
+  }
 }

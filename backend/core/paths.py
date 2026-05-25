@@ -80,13 +80,22 @@ def detect_app_paths() -> AppPaths:
     env_bundle_root = os.environ.get("SST_BUNDLE_ROOT")
     env_project_root = os.environ.get("SST_PROJECT_ROOT")
 
-    bundle_root = Path(env_bundle_root).resolve() if env_bundle_root else Path(getattr(sys, "_MEIPASS", source_root))
+    is_frozen = bool(getattr(sys, "frozen", False))
+    if env_bundle_root:
+        bundle_root = Path(env_bundle_root).resolve()
+    elif is_frozen:
+        bundle_root = Path(getattr(sys, "_MEIPASS", source_root)).resolve()
+    else:
+        bundle_root = source_root
     if env_project_root:
         project_root = Path(env_project_root).resolve()
+    elif is_frozen:
+        project_root = Path(sys.executable).resolve().parent
     else:
-        project_root = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else source_root
+        project_root = source_root
 
-    backend_root = project_root / "backend"
+    bundled_backend = bundle_root / "backend"
+    backend_root = bundled_backend if bundled_backend.is_dir() else project_root / "backend"
     user_data_dir = project_root / DESKTOP_USER_DATA_DIRNAME
     runtime_dir = _project_runtime_root(project_root)
     logs_dir = project_root / "logs"

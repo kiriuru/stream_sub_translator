@@ -181,15 +181,16 @@ export function createDashboardApi(client) {
     getAudioInputs() {
       return client.apiGet("/api/devices/audio-inputs");
     },
-    startRuntime(deviceId, configPayload = null) {
+    startRuntime(deviceId, configPayload = null, requestOptions = {}) {
       return client.apiPost(
         "/api/runtime/start",
         { device_id: deviceId || null, config_payload: configPayload || null },
-        { busyKey: "runtime" }
+        { busyKey: "runtime", ...requestOptions }
       );
     },
     stopRuntime() {
-      return client.apiPost("/api/runtime/stop", null, { busyKey: "runtime" });
+      // No busyKey: Stop must work even while Start is still awaiting the backend.
+      return client.apiPost("/api/runtime/stop", null);
     },
     getRuntimeStatus() {
       return client.apiGet("/api/runtime/status");
@@ -218,6 +219,9 @@ export function createDashboardApi(client) {
     },
     postClientLog(payload) {
       return client.apiPost("/api/logs/client-event", payload);
+    },
+    postUiTrace(payload) {
+      return client.apiPost("/api/logs/ui-trace", payload);
     },
     downloadDiagnosticsBundle() {
       return client.apiDownload("/api/exports/diagnostics");

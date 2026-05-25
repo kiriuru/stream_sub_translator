@@ -63,6 +63,19 @@ function isLocalParakeetMode(config) {
   return !isBrowserRecognitionMode(mode) && !isDesktopBrowserQuickStartLocked(config);
 }
 
+// Parakeet tuning controls (latency preset, incremental streaming decode,
+// partial_emit_mode, partial_min_new_words, …) are exposed whenever the
+// install can run Parakeet at all. The Browser Speech quick-start lock
+// pins the install to Web Speech only — in that case Parakeet is genuinely
+// unavailable and the controls stay hidden. In every other state (including
+// when the user is currently using browser_google mode), allow tuning
+// Parakeet ahead of a mode switch. Matches the 0.4.1 main-branch
+// expectation that these knobs are visible in the standard layout for
+// any non-quick-start install regardless of the currently selected mode.
+function isLocalParakeetTuningAvailable(config) {
+  return !isDesktopBrowserQuickStartLocked(config);
+}
+
 export function createAsrConfigMutators(elements, actions) {
   function mutateRealtimeFromControls() {
     actions.mutateConfig((draft) => {
@@ -195,9 +208,9 @@ export function renderAsrPanel(snapshot, elements) {
     }
   }
   fillAudioInputDevices(elements, snapshot);
-  const localParakeetUi = isLocalParakeetMode(config);
-  setElementVisibility(elements.parakeetLatencyPresetRow, localParakeetUi);
-  setElementVisibility(elements.rtToolsLocalParakeetExtras, localParakeetUi);
+  const parakeetTuningVisible = isLocalParakeetTuningAvailable(config);
+  setElementVisibility(elements.parakeetLatencyPresetRow, parakeetTuningVisible);
+  setElementVisibility(elements.rtToolsLocalParakeetExtras, parakeetTuningVisible);
   const realtime = config.asr?.realtime || {};
   const lifecycle = config.subtitle_lifecycle || {};
   if (elements.parakeetLatencyPreset) {

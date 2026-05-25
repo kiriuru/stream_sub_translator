@@ -56,6 +56,19 @@ class ClientLogEventResponse(SchemaModel):
     reason: str | None = None
 
 
+class UiTraceEventRequest(SchemaModel):
+    surface: Literal["dashboard", "overlay", "browser_worker", "desktop"] = "dashboard"
+    phase: str
+    event: str
+    fields: dict[str, Any] | None = None
+
+
+class UiTraceEventResponse(SchemaModel):
+    ok: bool = True
+    logged: bool = True
+    reason: str | None = None
+
+
 class RemoteWorkerRuntimeActionResponse(SchemaModel):
     ok: bool = True
     action: Literal["start", "stop"]

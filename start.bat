@@ -92,7 +92,13 @@ if "%LIGHT_CONTROLLER_MODE%"=="1" (
     pause
     exit /b 1
   )
-  call ".venv\Scripts\python.exe" -m pip install -r requirements.txt
+  call ".venv\Scripts\python.exe" -m backend.bootstrap_pip_pins --python ".venv\Scripts\python.exe" --bundle-root "%CD%"
+  if errorlevel 1 (
+    echo Failed to install bundled antlr4-python3-runtime wheel before NeMo
+    pause
+    exit /b 1
+  )
+  call ".venv\Scripts\python.exe" -m pip install --no-cache-dir -r requirements.txt
   if errorlevel 1 (
     echo Failed to install shared requirements from requirements.txt
     pause

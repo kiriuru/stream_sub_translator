@@ -116,7 +116,7 @@ class NonRemoteControllerTests(unittest.IsolatedAsyncioTestCase):
             cap.stop()
 
         ctl = AudioCaptureController(create_capture=create, stop_in_thread=stop_in_thread)
-        self.assertEqual(await ctl.read_chunk(0.1), b"")
+        self.assertIsNone(await ctl.read_chunk(0.1))
         ctl.start_if_needed()  # no device id
         self.assertIsNone(ctl.capture)
 

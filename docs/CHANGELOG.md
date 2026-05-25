@@ -8,7 +8,67 @@
 
 ## Unreleased
 
-Инженерный hardening поверх релиза `0.4.1`. `PROJECT_VERSION` в `backend/versioning.py` по-прежнему **0.4.1**; `config_version` **7**. Публичные HTTP/WebSocket route contracts и subtitle/translation lifecycle **не менялись**.
+## 0.4.2
+
+Stabilization release. `PROJECT_VERSION` в `backend/versioning.py` — **0.4.2**; `config_version` **7**. Публичные HTTP/WebSocket route contracts и subtitle/translation lifecycle **не менялись**.
+
+### Parakeet integrity (idle latency fix)
+
+- **`backend/asr/parakeet/model_installer.py`**: добавлен потокобезопасный кеш результата `official_eu_parakeet_integrity_state()` по ключу `(file_path, mtime_ns, size, expected_sha)`. SHA-256 многогигабайтного `.nemo` теперь считается один раз за жизнь процесса вместо каждого вызова `/api/runtime/status` и `/api/health`. На свежей установке с `sha256` в `manifest.json` idle-latency status падает с 3–10 с до миллисекунд (см. [docs/ETALON_RUNTIME_VERIFICATION.md](./ETALON_RUNTIME_VERIFICATION.md) gate C).
+- Публичная `invalidate_official_eu_parakeet_integrity_cache()` для явной инвалидации; вызывается из `ensure_official_eu_parakeet_model()` после записи манифеста, чтобы закрыть гонку «`shutil.move` → manifest write».
+- Регрессии: `tests/test_parakeet_model_installer_manifest.py` — 8 тестов, включая прямой regression `test_integrity_state_caches_sha256_result`.
+
+### Desktop bootstrap install/repair
+
+- **`desktop/bootstrap_payload.py`**: при detected mismatch теперь чистит существующий `app-runtime/` перед извлечением нового payload — drop-in замена exe обновляет managed runtime без накопления stale файлов от прошлой версии.
+- **`backend/bootstrap_pip_pins.py`** + `vendor/python-wheels/antlr4_python3_runtime-4.9.3-py3-none-any.whl`: vendored ANTLR4 runtime wheel ставится перед NeMo, чтобы убрать flaky sdist-сборку `antlr4-python3-runtime==4.9.3` на Windows (path/cache/egg-info race в `pip`). Регрессия: `tests/test_bootstrap_pip_pins.py`.
+
+### Subtitle renderer (incremental effects, no full-line re-render)
+
+- **`frontend/js/subtitle-style.js`** — capability-сохраняющая перезапись потока рендера:
+  - Эффект (typewriter / pop-in / glow burst / underline sweep / scale fade / blur sharpen / spotlight pop / ink bloom / vintage flicker) теперь применяется **только к свежим фрагментам** partial-обновления, ранее набранная часть остаётся статичной. CSS-классы `.subtitle-fragment-static` / `.subtitle-fragment-fresh` в `frontend/css/subtitle-style.css`.
+  - Введена **shape-signature** для строки субтитров (`_shapeSignatureForRows`, `_shapeSignatureForEntry`); если сигнатура совпадает с предыдущим кадром, рендер идёт через fast path (повторно используется существующий wrapper/stage/row/surface DOM) — `container.innerHTML = ""` больше не вытирает блок при partial-обновлении исходного текста.
+  - Fast path охватывает и переход transient→completed: `_canFastPathFinalize` / `_finalizeTransientSurfaceInPlace` доконсолидируют partial-source в финальный блок без повторной анимации.
+  - Slow path при добавлении новой строки перевода переиспользует уже завершённую source-поверхность из `previousEntrySurfaces`, чтобы исходник не переанимировался при появлении блока перевода.
+  - В `composeRenderRows` partial-source при `lifecycle_state === "completed_with_partial"` помечается `transient: true`, так что live partial не считается завершённым и обновляется in-place через fast path.
+  - Новые поля `render_summary`: `fast_path_reason`, `finalized_in_place`, `reused_completed_surface`, `reused_partial_surfaces`. Включаются через `SST_TRACE_SUBTITLE_RENDER=1` (см. отладочный канал в `frontend/js/dashboard/ui-trace.js`).
+- **`frontend/js/normalizers/overlay-normalizer.js`** + **`overlay/overlay.js`**: `lifecycle_state` теперь дотягивается из backend-payload до `SubtitleStyleRenderer.render` и в дашборд-превью, и в overlay. Без него fast path неправильно классифицировал completed_with_partial frames.
+- **`frontend/js/panels/overlay-panel.js`**: дашборд-превью очищает все `.subtitle-stage-note` перед добавлением нового, чтобы блок «Живой блок субтитров #N» не размножался кадр-за-кадром.
+- Кеш-бастинг `index.html` / `overlay.html` бамп `?v=20260525a` для `subtitle-style.js` / `overlay.js` / `i18n.js` / `main.js` — старые кэшированные сборки во встроенном WebView2 не перетянут back старую логику.
+- Регрессии: `tests/test_subtitle_style_effects.py` — ~25 новых тестов на fast path / shape signature / finalization / lifecycle_state plumbing / DOM reuse.
+
+### Subtitle styles и bundled fonts
+
+- **`backend/core/subtitle_style.py`** — `_STYLE_PRESETS` переработан (10 различимых тематических пресетов): обновлены `anime_stream` (Mochiy Pop One + Comfortaa, белая заливка, узкий фиолетовый stroke 1px, мягкая тень), `cinema_plate`, `max_contrast`, `comic_burst`, `retro_terminal`; добавлены `fallout_terminal` (зелёный неон в стиле Pip-Boy), `cyberpunk_neon`, `noir_caption`, `jp_style` слит в общий пресет (бывший «JP dual» удалён). `_LEGACY_PRESET_MIGRATIONS` перенаправляет старые ключи.
+- **`fonts/*.ttf`** — 28 popular Google Fonts добавлены прямо в репозиторий (Bangers, BebasNeue, Comfortaa, ComicRelief, CutiveMono, Exo2, Inter, JetBrainsMono, Lato, Merriweather, MochiyPopOne, Montserrat, NotoSans, OpenSans, Orbitron, Oswald, PTMono, PlayfairDisplay, Poppins, Raleway, Roboto, ShareTechMono, SourceSans3, SpecialElite, UbuntuMono, Underdog, VT323). Все пресеты используют fallback-цепочку с кириллицей (Comfortaa Regular, Lato Regular, Noto Sans, Open Sans), чтобы тематические шрифты не разрушали русский текст.
+- **`backend/core/font_catalog.py`**: `_CAMEL_TO_SPACE_RE` нормализует имена файлов `MochiyPopOne-Regular.ttf` → `Mochiy Pop One Regular` для UI-каталога. Регрессия: `tests/test_font_catalog.py`.
+- **Frontend: системные шрифты не пропадают при сохранении.** `frontend/js/dashboard/action-helpers.js` экспортирует `mergeFontCatalogPreservingSystem`; `data-actions.js` мерджит каталог из сервера с client-side кешем `system_font_catalog` (localStorage), `config-actions.js` использует тот же merge при save/import. Раньше save затирал `system` записи на серверном каталоге и пользователь терял выбранный системный шрифт.
+- **Style editor UI**:
+  - `frontend/js/panels/style/style-editor-panel-shared.js` — `extractPrimaryFontFamily` парсит первое quoted имя из CSS font-family chain, чтобы dropdown отображал реально выбранный шрифт при загрузке пресета.
+  - `frontend/js/panels/style/style-editor-panel-render.js` + `frontend/js/panels/style-editor-panel.js` — новый селектор `#style-line-slot-apply-preset`: применяет base-стиль выбранного пресета только к конкретному line slot override, форсит `enabled=true` для слота, после применения сбрасывается в placeholder.
+- **Browser Speech worker (`frontend/google_asr.html`)**: `buildSettingsSavePayload` теперь сначала загружает свежий `/api/settings/load`, мерджит в него только browser-specific поля и сохраняет — раньше окно браузер-воркера затирало изменения, сделанные в дашборде между его открытием и кнопкой «Сохранить». Регрессия: `tests/test_browser_worker_contract.py::test_browser_worker_save_reloads_latest_config_before_save`.
+
+### Dashboard UI: compact layout и Parakeet-настройки
+
+- **`frontend/css/compact-layout.css`** — `body.sst-layout-compact .overview-preview-card { display:none !important; }` гарантирует, что live snapshot preview не показывается в compact view даже если DOM перенесёт его за пределы `.overview-layout`.
+- Compact-mode hide-правила декоративных `.eyebrow`, `<p class="muted">` под заголовками и stand-alone `<p class="muted" data-i18n>` теперь **исключают** technical-панели `recognition`, `tuning`, `asr_advanced` через `:not([data-tab-panel="..."])`. Технические подсказки и notes на Parakeet-страницах остаются видимыми в compact-режиме (раньше агрессивно скрывались).
+- Live snapshot preview card перенесён в `frontend/index.html` под блок «Завершённый текст» (`<pre id="final-transcript">`), чтобы стандартная и compact раскладки одинаково группировали ASR-output блоки.
+- **`frontend/js/panels/asr/asr-panel-render.js`** — Parakeet tuning controls (`#parakeet-latency-preset-row`, `#rt-tools-local-parakeet-extras`: streaming decode toggle, `partial_emit_mode`, `partial_min_new_words`) теперь видны всегда, кроме случая `desktop_profile_lock="browser_speech"` (Web-Speech-only install). Раньше эти контролы скрывались при текущем `asr.mode === "browser_google"`, и пользователь не мог настроить Parakeet до переключения mode. Регрессия: `tests/test_frontend_architecture.py::test_parakeet_tuning_controls_visible_outside_browser_speech_lock`.
+- Кнопки `start-btn` / `stop-btn` помечены `type="button"`, чтобы не триггерили subm​it ближайшей формы и не вызывали посторонний reload состояния.
+
+### Opt-in deep-diagnostic tracing
+
+- **`backend/core/diagnostic_flags.py`** (новый модуль) — централизованный контроль через переменные окружения: `SST_DEEP_DIAGNOSTICS` (мастер-свитч) или индивидуальные `SST_TRACE_API`, `SST_TRACE_PIPELINE`, `SST_TRACE_UI`, `SST_TRACE_STARTUP_JOURNEY`, `SST_TRACE_RUNTIME_LIFECYCLE`, `SST_TRACE_RUNTIME_EVENTS_VERBOSE`.
+- **`backend/core/app_bootstrap.py`** — `configure_api_trace_log`, `configure_ui_trace_log`, `configure_pipeline_trace_log`, `configure_startup_journey_log` вызываются только при включённом флаге. JSONL trace-файлы (`logs/api-trace.jsonl`, `logs/pipeline-trace.jsonl`, `logs/ui-trace.jsonl`, `logs/startup-journey.jsonl`) не создаются и helper-функции становятся no-op без флага.
+- **`backend/core/runtime_lifecycle_trace.py`** — `runtime_trace()` короткозамкнут на `is_runtime_lifecycle_trace_enabled()` (события `runtime_lifecycle.*` в `runtime-events.log` не пишутся, если выключено).
+- **`backend/core/structured_runtime_logger.py`** — добавлен per-event severity-фильтр. По умолчанию пишутся только `INF/WRN/ERR/CRT` события (`translation_publish_accepted`, `browser_external_final`, `browser_degraded`, …). `DBG/VRB` поток (`basr.fsm_transition`, `basr.policy_action_result`, `browser_worker_status`, `translation_queue_depth_changed`, `browser_rearm_scheduled`, …) подключается через `SST_TRACE_RUNTIME_EVENTS_VERBOSE=1` (или мастер-свитч). Это сокращает `logs/runtime-events.log` на штатной сессии примерно в 20–50 раз (с ~250 КБ до ~5–15 КБ) и совпадает с 0.4.1-дисковым следом для install-папок.
+- **`desktop/launcher.py`** — `configure_startup_journey_log`, `configure_ui_trace_log`, `configure_api_trace_log` теперь обёрнуты `is_startup_journey_enabled()` / `is_ui_trace_enabled()` / `is_api_trace_enabled()` гейтом, так что desktop процесс не создаёт пустые `startup-journey.jsonl` / `ui-trace.jsonl` / `api-trace.jsonl` рядом с public exe без явного opt-in (раньше эти файлы создавались launcher-процессом независимо от backend-гейта). `deps-install-trace.jsonl` и `subprocess-trace.jsonl` остаются always-on в соответствии с `docs/ETALON_RUNTIME_VERIFICATION.md` (необходимы для Gate A/B триажа, маленькие).
+- **`docs/ETALON_RUNTIME_VERIFICATION.md`** — секция «3.1 Включение глубоких трейсов» с инструкцией, как поднять флаги; добавлено описание `SST_TRACE_RUNTIME_EVENTS_VERBOSE` и desktop launcher-гейта.
+- Регрессии: `tests/test_diagnostic_flags.py` (флаги off-by-default, мастер-свитч, индивидуальные флаги, truthy-токены, no-op helpers); `tests/test_structured_runtime_logger.py::test_default_skips_dbg_and_vrb_events` (DBG/VRB фильтр); `tests/test_api_and_websockets.py::test_runtime_start_emits_structured_lifecycle_trace` обёрнут `mock.patch.dict("os.environ", {"SST_TRACE_RUNTIME_LIFECYCLE": "1"})`.
+
+### Документация
+
+Инженерный hardening, ранее лежавший в `Unreleased` поверх `0.4.1`, фиксируется как часть `0.4.2`-линии:
 
 ### Runtime orchestrator и local Parakeet
 

@@ -28,6 +28,20 @@ class PathsReleaseContractTests(unittest.TestCase):
             self.assertEqual(paths.logs_dir, root / "logs")
             self.assertEqual(paths.models_dir, root / "user-data" / "models")
 
+    def test_detect_app_paths_prefers_bundle_backend_over_missing_project_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "install"
+            bundle = root / "app-runtime"
+            (bundle / "backend").mkdir(parents=True)
+            env = {
+                "SST_PROJECT_ROOT": str(root),
+                "SST_BUNDLE_ROOT": str(bundle),
+            }
+            with mock.patch.dict(os.environ, env, clear=False):
+                paths = detect_app_paths()
+            self.assertEqual(paths.backend_root, (bundle / "backend").resolve())
+            self.assertFalse((root / "backend").exists())
+
     def test_ensure_app_layout_creates_models_under_user_data(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "app"

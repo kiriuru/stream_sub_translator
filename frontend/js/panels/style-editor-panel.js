@@ -164,6 +164,48 @@ function bindStyleEditorEvents(elements, { store, actions, logger }, catalogStat
     });
   });
 
+  // "Apply preset to this slot" — copy the chosen preset's base style into
+  // the currently selected line slot as a one-shot override. The slot keeps
+  // its enabled=true flag, all base fields are pushed into the slot, and
+  // the selector is reset to the placeholder so users see this as an
+  // action button rather than a binding (the slot is a free-form override
+  // afterwards and can be tweaked further). The base preset selector is
+  // unaffected, so users can still mix and match (e.g. base preset =
+  // clean_default, source slot copied from cyberpunk_pulse).
+  add(elements.lineSlots.applyPreset, "change", () => {
+    const presetName = String(elements.lineSlots.applyPreset.value || "").trim();
+    if (!presetName) {
+      return;
+    }
+    const presets = store.getState().subtitleStylePresets || {};
+    const sourceStyle = buildStyleFromPreset(presets, presetName);
+    const sourceBase = sourceStyle?.base || {};
+    if (!Object.keys(sourceBase).length) {
+      elements.lineSlots.applyPreset.value = "";
+      return;
+    }
+    updateStyle((style) => {
+      const activeSlot = store.getState().ui?.selectedStyleLineSlot || "source";
+      if (!style.line_slots || typeof style.line_slots !== "object") {
+        style.line_slots = {};
+      }
+      const current =
+        style.line_slots[activeSlot] && typeof style.line_slots[activeSlot] === "object"
+          ? style.line_slots[activeSlot]
+          : {};
+      const next = { ...current, enabled: true };
+      Object.entries(sourceBase).forEach(([key, value]) => {
+        // Coerce all values to strings so they match how the slot field
+        // bindings persist user-entered values (later normalisation in
+        // the renderer/router handles the parse-back to numbers etc.).
+        next[key] = value === null || value === undefined ? null : String(value);
+      });
+      style.line_slots[activeSlot] = next;
+    });
+    elements.lineSlots.applyPreset.value = "";
+    logger(`[subtitle-style] slot preset applied -> ${presetName}`);
+  });
+
   add(elements.saveCustomBtn, "click", async () => {
     const name = String(elements.customName?.value || "").trim();
     if (!name) {

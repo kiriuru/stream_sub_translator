@@ -26,7 +26,14 @@ class RuntimeOrchestratorStateMetricsMixin:
         self._latest_runtime_status_message = normalized
         loop = self._runtime_loop
         if loop is None or loop.is_closed():
-            return
+            # _runtime_loop is assigned in pre_start(); if this callback fires before that
+            # (e.g. a very early ASR init callback), try to reach the running loop directly.
+            try:
+                loop = asyncio.get_event_loop()
+                if loop is None or loop.is_closed() or not loop.is_running():
+                    return
+            except RuntimeError:
+                return
         loop.call_soon_threadsafe(
             lambda: asyncio.create_task(self._apply_runtime_status_message(normalized))
         )
@@ -108,7 +115,23 @@ class RuntimeOrchestratorStateMetricsMixin:
                 obs_caption_output=getattr(self, "_obs_caption_output", None),
                 state_controller=self._state_controller,  # type: ignore[arg-type]
             )
-        await self._output.broadcast_runtime_update(self._state)  # type: ignore[attr-defined]
+        # Enrich the broadcast state with live ws_manager diagnostics so the real-time
+        # WebSocket payload carries accurate ws_events_* counters (otherwise these are
+        # populated only on the HTTP status-polling path in runtime_service.py).
+        ws_diag = self.ws_manager.diagnostics()  # type: ignore[attr-defined]
+        broadcast_state = self._state.model_copy(  # type: ignore[attr-defined]
+            update={
+                "metrics": self._state.metrics.model_copy(  # type: ignore[attr-defined]
+                    update={
+                        "ws_events_connections_active": int(ws_diag.get("ws_events_connections_active", 0) or 0),
+                        "ws_events_broadcast_count": int(ws_diag.get("ws_events_broadcast_count", 0) or 0),
+                        "ws_events_send_failures": int(ws_diag.get("ws_events_send_failures", 0) or 0),
+                        "ws_events_dead_connections_removed": int(ws_diag.get("ws_events_dead_connections_removed", 0) or 0),
+                    }
+                )
+            }
+        )
+        await self._output.broadcast_runtime_update(broadcast_state)  # type: ignore[attr-defined]
 
     async def _broadcast_transcript(self, event: TranscriptEvent) -> None:
         await self._output.publish_transcript(event)
@@ -205,6 +228,27 @@ class RuntimeOrchestratorStateMetricsMixin:
         last_error: str | None = None,
         status_message: str | None = None,
     ) -> None:
+        previous = self._state
+        previous_status = getattr(previous, "status", None)
+        previous_running = getattr(previous, "is_running", None)
+        if (
+            previous_status != status
+            or previous_running != is_running
+            or (previous.last_error or None) != (last_error or None)
+        ):
+            from backend.core.pipeline_trace_log import pipeline_trace
+
+            pipeline_trace(
+                "runtime_state",
+                "runtime_orchestrator",
+                "state_changed",
+                from_status=previous_status,
+                to_status=status,
+                from_is_running=previous_running,
+                to_is_running=is_running,
+                last_error=last_error,
+                status_message=status_message,
+            )
         self._state = self._build_runtime_state(
             is_running=is_running,
             status=status,

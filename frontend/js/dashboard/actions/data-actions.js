@@ -1,5 +1,50 @@
 import { normalizeDiagnostics } from "../../normalizers/diagnostics-normalizer.js";
+import { mergeFontCatalogPreservingSystem } from "../action-helpers.js";
 import { getCurrentLocale } from "../helpers.js";
+
+// Caches the most recent system-font catalog snapshot in localStorage so that
+// the dropdown re-populates without requiring the user to click "Refresh
+// System Fonts" again on every page load. Each cache entry is a sanitized
+// array of `{ id, label, family, source }` records identical to the live
+// catalog format.
+const SYSTEM_FONTS_CACHE_STORAGE_KEY = "sst.font_catalog.system.v1";
+const SYSTEM_FONTS_CACHE_LIMIT = 1024;
+
+function _sanitizeSystemFontEntry(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const id = String(entry.id || "").trim();
+  const label = String(entry.label || "").trim();
+  const family = String(entry.family || "").trim();
+  if (!id || !label || !family) {
+    return null;
+  }
+  return { id, label, family, source: "system" };
+}
+
+function readSystemFontsCache() {
+  try {
+    const raw = window.localStorage.getItem(SYSTEM_FONTS_CACHE_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(_sanitizeSystemFontEntry).filter(Boolean);
+  } catch (_error) {
+    return [];
+  }
+}
+
+function writeSystemFontsCache(entries) {
+  try {
+    const sanitized = Array.isArray(entries)
+      ? entries.map(_sanitizeSystemFontEntry).filter(Boolean).slice(0, SYSTEM_FONTS_CACHE_LIMIT)
+      : [];
+    window.localStorage.setItem(SYSTEM_FONTS_CACHE_STORAGE_KEY, JSON.stringify(sanitized));
+  } catch (_error) {
+    // localStorage may be full or disabled; the in-memory list still works.
+  }
+}
 
 export function createDataActions({ store, api, logger, configActions }) {
   function updateBusyState(busyKey, isBusy) {
@@ -62,16 +107,35 @@ export function createDataActions({ store, api, logger, configActions }) {
         source: "system",
       });
     });
+    const sorted = systemFonts.sort((left, right) => left.label.localeCompare(right.label));
+    writeSystemFontsCache(sorted);
     const snapshot = store.getState();
     store.updateState({
       fontCatalog: {
         ...snapshot.fontCatalog,
-        system: systemFonts.sort((left, right) => left.label.localeCompare(right.label)),
+        system: sorted,
+      },
+    });
+  }
+
+  function hydrateSystemFontsFromCache() {
+    const cached = readSystemFontsCache();
+    if (!cached.length) return;
+    const snapshot = store.getState();
+    if (Array.isArray(snapshot.fontCatalog?.system) && snapshot.fontCatalog.system.length) return;
+    store.updateState({
+      fontCatalog: {
+        ...snapshot.fontCatalog,
+        system: cached,
       },
     });
   }
 
   async function loadInitialData() {
+    // Restore any system fonts the user picked in a previous session so the
+    // selector is usable immediately, even before they grant Local Font Access
+    // again. Fresh enumeration still happens on demand via refreshSystemFonts.
+    hydrateSystemFontsFromCache();
     const [versionInfo, health, obs, settings, audioInputs] = await Promise.all([
       api.getVersionInfo().catch(() => null),
       api.getHealth().catch(() => null),
@@ -105,7 +169,7 @@ export function createDataActions({ store, api, logger, configActions }) {
     if (settings) {
       store.updateState({
         subtitleStylePresets: settings.subtitle_style_presets || {},
-        fontCatalog: settings.font_catalog || store.getState().fontCatalog,
+        fontCatalog: mergeFontCatalogPreservingSystem(settings.font_catalog, store.getState().fontCatalog),
       });
       configActions.setConfig(settings.payload);
     }
@@ -163,6 +227,7 @@ export function createDataActions({ store, api, logger, configActions }) {
     setAudioInputs,
     refreshProfiles,
     refreshSystemFonts,
+    hydrateSystemFontsFromCache,
     loadInitialData,
     exportDiagnostics,
     listOpenAiModels,

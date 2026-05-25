@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+import asyncio
+import os
+import time
 from typing import Any
 
 import httpx
 from fastapi import FastAPI
 
+from backend.core.asr_provider_selection import resolve_effective_asr_provider
+from backend.core.startup_journey_log import journey_log, journey_log_mapping
+from backend.core.runtime_lifecycle_trace import (
+    runtime_trace,
+    summarize_asr_diagnostics_snapshot,
+    summarize_device_resolution,
+    summarize_metrics_snapshot,
+    summarize_runtime_config,
+)
 from backend.models import (
+    AudioInputDevice,
     AudioInputsResponse,
     BrowserAsrDiagnostics,
     ObsUrlResponse,
@@ -25,6 +38,27 @@ class RuntimeService:
     @property
     def _runtime_orchestrator(self):
         return self._app.state.runtime_orchestrator
+
+    @property
+    def _structured_runtime_logger(self):
+        return getattr(self._app.state, "structured_runtime_logger", None)
+
+    def _trace(self, event: str, **fields: Any) -> None:
+        runtime_trace(self._structured_runtime_logger, event, source="runtime_service", **fields)
+
+    def _attach_ws_metrics(self, state: RuntimeState) -> RuntimeState:
+        ws_diagnostics = self._app.state.ws_manager.diagnostics()
+        metrics = state.metrics.model_copy(
+            update={
+                "ws_events_connections_active": int(ws_diagnostics.get("ws_events_connections_active", 0) or 0),
+                "ws_events_broadcast_count": int(ws_diagnostics.get("ws_events_broadcast_count", 0) or 0),
+                "ws_events_send_failures": int(ws_diagnostics.get("ws_events_send_failures", 0) or 0),
+                "ws_events_dead_connections_removed": int(
+                    ws_diagnostics.get("ws_events_dead_connections_removed", 0) or 0
+                ),
+            }
+        )
+        return state.model_copy(update={"metrics": metrics})
 
     def _current_config(self) -> dict[str, Any]:
         config_state_service = getattr(self._app.state, "config_state_service", None)
@@ -101,22 +135,152 @@ class RuntimeService:
         devices = self._app.state.audio_device_manager.list_input_devices()
         return AudioInputsResponse(devices=devices, source="sounddevice")
 
+    @staticmethod
+    def _normalize_device_id(value: str | None) -> str | None:
+        text = str(value or "").strip()
+        return text or None
+
+    @staticmethod
+    def _device_list_id(item: AudioInputDevice | dict[str, Any]) -> str | None:
+        if isinstance(item, dict):
+            return RuntimeService._normalize_device_id(item.get("id"))
+        return RuntimeService._normalize_device_id(getattr(item, "id", None))
+
+    @staticmethod
+    def _device_list_is_default(item: AudioInputDevice | dict[str, Any]) -> bool:
+        if isinstance(item, dict):
+            return bool(item.get("is_default"))
+        return bool(getattr(item, "is_default", False))
+
+    def _resolve_runtime_start_device_id(
+        self,
+        requested: str | None,
+        devices: list[AudioInputDevice | dict[str, Any]],
+    ) -> str | None:
+        device_id = self._normalize_device_id(requested)
+        known_ids = {self._device_list_id(item) for item in devices}
+        known_ids.discard(None)
+        if device_id and device_id in known_ids:
+            return device_id
+
+        desktop_launcher = str(os.environ.get("SST_DESKTOP_LAUNCHER", "") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        prefer_default = desktop_launcher and (not device_id or device_id not in known_ids)
+        default_device = next(
+            (item for item in devices if self._device_list_is_default(item)),
+            devices[0] if devices else None,
+        )
+        if prefer_default and default_device is not None:
+            return self._device_list_id(default_device)
+
+        config = self._current_config()
+        audio = config.get("audio") if isinstance(config.get("audio"), dict) else {}
+        configured_id = self._normalize_device_id(audio.get("input_device_id") if isinstance(audio, dict) else None)
+        if configured_id and any(self._device_list_id(item) == configured_id for item in devices):
+            return configured_id
+
+        if default_device is not None:
+            return self._device_list_id(default_device)
+        return None
+
     async def start(self, body: RuntimeStartRequest | None = None) -> RuntimeActionResponse:
         payload = body or RuntimeStartRequest()
+        started_at = time.perf_counter()
         self._apply_runtime_start_config(payload.config_payload)
-        devices = self._app.state.audio_device_manager.list_input_devices()
+        config = self._current_config()
+        resolved_asr = resolve_effective_asr_provider(config)
+        audio = config.get("audio") if isinstance(config.get("audio"), dict) else {}
+        configured_device_id = self._normalize_device_id(
+            audio.get("input_device_id") if isinstance(audio, dict) else None
+        )
+        start_request_payload = {
+            "settings_summary": summarize_runtime_config(config),
+            "requested_device_id": self._normalize_device_id(payload.device_id),
+            "configured_device_id": configured_device_id,
+            "has_config_payload": bool(payload.config_payload),
+            "asr_mode": resolved_asr.get("mode"),
+        }
+        self._trace("runtime_start_request", payload=start_request_payload)
+        journey_log_mapping("runtime", "runtime_start_request", start_request_payload)
+        from backend.core.pipeline_trace_log import pipeline_trace
+
+        pipeline_trace("runtime_api", "runtime_service", "start_request", **start_request_payload)
+        devices: list[AudioInputDevice] = []
+        device_id = payload.device_id
+        if bool(resolved_asr.get("uses_backend_audio_capture")):
+            devices = await asyncio.to_thread(
+                self._app.state.audio_device_manager.list_input_devices
+            )
+            device_id = self._resolve_runtime_start_device_id(payload.device_id, devices)
+        self._trace(
+            "runtime_start_device_resolved",
+            payload=summarize_device_resolution(
+                requested_device_id=self._normalize_device_id(payload.device_id),
+                resolved_device_id=self._normalize_device_id(device_id),
+                audio_input_count=len(devices),
+                configured_device_id=configured_device_id,
+            ),
+        )
         state = await self._runtime_orchestrator.start(
             has_audio_inputs=bool(devices),
-            device_id=payload.device_id,
+            device_id=device_id,
         )
-        return RuntimeActionResponse(action="start", runtime=state)
+        start_complete_payload = {
+            "elapsed_ms": round((time.perf_counter() - started_at) * 1000.0, 2),
+            "status": state.status,
+            "is_running": state.is_running,
+            "last_error": state.last_error,
+            "metrics": summarize_metrics_snapshot(
+                state.metrics.model_dump() if state.metrics is not None else None
+            ),
+            "asr_diagnostics": summarize_asr_diagnostics_snapshot(
+                state.asr_diagnostics.model_dump() if state.asr_diagnostics is not None else None
+            ),
+        }
+        self._trace("runtime_start_complete", payload=start_complete_payload)
+        journey_log_mapping("runtime", "runtime_start_complete", start_complete_payload)
+        pipeline_trace("runtime_api", "runtime_service", "start_complete", **start_complete_payload)
+        return RuntimeActionResponse(action="start", runtime=self._attach_ws_metrics(state))
 
     async def stop(self) -> RuntimeActionResponse:
+        started_at = time.perf_counter()
+        self._trace("runtime_stop_request")
+        from backend.core.pipeline_trace_log import pipeline_trace
+
+        pipeline_trace(
+            "runtime_api",
+            "runtime_service",
+            "stop_request",
+            status=self._runtime_orchestrator.status().status,
+            is_running=self._runtime_orchestrator.status().is_running,
+        )
+        journey_log(
+            "runtime",
+            "runtime_stop_request",
+            status=self._runtime_orchestrator.status().status,
+            is_running=self._runtime_orchestrator.status().is_running,
+        )
         browser_asr_service = getattr(self._app.state, "browser_asr_service", None)
         if browser_asr_service is not None:
             await browser_asr_service.send_control("stop", reason="runtime_stop")
         state = await self._runtime_orchestrator.stop()
-        return RuntimeActionResponse(action="stop", runtime=state)
+        stop_payload = {
+            "elapsed_ms": round((time.perf_counter() - started_at) * 1000.0, 2),
+            "status": state.status,
+            "is_running": state.is_running,
+            "last_error": state.last_error,
+            "metrics": summarize_metrics_snapshot(
+                state.metrics.model_dump() if state.metrics is not None else None
+            ),
+        }
+        self._trace("runtime_stop_complete", payload=stop_payload)
+        journey_log("runtime", "runtime_stop_complete", **stop_payload)
+        pipeline_trace("runtime_api", "runtime_service", "stop_complete", **stop_payload)
+        return RuntimeActionResponse(action="stop", runtime=self._attach_ws_metrics(state))
 
     def status(self) -> RuntimeState:
         state = self._runtime_orchestrator.status()
@@ -153,15 +317,11 @@ class RuntimeService:
                 ),
             }
         )
-        metrics = state.metrics.model_copy(
+        metrics = self._attach_ws_metrics(state).metrics.model_copy(
             update={
                 "client_log_events_received": int(client_log_diagnostics.get("client_log_events_received", 0) or 0),
                 "client_log_events_written": int(client_log_diagnostics.get("client_log_events_written", 0) or 0),
                 "client_log_events_dropped": int(client_log_diagnostics.get("client_log_events_dropped", 0) or 0),
-                "ws_events_connections_active": int(ws_diagnostics.get("ws_events_connections_active", 0) or 0),
-                "ws_events_broadcast_count": int(ws_diagnostics.get("ws_events_broadcast_count", 0) or 0),
-                "ws_events_send_failures": int(ws_diagnostics.get("ws_events_send_failures", 0) or 0),
-                "ws_events_dead_connections_removed": int(ws_diagnostics.get("ws_events_dead_connections_removed", 0) or 0),
             }
         )
         overlay = state.overlay.model_copy(

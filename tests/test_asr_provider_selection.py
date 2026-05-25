@@ -22,6 +22,9 @@ class _RecordingWsManager:
     async def broadcast(self, message: dict) -> None:
         self.messages.append(message)
 
+    def diagnostics(self) -> dict:
+        return {}
+
 
 class _FakeObsCaptionOutput:
     async def start(self) -> None:
@@ -272,6 +275,89 @@ class AsrProviderSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(_FakeAudioCapture.created), 1)
         self.assertIsNotNone(runtime._asr_task)  # noqa: SLF001
         await runtime.stop()
+
+    async def test_local_start_starts_processing_tasks_once_after_listen(self) -> None:
+        config = _config("local")
+        runtime = self._build_runtime(config)
+        start_calls = 0
+        original_start = runtime._start_processing_tasks_impl  # noqa: SLF001
+
+        async def _tracked_start() -> None:
+            nonlocal start_calls
+            start_calls += 1
+            await original_start()
+
+        def _initialize_runtime() -> AsrProviderStatus:
+            return AsrProviderStatus(
+                provider="official_eu_parakeet_low_latency",
+                ready=True,
+                message="ready",
+                partials_supported=True,
+                supports_partials=True,
+                supports_streaming=True,
+                selected_device="cpu",
+                selected_execution_provider="nemo_direct",
+                runtime_initialized=True,
+            )
+
+        def _diagnostics() -> AsrProviderDiagnostics:
+            return AsrProviderDiagnostics(
+                provider_name="official_eu_parakeet_low_latency",
+                supports_gpu=True,
+                supports_partials=True,
+                supports_streaming=True,
+                gpu_requested=False,
+                gpu_available=False,
+                actual_selected_device="cpu",
+                actual_execution_provider="nemo_direct",
+                ready=True,
+                message="ready",
+                runtime_initialized=True,
+            )
+
+        with (
+            mock.patch("backend.core.runtime_orchestrator.AudioCapture", _FakeAudioCapture),
+            mock.patch.object(runtime._asr_engine, "initialize_runtime", side_effect=_initialize_runtime),  # noqa: SLF001
+            mock.patch.object(runtime._asr_engine, "diagnostics", side_effect=_diagnostics),  # noqa: SLF001
+            mock.patch.object(runtime, "_start_processing_tasks_impl", side_effect=_tracked_start),  # noqa: SLF001
+        ):
+            state = await runtime.start(has_audio_inputs=True, device_id="mic0")
+
+        self.assertTrue(state.is_running)
+        self.assertEqual(start_calls, 1)
+        await runtime.stop()
+
+    async def test_browser_start_skips_parakeet_when_stale_active_mode_pin_is_local(self) -> None:
+        config = _config("browser_google")
+        runtime = self._build_runtime(config)
+        runtime._asr_mode._active_runtime_mode = "local"  # noqa: SLF001 — simulates CPU session pin after stop
+        init_calls = 0
+
+        def _initialize_runtime() -> AsrProviderStatus:
+            nonlocal init_calls
+            init_calls += 1
+            return AsrProviderStatus(
+                provider="official_eu_parakeet_low_latency",
+                ready=True,
+                message="ready",
+                partials_supported=True,
+                supports_partials=True,
+                supports_streaming=True,
+                selected_device="cpu",
+                selected_execution_provider="nemo_direct",
+                runtime_initialized=True,
+            )
+
+        with mock.patch.object(
+            runtime._asr_engine, "initialize_runtime", side_effect=_initialize_runtime  # noqa: SLF001
+        ):
+            state = await runtime.start(has_audio_inputs=True, device_id=None)
+
+        self.assertTrue(state.is_running)
+        self.assertEqual(init_calls, 0)
+        self.assertEqual(runtime._asr_mode._active_runtime_mode, "browser_google")  # noqa: SLF001
+        await runtime.stop()
+        self.assertIsNone(runtime._asr_mode._active_runtime_mode)  # noqa: SLF001
 
 
 if __name__ == "__main__":

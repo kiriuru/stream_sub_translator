@@ -48,11 +48,24 @@ export function applyDashboardLayout(layout, { persistBodyClass = true } = {}) {
   return mode;
 }
 
+function traceDesktopResize(event, fields) {
+  if (typeof window.SstDesktopUiTrace === "function") {
+    window.SstDesktopUiTrace(event, fields);
+  }
+}
+
 async function requestDesktopWindowResize(layout) {
   const mode = normalizeLayout(layout);
   const sizes = WINDOW_SIZES[mode] || WINDOW_SIZES.standard;
   const resizeApi = window.pywebview?.api?.resize_main_window;
   if (typeof resizeApi === "function") {
+    traceDesktopResize("resize_main_window_begin", {
+      layout: mode,
+      width: sizes.width,
+      height: sizes.height,
+      min_width: sizes.minWidth,
+      min_height: sizes.minHeight,
+    });
     try {
       const outcome = resizeApi.call(
         window.pywebview.api,
@@ -65,9 +78,13 @@ async function requestDesktopWindowResize(layout) {
       if (outcome && typeof outcome.then === "function") {
         await outcome;
       }
+      traceDesktopResize("resize_main_window_complete", { layout: mode, ok: true });
       return true;
-    } catch (_error) {
-      // optional desktop API
+    } catch (error) {
+      traceDesktopResize("resize_main_window_failed", {
+        layout: mode,
+        error: error instanceof Error ? error.message : String(error || ""),
+      });
     }
   }
   window.dispatchEvent(

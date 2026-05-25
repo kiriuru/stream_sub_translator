@@ -1,6 +1,13 @@
 (function () {
+  function traceDesktop(event, fields) {
+    if (typeof window.SstDesktopUiTrace === "function") {
+      window.SstDesktopUiTrace(event, fields);
+    }
+  }
+
   const URL_PARAMS = new URLSearchParams(window.location.search);
   const FORCED_DESKTOP_MODE = URL_PARAMS.get("desktop") === "1";
+  const PYWEBVIEW_GUI = "edgechromium";
   const DEFAULT_CONTEXT = {
     desktop_mode: FORCED_DESKTOP_MODE,
     base_url: location.origin,
@@ -28,11 +35,13 @@
 
   function waitForPywebviewApi(timeoutMs = 4000) {
     if (hasPywebviewApi()) {
+      traceDesktop("pywebview_api_ready", { immediate: true, timeout_ms: timeoutMs });
       return Promise.resolve(true);
     }
     if (!FORCED_DESKTOP_MODE) {
       return Promise.resolve(false);
     }
+    traceDesktop("pywebview_api_wait_begin", { timeout_ms: timeoutMs, forced_desktop: FORCED_DESKTOP_MODE });
     return new Promise((resolve) => {
       let settled = false;
       const finish = (value) => {
@@ -42,6 +51,10 @@
         settled = true;
         document.removeEventListener("pywebviewready", onReady);
         clearTimeout(timer);
+        traceDesktop(value ? "pywebview_api_ready" : "pywebview_api_timeout", {
+          timeout_ms: timeoutMs,
+          has_api: hasPywebviewApi(),
+        });
         resolve(value);
       };
       const onReady = () => finish(hasPywebviewApi());
@@ -86,10 +99,21 @@
         if (window.AppState) {
           window.AppState.desktop = cachedContext;
         }
+        traceDesktop("launch_context_loaded", {
+          gui: payload?.pywebview_gui || PYWEBVIEW_GUI,
+          storage_path: payload?.pywebview_storage_path || null,
+          startup_mode: cachedContext.startup_mode,
+          install_profile: cachedContext.install_profile,
+        });
         dispatchContext(cachedContext);
         return cachedContext;
       })
-      .catch(() => cachedContext);
+      .catch((error) => {
+        traceDesktop("launch_context_failed", {
+          error: error instanceof Error ? error.message : String(error || ""),
+        });
+        return cachedContext;
+      });
     return contextPromise;
   }
 
@@ -126,13 +150,48 @@
     async openExternalUrl(url) {
       return openExternalUrl(url);
     },
+    async requestRuntimeStart(deviceId, configPayload) {
+      if (!hasPywebviewApi() || typeof window.pywebview.api.request_runtime_start !== "function") {
+        return { ok: false, error: "native start unavailable" };
+      }
+      try {
+        return await window.pywebview.api.request_runtime_start(deviceId ?? null, configPayload ?? null);
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+    async requestRuntimeStop() {
+      if (!hasPywebviewApi() || typeof window.pywebview.api.request_runtime_stop !== "function") {
+        return { ok: false, error: "native stop unavailable" };
+      }
+      try {
+        return await window.pywebview.api.request_runtime_stop();
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
   };
 
   document.addEventListener("pywebviewready", () => {
+    traceDesktop("pywebviewready", {
+      gui: PYWEBVIEW_GUI,
+      has_api: hasPywebviewApi(),
+      href: String(location.href || ""),
+    });
     void getContext();
+  });
+
+  traceDesktop("desktop_bridge_init", {
+    forced_desktop: FORCED_DESKTOP_MODE,
+    gui: PYWEBVIEW_GUI,
+    has_api: hasPywebviewApi(),
+    href: String(location.href || ""),
   });
 
   if (!hasPywebviewApi()) {
     dispatchContext(cachedContext);
+    if (FORCED_DESKTOP_MODE) {
+      scheduleContextRefresh();
+    }
   }
 })();

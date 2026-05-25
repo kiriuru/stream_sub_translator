@@ -8,28 +8,16 @@ app-runtime/
 Stream Subtitle Translator.exe
 AGENTS.md
 
-# Local-only: desktop packaging (not published to GitHub; normal run uses start.bat)
-desktop/
-requirements.desktop.txt
-Stream Subtitle Translator*.spec
-Stream Subtitle Translator Bootstrap Web Only.spec
-build-desktop.bat
-build-bootstrap-launcher.bat
-build-bootstrap-launcher-web-only.bat
-publish-desktop-releases.ps1
-publish-desktop-releases-web-only.ps1
+# Desktop packaging — sources + build scripts published to GitHub since 0.4.2.
+# Runtime artifacts under desktop/ are still local-only.
+desktop/logs/
+desktop/__pycache__/
+
+# Remote-lite packaging is part of the frozen remote surface — kept local-only.
 build-remote-lite.ps1
 
 # Local-only: ad-hoc dev scripts
 scripts/
-
-# Local-only: desktop packaging tests (need desktop/ sources)
-tests/test_launcher.py
-tests/test_bootstrap_launcher.py
-tests/test_bootstrap_launcher_web_only.py
-tests/test_bootstrap_payload.py
-tests/test_runtime_bootstrap.py
-tests/test_desktop_profile_lock.py
 
 # Env
 .env

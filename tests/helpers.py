@@ -11,6 +11,8 @@ from backend.core.parakeet_provider import AsrProviderStatus
 from backend.core.remote_session import RemoteSessionManager
 from backend.core.remote_signaling import RemoteSignalingManager
 from backend.models import AsrDiagnostics, ObsCaptionDiagnostics, RuntimeState, TranslationDiagnostics
+from backend.core.api_trace_log import ApiTraceLog, configure_api_trace_log
+from backend.core.ui_trace_log import UiTraceLog, configure_ui_trace_log
 from backend.services.config_state_service import ConfigStateService
 from backend.services.browser_asr_service import BrowserAsrService
 from backend.ws_manager import WebSocketManager
@@ -45,7 +47,7 @@ class FakeConfigManager:
 
 class FakeAudioDeviceManager:
     def __init__(self, devices: list[dict[str, Any]] | None = None) -> None:
-        self.devices = devices if devices is not None else [{"id": "mic0", "name": "Microphone"}]
+        self.devices = devices if devices is not None else [{"id": "mic0", "name": "Microphone", "is_default": True}]
 
     def list_input_devices(self) -> list[dict[str, Any]]:
         return list(self.devices)
@@ -203,6 +205,8 @@ class AppStateSandbox(AbstractContextManager["AppStateSandbox"]):
         "runtime_orchestrator",
         "session_logger",
         "structured_runtime_logger",
+        "ui_trace_log",
+        "api_trace_log",
         "browser_asr_service",
     ]
 
@@ -229,6 +233,8 @@ class AppStateSandbox(AbstractContextManager["AppStateSandbox"]):
         self.audio_device_manager = FakeAudioDeviceManager()
         self.session_logger = FakeSessionLogger()
         self.structured_runtime_logger = FakeStructuredRuntimeLogger()
+        self.ui_trace_log = configure_ui_trace_log(self.paths.logs_dir)
+        self.api_trace_log = configure_api_trace_log(self.paths.logs_dir)
         self.remote_session_manager = RemoteSessionManager()
         self.remote_signaling_manager = RemoteSignalingManager()
         self.ws_manager = WebSocketManager()
@@ -249,11 +255,15 @@ class AppStateSandbox(AbstractContextManager["AppStateSandbox"]):
         app_module.app.state.runtime_orchestrator = self.runtime_orchestrator
         app_module.app.state.session_logger = self.session_logger
         app_module.app.state.structured_runtime_logger = self.structured_runtime_logger
+        app_module.app.state.ui_trace_log = self.ui_trace_log
+        app_module.app.state.api_trace_log = self.api_trace_log
         app_module.app.state.browser_asr_service = self.browser_asr_service
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
         for key, value in self.saved.items():
             setattr(app_module.app.state, key, value)
+        UiTraceLog._instance = None
+        ApiTraceLog._instance = None
         self._temp_dir.cleanup()
         return None

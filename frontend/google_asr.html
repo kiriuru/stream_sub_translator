@@ -824,8 +824,32 @@
           return applyResolvedWorkerSettings(resolveWorkerSettings(browserConfig, storedWorkerSettings));
         }
 
-        function buildSettingsSavePayload(nextWorkerSettings) {
-          const payload = cloneConfigPayload(state.currentConfigPayload);
+        // Build the save payload from a fresh server snapshot, NOT from
+        // `state.currentConfigPayload`. The worker window only cares about
+        // `asr.browser.*`; anything else in the local snapshot (especially
+        // `subtitle_style`, `subtitle_output`, `translation.*`) is captured
+        // at worker-window load time and can be stale by the time the user
+        // clicks Save here — the dashboard may have changed those fields
+        // since, and writing the stale snapshot back would silently revert
+        // those edits. We pull the latest config from the backend right
+        // before save and only inject the new browser-worker fields into
+        // it, so this save touches exactly the asr.browser surface.
+        async function buildSettingsSavePayload(nextWorkerSettings) {
+          let basePayload = null;
+          try {
+            const response = await fetch("/api/settings/load", { headers: { "Accept": "application/json" } });
+            if (response.ok) {
+              const latest = await response.json();
+              if (latest && typeof latest === "object" && latest.payload && typeof latest.payload === "object") {
+                basePayload = cloneConfigPayload(latest.payload);
+              }
+            }
+          } catch (_error) {
+            // best effort — fall back to the local snapshot if the load
+            // fails; this preserves the previous save behaviour when the
+            // backend is unavailable.
+          }
+          const payload = basePayload || cloneConfigPayload(state.currentConfigPayload);
           const currentAsr = payload.asr && typeof payload.asr === "object" ? payload.asr : {};
           const currentBrowser = currentAsr.browser && typeof currentAsr.browser === "object" ? currentAsr.browser : {};
           payload.asr = {
@@ -875,10 +899,11 @@
           state.settingsSavePromise = state.settingsSavePromise
             .catch(() => undefined)
             .then(async () => {
+              const savePayload = await buildSettingsSavePayload(nextWorkerSettings);
               const response = await fetch("/api/settings/save", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ payload: buildSettingsSavePayload(nextWorkerSettings) }),
+                body: JSON.stringify({ payload: savePayload }),
               });
               if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);

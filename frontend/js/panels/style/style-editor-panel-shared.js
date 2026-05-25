@@ -116,6 +116,30 @@ export function normalizeOverrideFieldValue(value) {
   return String(value);
 }
 
+// Built-in presets store a full CSS font-family chain (e.g.
+// `"Mochiy Pop One Regular", "Comfortaa Bold", "Segoe UI", sans-serif`) so the
+// browser can fall through to a Cyrillic-capable face or to system defaults
+// when a project font is missing. The font dropdown, however, exposes one
+// entry per registered face (each option's value is a single quoted family
+// name). Without this helper the editor would compare the full chain to the
+// single-name option values, find no match, and leave the dropdown blank —
+// which the user reads as "preset doesn't show which font is selected".
+export function extractPrimaryFontFamily(chain) {
+  const str = String(chain || "").trim();
+  if (!str) {
+    return "";
+  }
+  // Prefer the first quoted name (handles `"Mochiy Pop One Regular", ...`).
+  const quoted = str.match(/"([^"]+)"/);
+  if (quoted && quoted[1]) {
+    return `"${quoted[1].trim()}"`;
+  }
+  // Fall back to the first comma-separated token (handles unquoted
+  // single-name values like `sans-serif`).
+  const bare = str.split(",")[0].trim();
+  return bare || "";
+}
+
 export function isStyleNumberInput(element) {
   return Boolean(element && element.type === "number");
 }

@@ -1,7 +1,73 @@
 import { collectElements, setCheckedIfChanged, setInputValueIfChanged } from "../core/dom.js";
 import { createPanelMount } from "../core/panel-mount.js";
 import { escapeHtml, getCurrentLocale, setElementVisibility, t } from "../dashboard/helpers.js";
+import { traceUi } from "../dashboard/ui-trace.js";
 import { renderSubtitleDisplayOrder } from "./overlay/overlay-display-order-view.js";
+
+// Subtitle-effect debug trace toggle for the dashboard preview surface.
+// Persistent so it survives reloads/relaunches in the desktop shell. Enable
+// from DevTools with:
+//   localStorage.setItem("sst_debug_subtitles", "1"); location.reload();
+const SUBTITLE_DEBUG_STORAGE_KEY = "sst_debug_subtitles";
+const SUBTITLE_TRACE_RING_LIMIT = 200;
+
+function isSubtitleDebugEnabled() {
+  try {
+    return window.localStorage && window.localStorage.getItem(SUBTITLE_DEBUG_STORAGE_KEY) === "1";
+  } catch (_error) {
+    return false;
+  }
+}
+
+function getSubtitleTraceRing() {
+  if (!Array.isArray(window.__sstDashboardSubtitleTrace)) {
+    window.__sstDashboardSubtitleTrace = [];
+  }
+  return window.__sstDashboardSubtitleTrace;
+}
+
+function handleSubtitleRenderTraceForDashboard(event) {
+  if (!event || typeof event !== "object") {
+    return;
+  }
+  const ring = getSubtitleTraceRing();
+  const enriched = { ts: Date.now(), ...event };
+  ring.push(enriched);
+  if (ring.length > SUBTITLE_TRACE_RING_LIMIT) {
+    ring.splice(0, ring.length - SUBTITLE_TRACE_RING_LIMIT);
+  }
+  if (event.type === "partial_frame") {
+    console.debug(
+      `[dashboard-subtitles] partial slot=${event.slot} transition=${event.transition} `
+        + `shared=${event.shared_length} fresh=${event.fresh_chars} prev_len=${event.previous_text_length} `
+        + `cur_len=${event.current_text_length} effect=${event.effect}`
+    );
+  } else if (event.type === "completed_frame") {
+    console.debug(
+      `[dashboard-subtitles] completed slot=${event.slot} animated=${event.animated} text_len=${event.text_length}`
+    );
+  } else if (event.type === "render_summary") {
+    const anomalyTags = (event.anomalies || []).map((a) => a.kind).join(",") || "none";
+    console.debug(
+      `[dashboard-subtitles] summary rows=${event.rows} partials=${event.partial_entries} `
+        + `completed=${event.completed_entries} state_carryover=${event.state_carryover} `
+        + `since_last_ms=${event.ms_since_last_render} anomalies=${anomalyTags}`
+    );
+    // Backend persistence: anomalies only, to keep ui-trace.jsonl readable.
+    if (event.anomalies && event.anomalies.length) {
+      traceUi("dashboard", "subtitle_render", "anomaly", {
+        overlay: event.overlay,
+        rows: event.rows,
+        partial_entries: event.partial_entries,
+        completed_entries: event.completed_entries,
+        state_carryover: event.state_carryover,
+        ms_since_last_render: event.ms_since_last_render,
+        render_duration_ms: event.render_duration_ms,
+        anomalies: event.anomalies,
+      });
+    }
+  }
+}
 
 function renderPreview(container, payload, state) {
   if (!container) {
@@ -15,24 +81,36 @@ function renderPreview(container, payload, state) {
     container.innerHTML = `<p class="muted">${escapeHtml(getCurrentLocale() === "ru" ? "SubtitleStyleRenderer недоступен." : "SubtitleStyleRenderer unavailable.")}</p>`;
     return;
   }
+  const subtitleDebug = isSubtitleDebugEnabled();
   const result = window.SubtitleStyleRenderer.render(container, payload, {
     styleConfig: state.config?.subtitle_style || {},
     presets: state.subtitleStylePresets || {},
+    onRenderTrace: subtitleDebug ? handleSubtitleRenderTraceForDashboard : null,
   });
   if (result.empty) {
     container.innerHTML = `<p class="muted">${escapeHtml(getCurrentLocale() === "ru" ? "По текущим настройкам сейчас нет видимых строк субтитров." : "No visible subtitle lines for the current settings yet.")}</p>`;
     return;
   }
+  // The renderer owns the `.subtitle-stage-shell` wrapper inside `container`
+  // and only mutates it. Anything else this function appends as a sibling
+  // (notes, hints, etc.) MUST be cleaned up by us — previously the renderer's
+  // implicit `container.innerHTML = ""` wipe on every frame did that for us,
+  // but the new in-place fast path leaves stale siblings in place. Without
+  // this cleanup the dashboard accumulates one duplicate note per partial
+  // frame ("Живой блок субтитров #N." stacked dozens of times).
+  const staleNotes = container.querySelectorAll(".subtitle-stage-note");
+  staleNotes.forEach((node) => node.remove());
   if (state.overlay?.payload) {
-    const note = document.createElement("p");
-    note.className = "subtitle-stage-note";
-    note.textContent = payload.completed_block_visible
+    const noteText = payload.completed_block_visible
       ? getCurrentLocale() === "ru"
         ? `Живой блок субтитров${payload.sequence ? ` #${payload.sequence}` : ""}.`
         : `Live subtitle block${payload.sequence ? ` #${payload.sequence}` : ""}.`
       : getCurrentLocale() === "ru"
         ? "Предпросмотр live-partial."
         : "Live partial preview.";
+    const note = document.createElement("p");
+    note.className = "subtitle-stage-note";
+    note.textContent = noteText;
     container.appendChild(note);
   }
 }

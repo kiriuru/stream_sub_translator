@@ -205,6 +205,31 @@ class BrowserWorkerContractTests(unittest.TestCase):
         self.assertIn('/api/settings/save', self.html)
         self.assertIn('storedWorkerSettings ? "localStorage+backend" : "backend"', self.html)
 
+    def test_browser_worker_save_reloads_latest_config_before_save(self) -> None:
+        """The Browser Speech worker window keeps a *snapshot* of the config
+        (`state.currentConfigPayload`) taken when the worker window first
+        loaded. If the user changed `subtitle_style`, `subtitle_output`,
+        `translation.*` or any other non-`asr.browser.*` field in the
+        dashboard after the worker window was opened, that stale snapshot
+        in the worker still holds the old values. Posting the snapshot
+        verbatim to `/api/settings/save` then silently *reverts* every one
+        of those edits — exactly the 'subtitles change to some other saved
+        unknown when' regression reported on v0.4.2.
+
+        The worker MUST refetch `/api/settings/load` inside
+        `buildSettingsSavePayload` and only inject `asr.browser.*` into the
+        fresh server snapshot, so a worker-side Save touches exactly the
+        Browser Speech worker surface."""
+        self.assertIn("async function buildSettingsSavePayload", self.html)
+        self.assertIn('await fetch("/api/settings/load"', self.html)
+        # The fresh load must be wired into the save call (await on the
+        # async builder).
+        self.assertIn("await buildSettingsSavePayload(nextWorkerSettings)", self.html)
+        # Defence in depth — the helper must still emit the latest
+        # `asr.browser.*` fields the user just changed.
+        self.assertRegex(self.html, r"payload\.asr\s*=\s*\{")
+        self.assertIn("recognition_language", self.html)
+
     def test_manager_emits_duplicate_and_mic_health_diagnostics(self) -> None:
         self.assertIn("duplicate_partial_suppressed", self.manager_js)
         self.assertIn("duplicate_final_suppressed", self.manager_js)

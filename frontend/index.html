@@ -68,8 +68,8 @@
 
           <aside class="runtime-side">
             <div class="actions runtime-actions">
-              <button id="start-btn" class="sst-button" data-i18n="common.start">Start</button>
-              <button id="stop-btn" class="secondary sst-button-ghost" data-i18n="common.stop">Stop</button>
+              <button id="start-btn" type="button" class="sst-button" data-i18n="common.start">Start</button>
+              <button id="stop-btn" type="button" class="secondary sst-button-ghost" data-i18n="common.stop">Stop</button>
             </div>
           </aside>
         </div>
@@ -99,10 +99,6 @@
               <pre id="final-transcript" class="transcript-box"></pre>
             </article>
 
-          </div>
-
-          <div class="overview-right-column">
-            <div id="overview-recognition-anchor" class="overview-recognition-anchor"></div>
             <article class="mini-card overview-preview-card">
               <div class="section-heading">
                 <div>
@@ -112,6 +108,10 @@
               </div>
               <div id="subtitle-output-preview" class="translation-results"></div>
             </article>
+          </div>
+
+          <div class="overview-right-column">
+            <div id="overview-recognition-anchor" class="overview-recognition-anchor"></div>
           </div>
         </div>
       </section>
@@ -440,17 +440,6 @@
           </div>
         </div>
         <p id="subtitle-style-custom-status" class="muted" data-i18n="style.custom_status.default">Built-in presets are editable, and custom presets are saved locally in config/profiles.</p>
-        <div id="style-fonts-section" class="settings-surface settings-fonts-section">
-          <div class="surface-header">
-            <div>
-              <h3 data-i18n="style.fonts.title">Fonts</h3>
-              <p class="muted" data-i18n="style.fonts.note">Project-local fonts are the reliable custom-font path. System font listing is best-effort.</p>
-            </div>
-            <button id="font-refresh-btn" class="secondary" type="button" data-i18n="style.fonts.refresh">Refresh System Fonts</button>
-          </div>
-          <p class="muted"><span data-i18n="style.fonts.dir">Project-local fonts folder:</span> <span id="project-fonts-dir" class="mono">loading...</span></p>
-          <p id="font-source-status" class="muted" data-i18n="style.fonts.status.default">Fallback fonts are always available. Local system font access depends on the browser/runtime.</p>
-        </div>
 
         <div class="settings-surface">
           <div class="surface-header">
@@ -552,6 +541,10 @@
           </div>
           <div id="style-line-slot-tabs" class="slot-tab-list"></div>
           <p id="style-line-slot-description" class="muted" data-i18n="style.slots.description">Select a line slot to override the base style.</p>
+          <label class="stack-field slot-apply-preset-row">
+            <span data-i18n="style.slots.apply_preset">Apply preset to this slot</span>
+            <select id="style-line-slot-apply-preset"></select>
+          </label>
           <div id="style-line-slot-fields" class="style-grid">
             <label class="stack-field">
               <span data-i18n="style.field.font_family">Font family</span>
@@ -1264,6 +1257,18 @@
 
         <p class="muted settings-fonts-hint" data-i18n="settings.fonts.hint">Subtitle font family, size, weight, and per-line overrides are on the Style tab.</p>
 
+        <div id="style-fonts-section" class="settings-surface settings-fonts-section">
+          <div class="surface-header">
+            <div>
+              <h3 data-i18n="style.fonts.title">Fonts</h3>
+              <p class="muted" data-i18n="style.fonts.note">Project-local fonts are the reliable custom-font path. System font listing is best-effort.</p>
+            </div>
+            <button id="font-refresh-btn" class="secondary" type="button" data-i18n="style.fonts.refresh">Refresh System Fonts</button>
+          </div>
+          <p class="muted"><span data-i18n="style.fonts.dir">Project-local fonts folder:</span> <span id="project-fonts-dir" class="mono">loading...</span></p>
+          <p id="font-source-status" class="muted" data-i18n="style.fonts.status.default">Fallback fonts are always available. Local system font access depends on the browser/runtime.</p>
+        </div>
+
         <div id="settings-translation-provider-anchor" class="settings-translation-provider-anchor"></div>
         <div id="settings-profiles-anchor" class="settings-profiles-anchor"></div>
         <div id="settings-config-anchor" class="settings-config-anchor"></div>
@@ -1307,12 +1312,13 @@
     <footer class="app-footer">
       <span>Powered by Kiriuru</span>
     </footer>
-    <div class="project-version-tag" title="Project version">v0.4.1</div>
+    <div class="project-version-tag" title="Project version">v0.4.2</div>
 
     <script src="/static/js/core/redaction.js?v=20260505a"></script>
-    <script src="/static/js/subtitle-style.js?v=20260512c"></script>
-    <script src="/static/js/desktop.js?v=20260516h"></script>
-    <script src="/static/js/i18n.js?v=20260508a"></script>
-    <script type="module" src="/static/js/main.js?v=20260521p"></script>
+    <script src="/static/js/subtitle-style.js?v=20260525a"></script>
+    <script src="/static/js/desktop-ui-trace.js?v=20260524a"></script>
+    <script src="/static/js/desktop.js?v=20260524a"></script>
+    <script src="/static/js/i18n.js?v=20260525a"></script>
+    <script type="module" src="/static/js/main.js?v=20260525a"></script>
   </body>
 </html>

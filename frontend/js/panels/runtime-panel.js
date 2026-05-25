@@ -9,8 +9,9 @@ import {
   resolveRuntimeUiStatus,
   t,
 } from "../dashboard/helpers.js";
+import { traceRuntimeVisualState, traceUi } from "../dashboard/ui-trace.js";
 
-function renderProgress(runtime, elements, mode) {
+function renderProgress(runtime, elements, mode, snapshot) {
   const message = String(runtime?.status_message || "").trim();
   const card = elements.progressCard;
   if (!card) {
@@ -21,7 +22,22 @@ function renderProgress(runtime, elements, mode) {
     card.classList.remove("is-compact");
     return;
   }
-  const shouldShow = runtime?.status === "starting" || Boolean(message);
+  const metrics = runtime?.metrics || {};
+  const localAsrLoading =
+    !isBrowserRecognitionMode(mode) &&
+    Boolean(message) &&
+    /loading|initializing|warming|preparing|download/i.test(message);
+  const awaitingFirstRecognition =
+    runtime?.status === "listening" &&
+    Boolean(runtime?.is_running) &&
+    Number(metrics.partial_updates_emitted ?? 0) === 0 &&
+    Number(metrics.finals_emitted ?? 0) === 0;
+  const shouldShow =
+    runtime?.status === "starting" ||
+    Boolean(snapshot?.ui?.runtimeBusy) ||
+    localAsrLoading ||
+    awaitingFirstRecognition ||
+    (Boolean(message) && runtime?.status === "transcribing");
   card.hidden = !shouldShow;
   if (!shouldShow) {
     card.classList.remove("is-compact");
@@ -116,7 +132,12 @@ function renderRuntimePanel(snapshot, elements) {
     elements.startBtn.textContent = runtime.status === "starting" ? t("common.starting") : t("common.start");
   }
   if (elements.stopBtn) {
-    elements.stopBtn.disabled = !runtime.is_running || snapshot.ui.runtimeBusy;
+    const stoppableStatuses = new Set(["starting", "listening", "transcribing", "translating", "error"]);
+    const canStop =
+      Boolean(runtime.is_running) ||
+      stoppableStatuses.has(String(runtime.status || "").toLowerCase());
+    // Never block Stop on runtimeBusy — users must cancel a long model load.
+    elements.stopBtn.disabled = !canStop;
   }
   if (elements.globalSaveBtn) {
     elements.globalSaveBtn.disabled = snapshot.ui.saving;
@@ -148,7 +169,8 @@ function renderRuntimePanel(snapshot, elements) {
     elements.versionTag.textContent = `v${snapshot.versionInfo.current_version}`;
     elements.versionTag.title = snapshot.versionInfo.current_version;
   }
-  renderProgress(runtime, elements, mode);
+  renderProgress(runtime, elements, mode, snapshot);
+  traceRuntimeVisualState(snapshot, "runtime_panel_render");
 }
 
 const collectRuntimeElements = (root) =>
@@ -179,10 +201,14 @@ const collectRuntimeElements = (root) =>
 
 function bindRuntimeEvents(elements, { store, actions }) {
   async function onStart() {
-    const result = await actions.startRuntime();
     const mode = selectAsrMode(store.getState());
-    if (result?.runtime && mode !== "local") {
-      await actions.navigateBrowserAsrWindow();
+    const openWorker =
+      mode !== "local" && typeof actions.navigateBrowserAsrWindow === "function"
+        ? actions.navigateBrowserAsrWindow()
+        : null;
+    const result = await actions.startRuntime();
+    if (openWorker) {
+      await openWorker;
     }
   }
 
@@ -200,7 +226,20 @@ function bindRuntimeEvents(elements, { store, actions }) {
   };
 
   add(elements.startBtn, "click", onStart);
-  add(elements.stopBtn, "click", () => actions.stopRuntime());
+  if (elements.stopBtn) {
+    const onStop = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const snapshot = store.getState();
+      traceUi("dashboard", "runtime", "stop_button_dom_click", {
+        prior_status: snapshot.runtime?.status || "idle",
+        prior_is_running: snapshot.runtime?.is_running === true,
+      });
+      void actions.stopRuntime();
+    };
+    elements.stopBtn.addEventListener("click", onStop, true);
+    handlers.push(() => elements.stopBtn.removeEventListener("click", onStop, true));
+  }
   add(elements.globalSaveBtn, "click", onGlobalSave);
   add(elements.globalSaveBtnToolbar, "click", onGlobalSave);
   add(elements.overlayLink, "click", async (event) => {

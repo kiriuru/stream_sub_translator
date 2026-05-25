@@ -65,12 +65,24 @@ class SegmentQueue:
         self._items = retained
         return removed
 
+    @staticmethod
+    def _is_deferred_empty_delta_final(item: AsrWorkItem, items: deque[AsrWorkItem]) -> bool:
+        """Empty delta finals flush streaming state and must run after partial audio jobs."""
+        if item.kind != "final" or not item.audio_is_delta or item.audio:
+            return False
+        segment_id = str(item.segment_id or "").strip()
+        if not segment_id:
+            return False
+        return any(
+            existing.kind == "partial" and existing.segment_id == segment_id for existing in items
+        )
+
     def _pop_next_locked(self) -> AsrWorkItem | None:
         if not self._items:
             return None
         # Finals should not get stuck behind long partial backlogs.
         for item in self._items:
-            if item.kind == "final":
+            if item.kind == "final" and not self._is_deferred_empty_delta_final(item, self._items):
                 try:
                     self._items.remove(item)
                 except ValueError:
@@ -85,7 +97,12 @@ class SegmentQueue:
         with self._condition:
             if item.kind == "partial" and item.segment_id:
                 self._prune_redundant_partials_locked(item)
-            elif item.kind == "final" and item.segment_id:
+            elif (
+                item.kind == "final"
+                and item.segment_id
+                and not (item.audio_is_delta and not item.audio)
+            ):
+                # Empty delta finals only flush streaming state; keep queued partial audio jobs.
                 self._prune_redundant_partials_locked(item)
             if len(self._items) >= self._maxsize:
                 dropped_existing_partial = self._drop_oldest_partial_locked()
