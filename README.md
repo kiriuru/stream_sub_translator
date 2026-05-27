@@ -524,11 +524,12 @@ To update SST Desktop:
 
 ## Building From Source
 
-**From a public GitHub clone** (tracked sources only):
+**From a public GitHub clone** (includes `backend/`, `frontend/`, `overlay/`, `tests/`, **`desktop/`**, build scripts, and PyInstaller `*.spec` files):
 
-- Provision and run with `start.bat` (backend + dashboard; no desktop packaging in the repo).
+- Provision and run with `start.bat` (no exe required).
+- Build bootstrap exes on Windows (venv with `requirements.desktop.txt`):
 
-**Desktop exe packaging** (full local dev tree with `desktop/`, build scripts — not on GitHub):
+**Desktop exe packaging** (outputs are not committed — see `.gitignore`):
 
 - `build-desktop.bat`, `build-bootstrap-launcher.bat`, `build-bootstrap-launcher-web-only.bat`
 - `publish-desktop-releases.ps1`, `publish-desktop-releases-web-only.ps1`
@@ -580,7 +581,7 @@ GitHub-tracked suite:
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
 ```
 
-For `0.4.3`: run `python -m unittest discover -s tests` after changes; the public repo runs the tracked subset (includes `tests/test_browser_asr_observability.py`). Bootstrap build verification is local-only — see [docs/TECHNICAL_ARCHITECTURE.md](./docs/TECHNICAL_ARCHITECTURE.md) §20.
+For `0.4.3`: run `python -m unittest discover -s tests` after changes (includes desktop/bootstrap tests under `tests/`). Bootstrap **exe** build is local on Windows; sources and scripts are in the repo — see [docs/TECHNICAL_ARCHITECTURE.md](./docs/TECHNICAL_ARCHITECTURE.md) §20.
 
 ## Privacy and Runtime Scope
 

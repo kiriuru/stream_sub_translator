@@ -8,8 +8,7 @@ app-runtime/
 Stream Subtitle Translator.exe
 AGENTS.md
 
-# Desktop packaging — sources + build scripts published to GitHub since 0.4.2.
-# Runtime artifacts under desktop/ are still local-only.
+# Desktop packaging — sources + build scripts are in git; ignore runtime junk only.
 desktop/logs/
 desktop/__pycache__/
 
