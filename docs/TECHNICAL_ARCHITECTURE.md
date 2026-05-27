@@ -12,12 +12,13 @@
 | --- | --- | --- |
 | `backend/`, `frontend/`, `overlay/`, `tests/`, `docs/`, `fonts/` | да | да (внутри managed runtime после bootstrap) |
 | `desktop/` (launcher, bootstrap, `runtime_bootstrap`, payload helpers) | да | да (внутри managed runtime) |
-| `build-desktop.bat`, `build-bootstrap-launcher*.bat`, `publish-desktop-releases*.ps1`, `*.spec`, `requirements.desktop.txt` | да | — |
+| `Stream Subtitle Translator*.spec`, `requirements.desktop.txt` | да | — |
+| `build-desktop.bat`, `build-bootstrap-launcher*.bat`, `publish-desktop-releases*.ps1` | **нет** (локальные скрипты сборки) | да |
 | Desktop packaging tests (`test_launcher.py`, `test_desktop_*.py`, `test_bootstrap_*.py`, …) | да | — |
 | PyInstaller output (`build/`, `dist/`), `payload.zip`, bootstrap **exe** | **нет** (`.gitignore`) | да |
 | GitHub Releases: `Stream Subtitle Translator.exe`, `Only Web.exe` | бинарники релиза | собираются локально (`§14`, `§20`) |
 
-Клон репозитория содержит **полный исходный** desktop surface: можно разрабатывать через `start.bat` или собирать bootstrap exe по скриптам §14. В git **не** попадают только артефакты сборки и пользовательские `user-data/` / `logs/` / `.venv/`.
+Клон репозитория содержит исходники **`desktop/`** и PyInstaller `.spec` — можно разрабатывать через `start.bat`. Скрипты `build-*.bat` и `publish-desktop-releases*.ps1` **не публикуются** в git (остаются на машине сборки; см. `.gitignore`). В git **не** попадают артефакты PyInstaller (`build/`, `dist/`, exe) и пользовательские `user-data/` / `logs/` / `.venv/`.
 
 ## 1. Назначение и границы системы
 
@@ -161,13 +162,11 @@ stream-sub-translator/
 ├── fonts/                        # bundled project fonts
 ├── start.bat, start-remote-*.bat # default local / remote entrypoints
 ├── requirements*.txt           # backend / controller / desktop shell deps
-├── build-desktop.bat, build-bootstrap-launcher*.bat
-├── publish-desktop-releases.ps1, publish-desktop-releases-web-only.ps1
 ├── Stream Subtitle Translator*.spec   # PyInstaller specs (§14)
 └── user-data/, logs/              # локальные runtime-данные (не в git)
 
-# Артефакты сборки — в .gitignore, не коммитятся:
-# build/, dist/, .venv/, payload.zip под build/
+# Локально (не в git): build-desktop.bat, build-bootstrap-launcher*.bat,
+# publish-desktop-releases*.ps1, build/, dist/, .venv/, payload.zip
 ```
 
 ## 5. Backend layout (детально)
@@ -810,7 +809,7 @@ Frontend pages (FastAPI static):
 
 ## 14. Desktop runtime и release
 
-Исходники `desktop/`, PyInstaller `.spec` и `build-*.bat` / `publish-desktop-releases*.ps1` **входят в публичный репозиторий** (см. таблицу в начале документа). В git **не** коммитятся артефакты PyInstaller (`build/`, `dist/`, собранные bootstrap exe) и пользовательский runtime (`.venv/`, `user-data/`, `logs/`). Сборка и publish — на машине разработчика (§20); готовые exe также прикрепляются к [GitHub Releases](https://github.com/kiriuru/stream_sub_translator/releases).
+Исходники **`desktop/`** и PyInstaller `.spec` **в публичном репозитории**; `build-*.bat` и `publish-desktop-releases*.ps1` — **только локально** (не коммитятся). Артефакты PyInstaller (`build/`, `dist/`, собранные bootstrap exe) и пользовательский runtime (`.venv/`, `user-data/`, `logs/`) в git не попадают. Сборка и publish — на машине, где лежат локальные скрипты (§20); готовые exe прикрепляются к [GitHub Releases](https://github.com/kiriuru/stream_sub_translator/releases).
 
 ### 14.1 Файлы (исходники в репозитории)
 
@@ -833,8 +832,8 @@ Frontend pages (FastAPI static):
 - `desktop/bootstrap_launcher_web_only.py` — публичный `Stream Subtitle Translator Only Web.exe` (всегда передаёт `--web-speech-only` во внутренний runtime).
 - `desktop/runtime_bootstrap.py` — managed runtime + auto-detect install profile (CPU/NVIDIA).
 - `desktop/bootstrap_payload.py`, `desktop/build_bootstrap_payload.py` — построение payload bootstrap-лаунчера.
-- `Stream Subtitle Translator.spec`, `Stream Subtitle Translator Bootstrap.spec`, `Stream Subtitle Translator Bootstrap Web Only.spec` — PyInstaller spec.
-- `build-desktop.bat`, `build-bootstrap-launcher.bat`, `build-bootstrap-launcher-web-only.bat`, `publish-desktop-releases.ps1`, `publish-desktop-releases-web-only.ps1` — packaging flow.
+- `Stream Subtitle Translator.spec`, `Stream Subtitle Translator Bootstrap.spec`, `Stream Subtitle Translator Bootstrap Web Only.spec` — PyInstaller spec (в git).
+- `build-desktop.bat`, `build-bootstrap-launcher.bat`, `build-bootstrap-launcher-web-only.bat`, `publish-desktop-releases.ps1`, `publish-desktop-releases-web-only.ps1` — packaging flow (**локальные файлы**, не в git; типичный порядок — §20).
 
 ### 14.2 Профили desktop-лаунчера
 

@@ -8,9 +8,14 @@ app-runtime/
 Stream Subtitle Translator.exe
 AGENTS.md
 
-# Desktop packaging — sources + build scripts are in git; ignore runtime junk only.
+# Desktop packaging — `desktop/` sources are in git; build/publish scripts stay local-only.
 desktop/logs/
 desktop/__pycache__/
+build-desktop.bat
+build-bootstrap-launcher.bat
+build-bootstrap-launcher-web-only.bat
+publish-desktop-releases.ps1
+publish-desktop-releases-web-only.ps1
 
 # Remote-lite packaging is part of the frozen remote surface — kept local-only.
 build-remote-lite.ps1

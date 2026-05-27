@@ -70,7 +70,7 @@ Current extracted layout:
 - app logs: `logs/` (previous desktop launcher run → `desktop-launcher.old.log` on next start)
 - local models: `user-data/models/`
 
-Build desktop installer:
+Build desktop installer (local scripts — not in public git):
 
 - `build-bootstrap-launcher.bat` → `Stream Subtitle Translator.exe`
 - `build-bootstrap-launcher-web-only.bat` → `Stream Subtitle Translator Only Web.exe`
@@ -524,15 +524,12 @@ To update SST Desktop:
 
 ## Building From Source
 
-**From a public GitHub clone** (includes `backend/`, `frontend/`, `overlay/`, `tests/`, **`desktop/`**, build scripts, and PyInstaller `*.spec` files):
+**From a public GitHub clone** (includes `backend/`, `frontend/`, `overlay/`, `tests/`, **`desktop/`**, and PyInstaller `*.spec` files):
 
 - Provision and run with `start.bat` (no exe required).
-- Build bootstrap exes on Windows (venv with `requirements.desktop.txt`):
+- Build bootstrap exes on Windows (venv with `requirements.desktop.txt`) using **local** `build-*.bat` and `publish-desktop-releases*.ps1` scripts (not in git — see `.gitignore`). See [docs/TECHNICAL_ARCHITECTURE.md](./docs/TECHNICAL_ARCHITECTURE.md) §14 and §20.
 
-**Desktop exe packaging** (outputs are not committed — see `.gitignore`):
-
-- `build-desktop.bat`, `build-bootstrap-launcher.bat`, `build-bootstrap-launcher-web-only.bat`
-- `publish-desktop-releases.ps1`, `publish-desktop-releases-web-only.ps1`
+**Desktop exe packaging** (build/publish scripts and outputs are not committed):
 
 Build output:
 
