@@ -32,8 +32,7 @@ This document describes the actual project layout, API/WebSocket contract, domai
 - [19. Versioning and checking for updates](#19-versioning-and-checking-for-updates)
 - [20. Testing](#20-testing)
 - [21. Product invariants saved in 0.4.3](#21-product-invariants-saved-in-043)
-- [21.1 Release line 0.4.4](#211-release-line-044)
-- [22. Known Limitations & Technical Debt](#22-known-limitations-technical-debt)
+- [22. Known Limitations & Technical Debt](#22-known-limitations--technical-debt)
 - [23. Security & Privacy Model](#23-security-privacy-model)
 - [24. Extension Points (How To Extend Safely)](#24-extension-points-how-to-extend-safely)
 - [25. Performance Characteristics (Operational Expectations)](#25-performance-characteristics-operational-expectations)
@@ -354,7 +353,9 @@ The service layer is initialized centrally by `backend/core/app_bootstrap.py`.
 | `translation_dispatcher.py` | Transfer queue: per-provider concurrency/rate limit, slot-aware identity, drop stale jobs. |
 | `font_catalog.py` | `GET /project-fonts.css` - directory of local fonts. |
 | `exporter.py` | SRT/JSONL record. |
-| `profile_manager.py` | Profiles (`user-data/profiles/`), payload normalization, default profile. |
+| `profile_manager.py` | Profiles (`user-data/profiles/`), payload normalization, default profile; `_profile_path()` uses `Path.resolve()` + `is_relative_to(profiles_root)` against path traversal (`..`, `/`, `\` in name). |
+| `bind_policy.py` | `resolve_bind_host()` - explicit `--host` > `0.0.0.0` when `--allow-lan` > default `127.0.0.1`; used from `backend/run.py`. |
+| `outbound_url_policy.py` | SSRF policy for OpenAI helper routes (§8); translation provider outbound URLs unchanged. |
 | `dictionary_manager.py` | User dictionaries. |
 | `remote_mode.py`, `remote_session.py`, `remote_signaling.py`, `remote_diagnostics.py` | Remote controller/worker support (frozen surface). |
 
@@ -931,7 +932,7 @@ Sources **`desktop/`** and PyInstaller `.spec` **in public repository**; `build-
 
 ### 14.1 Files (sources in the repository)
 
-- `desktop/launcher.py` - thin facade (re-export); **PyInstaller entrypoint** must include `if __name__ == "__main__": main()` (otherwise `.sst-runtime.exe` imports the module and exits immediately with code 0); `DesktopLauncher` / `main()` live in `desktop/launcher_bootstrap.py` (bootstrap, launch options, config, `run`/`shutdown`); mixins: `desktop/launcher_window.py` (`LauncherWindowMixin` - resize, `load_url`, splash DOM), `desktop/launcher_backend.py` (`LauncherBackendMixin` - subprocess/in-process backend, metrics monitor), `desktop/browser_worker_launcher.py` (`BrowserWorkerLauncherMixin`); constants/HTTP helpers and splash i18n (`_SPLASH_I18N`, `_splash_profile_hint`, UTF-8 literals) - `desktop/launcher_context.py`; pywebview API - `desktop/launcher_api.py`. Unit tests patching symbols inside `DesktopLauncher` should target `desktop.launcher_bootstrap` / `desktop.launcher_backend`, not only the `desktop.launcher` re-export.
+- `desktop/launcher.py` - thin facade (re-export); **PyInstaller entrypoint** must include `if __name__ == "__main__": main()` (otherwise frozen `.sst-runtime.exe` exits immediately without splash; regression `test_launcher_module_layout.py`); `DesktopLauncher` / `main()` live in `desktop/launcher_bootstrap.py` (bootstrap, launch options, config, `run`/`shutdown`); mixins: `desktop/launcher_window.py` (`LauncherWindowMixin` - resize, `load_url`, splash DOM), `desktop/launcher_backend.py` (`LauncherBackendMixin` - subprocess/in-process backend, metrics monitor), `desktop/browser_worker_launcher.py` (`BrowserWorkerLauncherMixin`); constants/HTTP helpers and splash i18n (`_SPLASH_I18N`, `_splash_profile_hint`) - `desktop/launcher_context.py` (**UTF-8 literals**; do not move through lossy encoding when splitting modules); pywebview API - `desktop/launcher_api.py`. Unit tests patching symbols inside `DesktopLauncher` should target `desktop.launcher_bootstrap` / `desktop.launcher_backend`, not only the `desktop.launcher` re-export.
   - pywebview splash with startup profile selection (or `--web-speech-only` / `LaunchContext.web_speech_only` without profile panel);
   - `_apply_startup_mode_to_config()` - writes/removes `asr.desktop_profile_lock` and `asr.mode` in `user-data/config.json`;
   - bootstrap local runtime via `RuntimeBootstrapper`;
@@ -948,7 +949,8 @@ Sources **`desktop/`** and PyInstaller `.spec` **in public repository**; `build-
   - extract managed runtime into `app-runtime/`;
   - `--repair`/`--reset-runtime`/maintenance buttons.
 - `desktop/bootstrap_launcher_web_only.py` - public `Stream Subtitle Translator Only Web.exe` (always passes `--web-speech-only`).
-- `desktop/runtime_bootstrap.py` - managed runtime + auto-detect install profile (CPU/NVIDIA); `_ensure_pip_available()` delegates to `backend/bootstrap_pip_pins.ensure_pip_bootstrap()` (reuse pip ≥24.0 without PyPI; else `ensurepip`, then pin `pip==24.3.1` - **not** `pip install --upgrade pip` to latest).
+- `desktop/runtime_bootstrap.py` - managed runtime + auto-detect install profile (CPU/NVIDIA); `_ensure_pip_available()` delegates to `backend/bootstrap_pip_pins.ensure_pip_bootstrap()`.
+- `backend/bootstrap_pip_pins.py` - pip bootstrap policy: `BOOTSTRAP_PIP_MIN_VERSION=(24,0)`, `BOOTSTRAP_PIP_INSTALL_VERSION="24.3.1"`; reuse existing pip ≥24.0 **without PyPI**, else `ensurepip` then pin; CLI `python -m backend.bootstrap_pip_pins --ensure-pip`. **Not** `pip install --upgrade pip` to latest (avoids minute-scale PyPI timeouts). Also vendored `antlr4-python3-runtime==4.9.3` pin before NeMo (`vendor/python-wheels/`).
 - `desktop/bootstrap_payload.py`, `desktop/build_bootstrap_payload.py` - bootstrap payload build.
 - PyInstaller specs and local packaging scripts (§20).
 
@@ -965,10 +967,10 @@ The default behavior remains local-first; remote - explicit launch profile.
 
 ### 14.3 Startup scripts
 
-- `start.bat` — default local startup; step `[4/7]` calls `python -m backend.bootstrap_pip_pins --ensure-pip` (same pip policy as desktop bootstrap).
+- `start.bat` — default local startup; step `[4/7]` calls `python -m backend.bootstrap_pip_pins --ensure-pip` (§14.1).
 - `start-remote-controller.bat` — controller bootstrap (`SST_REMOTE_BOOTSTRAP=1`);
 - `start-remote-worker.bat` — worker bootstrap with LAN bind;
-- `backend/run.py` - common runtime launcher with `--remote-role` and `--allow-lan`;
+- `backend/run.py` - common runtime launcher with `--remote-role`, `--allow-lan`, and `resolve_bind_host()` (`backend/core/bind_policy.py`);
 - `backend/run_controller.py`, `backend/run_worker.py` - wrappers.
 
 ## 15. Storage and paths
@@ -1006,7 +1008,8 @@ project-root/
 `frontend/index.html` → `frontend/js/main.js`:
 
 - **Start dashboard (`0.4.0`):** `main.js` mounts panels immediately; `loadDashboardHelpContent()` - in the background after mount; `DesktopBridge.getContext()` and `actions.loadInitialData()` - in the background (do not block the shell on `pywebviewready`). Modular structure: `frontend/js/core/`, `frontend/js/shell/`, `frontend/js/dashboard/actions/`, `frontend/js/panels/`, `frontend/partials/dashboard-help-topics.html`.
-- **Compact layout (`0.4.0`):** `ui.layout` ∈ `{standard, compact}`; `frontend/css/compact-layout.css`, `frontend/js/layout/layout-controller.js` (icon rail, sticky chrome); desktop shell resizes the window when changing layout (standard ~1440×940, compact ~400×844).
+- **Compact layout (`0.4.0`):** `ui.layout` ∈ `{standard, compact}`; `frontend/css/compact-layout.css`, `frontend/js/layout/layout-controller.js` (icon rail, sticky chrome; nav button labels via `escapeHtml()` for localized/CJK text); desktop shell resizes the window when changing layout (standard ~1440×940, compact ~400×844).
+- **Bootstrap load errors:** `frontend/js/dashboard/actions/data-actions.js` → `loadInitialData()` fetches version/health/obs/settings/audio in parallel; partial failures aggregate into `store.ui.saveStatus` (`bootstrap.incomplete`, per-endpoint `bootstrap.error.*`); shell continues if settings loaded (warn tone), fatal if settings unavailable.
 - `frontend/js/i18n.js` - UI string catalogs (`en`, `ru`, `ja`, `ko`, `zh`); see **§16.8**;
 - `frontend/js/desktop.js` — bridge web ↔ pywebview: `getContext()` returns `immediateDesktopContext()` without API; `scheduleContextRefresh()` loads `get_launch_context` and sends `sst:desktop-context`;
 - `frontend/js/dashboard/desktop-profile-lock.js` — lock Local Parakeet (`syncRecognitionModeSelectLock` removes `<option value="local">`);
@@ -1017,7 +1020,7 @@ project-root/
 - `emit()` iterates a **snapshot** of listeners (`Array.from`) and isolates errors (`try/catch` per listener) so that failure of one panel does not stop the rest of the subscribers;
 - synchronous emit remains on the WS/API hot path - panels do not have to do the heavy lifting in the listener.
 - `dom.js` - `setInputValueIfChanged` / `setCheckedIfChanged`: idempotent render controls (does not overwrite focused text inputs, does not reset caret; checkboxes are updated only when the value changes).
-  - `api-client.js`, `ws-client.js`, `events.js`, `redaction.js`;
+  - `api-client.js`, `ws-client.js` (stale filter via `ws-stale-guard-logic.js`, exponential reconnect 1–10 s - same algorithm as overlay §16.4), `events.js`, `redaction.js`;
 - `panel-mount.js` - single lifecycle mount/render/dispose for panels.
 - `frontend/js/dashboard/`:
   - `actions.js`, `helpers.js`, `logging.js`, `constants.js`;
@@ -1519,7 +1522,7 @@ Coverage focuses on:
 - API/WebSocket (`test_api_and_websockets.py`, `test_ws_manager.py`, `test_runtime_status_contract.py`);
 - ASR provider and parameters (`test_asr_provider_contract.py`, `test_asr_provider_selection.py`, `test_parakeet_lifecycle.py`, `test_parakeet_model_installer_manifest.py`, `test_vad_engine.py`, `test_segment_queue.py`, `test_rnnoise_processor.py`, `test_source_text_replacement.py`).
 
-Launcher/bootstrap: `test_launcher.py`, `test_launcher_module_layout.py`, `test_bootstrap_*.py`, `test_desktop_profile_lock.py`, `test_desktop_launcher_*.py`, `test_run_bind_policy.py`, `test_bootstrap_pip_pins.py` - sources in `tests/`, import modules from tracked `desktop/`.
+Launcher/bootstrap: `test_launcher.py`, `test_launcher_module_layout.py`, `test_bootstrap_*.py`, `test_desktop_profile_lock.py`, `test_desktop_launcher_*.py`, `test_bind_policy.py`, `test_profile_manager_paths.py`, `test_bootstrap_pip_pins.py` - sources in `tests/`, import modules from tracked `desktop/`.
 
 ## 21. Product invariants saved in 0.4.3
 
@@ -1540,25 +1543,13 @@ Launcher/bootstrap: `test_launcher.py`, `test_launcher_module_layout.py`, `test_
 - desktop/bootstrap logs — rotation to `.old.log` at startup (§10, §14.1);
 - Parakeet integrity SHA-256 — module-level cache in `model_installer.py` (§17.x); idle-latency `/api/runtime/status` drops from 3–10 s to milliseconds on fresh installations;
 - bootstrap install/repair (`desktop/bootstrap_payload.py`) clears stale `app-runtime/` before extracting a new payload - drop-in replacement of exe gives a clean managed runtime;
-- vendored `antlr4-python3-runtime==4.9.3` wheel (`vendor/python-wheels/`) + `backend/bootstrap_pip_pins.py` - antlr4 pin before NeMo; since 0.4.4 also `ensure_pip_bootstrap()` / `--ensure-pip` (§21.1);
+- vendored `antlr4-python3-runtime==4.9.3` wheel + `backend/bootstrap_pip_pins.py` - antlr4 pin before NeMo; `ensure_pip_bootstrap()` / `--ensure-pip` (§14.1);
 - subtitle styles (backend): §13 — themed presets, bundled `fonts/`, font catalog merge on save;
 - subtitle renderer (frontend): §16.7 — incremental fragment effects, shape-signature fast path, slow-path completed-surface reuse, WeakRef carry-over, `disposeRenderContainer`;
 - compact layout: hide rules exclude `data-tab-panel="recognition|tuning|asr_advanced"` - Parakeet technical tips are visible in compact mode;
 - opt-in deep diagnostics: `backend/core/diagnostic_flags.py` + `SST_DEEP_DIAGNOSTICS` / `SST_TRACE_*` — JSONL-traces and `runtime_lifecycle.*` are disabled by default; backbone logs (`backend.log`, `runtime-events.log`, `session-latest.jsonl`) as in 0.4.1 baseline.
 
 The orchestrator decomposition (stages A–D) is completed; see §6 and `backend/core/runtime/`.
-
-### 21.1 Release line 0.4.4
-
-**Backlog (public CHANGELOG):** SSRF guard for OpenAI helper routes (`outbound_url_policy.py`); `store.js` desktop slice + `patchDesktopContext()`; overlay WS stale/reconnect via `ws-stale-guard-logic.js`; split `desktop/launcher.py` into modules; dashboard bootstrap-errors banner; `escapeHtml` in compact nav; bind/profile tests (`resolve_bind_host`, `ProfileManager.resolve`); **UI i18n** - ja/ko/zh locales, bundle+dynamic architecture, synchronous language switch (§16.8); **ASR Advanced** - field help `?`, two-column grid, recommended hints (§16.6.1); **idle dashboard preview** - placeholder until Start after Save (§16.7.6).
-
-**Bootstrap/runtime maintenance (TECH only, not product changelog):**
-
-- **PyInstaller entrypoint:** `desktop/launcher.py` must include `if __name__ == "__main__": main()` — otherwise frozen `.sst-runtime.exe` exits immediately without splash (`test_launcher_module_layout.py`).
-- **Splash i18n:** `_SPLASH_I18N["ru"]` and `_splash_profile_hint()` live in `desktop/launcher_context.py` as UTF-8 literals.
-- **Pip bootstrap policy:** `backend/bootstrap_pip_pins.py` — `BOOTSTRAP_PIP_MIN_VERSION=(24,0)`, `BOOTSTRAP_PIP_INSTALL_VERSION="24.3.1"`, `ensure_pip_bootstrap()` + CLI `--ensure-pip`. Used from `desktop/runtime_bootstrap.py` and `start.bat` step `[4/7]`. Not `pip install --upgrade pip` to latest.
-
-Invariants from §21 (0.4.3) and §12.3 / §16.7 **preserved**.
 
 ## 22. Known Limitations & Technical Debt
 
