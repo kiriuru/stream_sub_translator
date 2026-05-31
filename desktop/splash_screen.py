@@ -2,22 +2,33 @@ from __future__ import annotations
 
 import json
 
+from desktop.ui_locale import SUPPORTED_UI_LANGUAGES, normalize_ui_language
+
 
 def build_handoff_resume_html(title: str, *, locale: str) -> str:
     """Minimal splash after venv re-exec — profile was already chosen on the first process."""
-    normalized_locale = "ru" if str(locale or "").strip().lower() == "ru" else "en"
+    normalized_locale = normalize_ui_language(locale)
     title_escaped = json.dumps(title)
-    status = (
-        "Возобновление локального распознавания…"
-        if normalized_locale == "ru"
-        else "Resuming local speech recognition…"
-    )
-    subtitle = (
-        "Завершаем установку окружения и запуск backend в venv Python."
-        if normalized_locale == "ru"
-        else "Finishing environment setup and starting the backend in venv Python."
-    )
-    log_title = "Журнал запуска" if normalized_locale == "ru" else "Startup log"
+    if normalized_locale == "ru":
+        status = "Возобновление локального распознавания…"
+        subtitle = "Завершаем установку окружения и запуск backend в venv Python."
+        log_title = "Журнал запуска"
+    elif normalized_locale == "ja":
+        status = "ローカル音声認識を再開しています…"
+        subtitle = "環境セットアップを完了し、venv Python で backend を起動しています。"
+        log_title = "起動ログ"
+    elif normalized_locale == "ko":
+        status = "로컬 음성 인식을 재개하는 중…"
+        subtitle = "환경 설정을 마치고 venv Python에서 backend를 시작하는 중."
+        log_title = "시작 로그"
+    elif normalized_locale == "zh":
+        status = "正在恢复本地语音识别…"
+        subtitle = "正在完成环境设置并在 venv Python 中启动 backend。"
+        log_title = "启动日志"
+    else:
+        status = "Resuming local speech recognition…"
+        subtitle = "Finishing environment setup and starting the backend in venv Python."
+        log_title = "Startup log"
     return f"""<!doctype html>
 <html lang="{normalized_locale}">
   <head>
@@ -149,8 +160,9 @@ def build_splash_html(
     translations: dict[str, dict[str, str]],
     web_speech_only: bool = False,
 ) -> str:
-    normalized_locale = "ru" if str(locale or "").strip().lower() == "ru" else "en"
+    normalized_locale = normalize_ui_language(locale)
     i18n_json = json.dumps(translations, ensure_ascii=False)
+    supported_locales_json = json.dumps(sorted(SUPPORTED_UI_LANGUAGES))
     title_escaped = json.dumps(title)
     body_class = "web-speech-only" if web_speech_only else ""
     initial_status_key = (
@@ -403,6 +415,9 @@ def build_splash_html(
           <motion.div class="locale-switch" role="group" aria-labelledby="locale-switcher-label">
             <button type="button" class="locale-btn" data-locale="en">EN</button>
             <button type="button" class="locale-btn" data-locale="ru">RU</button>
+            <button type="button" class="locale-btn" data-locale="ja">JA</button>
+            <button type="button" class="locale-btn" data-locale="ko">KO</button>
+            <button type="button" class="locale-btn" data-locale="zh">ZH</button>
           </div>
         </motion.div>
       </motion.div>
@@ -460,7 +475,7 @@ def build_splash_html(
       }}
 
       function applySplashLocale(nextLocale) {{
-        splashLocale = nextLocale === "ru" ? "ru" : "en";
+        splashLocale = {supported_locales_json}.includes(nextLocale) ? nextLocale : "en";
         document.documentElement.lang = splashLocale;
         document.querySelectorAll("[data-i18n]").forEach((element) => {{
           const key = element.getAttribute("data-i18n");
@@ -538,7 +553,7 @@ def build_splash_html(
       }});
       document.querySelectorAll(".locale-btn").forEach((button) => {{
         button.addEventListener("click", () => {{
-          const next = button.dataset.locale === "ru" ? "ru" : "en";
+          const next = button.dataset.locale || "en";
           if (window.pywebview?.api?.set_ui_language) {{
             try {{
               const saved = window.pywebview.api.set_ui_language(next);

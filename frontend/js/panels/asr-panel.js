@@ -2,11 +2,12 @@ import { collectElements } from "../core/dom.js";
 import { createPanelMount } from "../core/panel-mount.js";
 import { createAsrConfigMutators, renderAsrPanel } from "./asr/asr-panel-render.js";
 import {
-  getCurrentLocale,
   getRecognitionModeLabel,
   isBrowserRecognitionMode,
   isDesktopBrowserQuickStartLocked,
+  t,
 } from "../dashboard/helpers.js";
+import { mountFieldHelpButtons } from "../ui/field-help-popover.js";
 
 const collectAsrElements = (root) =>
   collectElements(root, {
@@ -71,8 +72,9 @@ function bindAsrEvents(elements, { store, actions, logger }, rerender) {
 
   add(elements.modeSelect, "change", () => {
     const nextMode = elements.modeSelect.value || "local";
-    if (isDesktopBrowserQuickStartLocked(store.getState().config) && nextMode === "local") {
-      const fallback = store.getState().config?.asr?.mode || "browser_google";
+    const snapshot = store.getState();
+    if (isDesktopBrowserQuickStartLocked(snapshot.config, snapshot.desktop) && nextMode === "local") {
+      const fallback = snapshot.config?.asr?.mode || "browser_google";
       elements.modeSelect.value = isBrowserRecognitionMode(fallback) ? fallback : "browser_google";
       logger("[asr] local Parakeet is locked for this desktop quick start profile");
       return;
@@ -93,11 +95,7 @@ function bindAsrEvents(elements, { store, actions, logger }, rerender) {
     actions.mutateConfig((draft) => {
       draft.asr.browser.worker_launch_browser = value;
     });
-    logger(
-      getCurrentLocale() === "ru"
-        ? "[asr] окно Web Speech: при следующем открытии worker будет использован выбранный браузер (desktop)"
-        : "[asr] Web Speech worker will use the selected browser on next open (desktop)"
-    );
+    logger(t("asr.worker_browser_next_open_log"));
   });
   add(elements.audioInputSelect, "change", () => {
     actions.setSelectedAudioInput(elements.audioInputSelect.value || null);
@@ -183,17 +181,17 @@ function bindAsrEvents(elements, { store, actions, logger }, rerender) {
 
   const onLocaleChanged = () => rerender(store.getState());
   window.addEventListener("sst:locale-changed", onLocaleChanged);
-  const onDesktopContext = (event) => {
-    const detail = event?.detail;
-    if (detail && window.AppState) {
-      window.AppState.desktop = { ...window.AppState.desktop, ...detail };
-    }
+  const onDesktopContext = () => {
     rerender(store.getState());
   };
   window.addEventListener("sst:desktop-context", onDesktopContext);
 
+  const asrAdvancedPanel = document.querySelector('[data-tab-panel="asr_advanced"]');
+  const unmountFieldHelp = mountFieldHelpButtons(asrAdvancedPanel, t);
+
   return () => {
     handlers.forEach((off) => off());
+    unmountFieldHelp();
     window.removeEventListener("sst:locale-changed", onLocaleChanged);
     window.removeEventListener("sst:desktop-context", onDesktopContext);
   };

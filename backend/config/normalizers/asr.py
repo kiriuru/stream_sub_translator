@@ -96,8 +96,6 @@ def normalize_asr_config(payload: Any, *, defaults: dict[str, Any]) -> dict[str,
     profile_lock = str(asr.get("desktop_profile_lock", "") or "").strip().lower()
     if profile_lock != "browser_speech":
         profile_lock = ""
-    elif asr_mode not in {"browser_google", "browser_google_experimental"}:
-        asr_mode = "browser_google"
 
     normalized: dict[str, Any] = {
         "mode": asr_mode,

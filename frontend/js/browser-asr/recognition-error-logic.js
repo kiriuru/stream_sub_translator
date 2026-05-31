@@ -62,9 +62,9 @@
     return { kind: "unknown", errorKind, errorMessage };
   };
 
-  root.networkErrorHintMessages = function networkErrorHintMessages(locale) {
-    if (locale === "ru") {
-      return "Web Speech: ошибка network — облако распознавания недоступно (VPN, фаервол, DNS, прокси, блокировщики). Проверьте интернет; смена микрофона в браузере это обычно не лечит.";
+  root.networkErrorHintMessages = function networkErrorHintMessages(_locale) {
+    if (typeof window !== "undefined" && window.I18n?.t) {
+      return window.I18n.t("browser_asr.network.hint");
     }
     return "Web Speech network error: recognition service unreachable (VPN, firewall, DNS, proxy, blockers). Check connectivity; changing the browser microphone usually does not fix this.";
   };

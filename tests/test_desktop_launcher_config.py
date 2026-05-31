@@ -42,7 +42,7 @@ def _build_launcher_with_fake_paths(tmp_root: Path) -> DesktopLauncher:
     fake_data.mkdir(parents=True, exist_ok=True)
     fake_logs.mkdir(parents=True, exist_ok=True)
     fake_runtime.mkdir(parents=True, exist_ok=True)
-    with patch("desktop.launcher.detect_runtime_paths", return_value=fake_paths):
+    with patch("desktop.launcher_bootstrap.detect_runtime_paths", return_value=fake_paths):
         launcher = DesktopLauncher(debug_webview=False, web_speech_only=False)
     return launcher
 

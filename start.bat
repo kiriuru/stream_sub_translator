@@ -70,9 +70,9 @@ if "%LIGHT_CONTROLLER_MODE%"=="1" (
 )
 
 echo [4/7] Installing/updating requirements...
-call ".venv\Scripts\python.exe" -m pip install --upgrade pip
+call ".venv\Scripts\python.exe" -m backend.bootstrap_pip_pins --ensure-pip --python ".venv\Scripts\python.exe"
 if errorlevel 1 (
-  echo Failed to upgrade pip in .venv
+  echo Failed to bootstrap pip in .venv
   pause
   exit /b 1
 )

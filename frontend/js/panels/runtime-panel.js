@@ -41,18 +41,32 @@ function renderProgress(runtime, elements, mode, snapshot) {
   card.hidden = !shouldShow;
   if (!shouldShow) {
     card.classList.remove("is-compact");
-    elements.progressPercent.textContent = "0%";
-    elements.progressText.textContent = t("runtime.progress.preparing");
-    elements.progressFill.style.width = "0%";
+    if (elements.progressPercent) {
+      elements.progressPercent.textContent = "0%";
+    }
+    if (elements.progressText) {
+      elements.progressText.textContent = t("runtime.progress.preparing");
+    }
+    if (elements.progressFill) {
+      elements.progressFill.style.width = "0%";
+    }
     return;
   }
   card.classList.remove("is-compact");
   const percentMatch = message.match(/(\d+(?:\.\d+)?)%/);
   const percent = percentMatch ? Number.parseFloat(percentMatch[1]) : runtime?.status === "starting" ? 12 : 0;
-  elements.progressTitle.textContent = t("runtime.progress.title");
-  elements.progressPercent.textContent = Number.isFinite(percent) ? `${Math.round(percent)}%` : "...";
-  elements.progressText.textContent = message || t("runtime.progress.preparing");
-  elements.progressFill.style.width = `${Math.max(0, Math.min(100, percent || 0))}%`;
+  if (elements.progressTitle) {
+    elements.progressTitle.textContent = t("runtime.progress.title");
+  }
+  if (elements.progressPercent) {
+    elements.progressPercent.textContent = Number.isFinite(percent) ? `${Math.round(percent)}%` : "...";
+  }
+  if (elements.progressText) {
+    elements.progressText.textContent = message || t("runtime.progress.preparing");
+  }
+  if (elements.progressFill) {
+    elements.progressFill.style.width = `${Math.max(0, Math.min(100, percent || 0))}%`;
+  }
 }
 
 function renderRuntimePanel(snapshot, elements) {
@@ -102,13 +116,7 @@ function renderRuntimePanel(snapshot, elements) {
   }
   if (elements.asrPartialsBadge) {
     elements.asrPartialsBadge.textContent = t("runtime.badge.partials", {
-      value: diagnostics.partials_supported
-        ? getCurrentLocale() === "ru"
-          ? "вкл"
-          : "on"
-        : getCurrentLocale() === "ru"
-          ? "выкл"
-          : "off",
+      value: diagnostics.partials_supported ? t("common.on") : t("common.off"),
     });
     applyStatusDataset(elements.asrPartialsBadge, diagnostics.partials_supported ? "ready" : "disabled");
   }
@@ -141,11 +149,7 @@ function renderRuntimePanel(snapshot, elements) {
   }
   if (elements.globalSaveBtn) {
     elements.globalSaveBtn.disabled = snapshot.ui.saving;
-    elements.globalSaveBtn.textContent = snapshot.ui.saving
-      ? getCurrentLocale() === "ru"
-        ? "Сохранение..."
-        : "Saving..."
-      : t("common.save");
+    elements.globalSaveBtn.textContent = snapshot.ui.saving ? t("runtime.save_button.saving") : t("common.save");
   }
   if (elements.saveStatusText) {
     elements.saveStatusText.textContent = snapshot.ui.saveStatus || t("save.status.default");

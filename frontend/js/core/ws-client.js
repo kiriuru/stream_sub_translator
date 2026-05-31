@@ -1,13 +1,8 @@
-function normalizeEventType(type) {
-  const current = String(type || "").trim().toLowerCase();
-  if (current === "runtime_update") {
-    return "runtime_status";
-  }
-  if (current === "subtitle_payload_update") {
-    return "overlay_update";
-  }
-  return current;
-}
+import {
+  createWsStaleGuardState,
+  isWsEventStale,
+  normalizeWsEventType,
+} from "./ws-stale-guard-logic.js";
 
 export class WsClient {
   constructor(options = {}) {
@@ -19,8 +14,7 @@ export class WsClient {
     this.reconnectTimer = null;
     this.backoffMs = 1000;
     this.maxBackoffMs = 10000;
-    this.sequenceByType = new Map();
-    this.timestampByType = new Map();
+    this._staleGuard = createWsStaleGuardState();
     this.manualClose = false;
     this.connectionId = 0;
   }
@@ -105,53 +99,13 @@ export class WsClient {
   }
 
   isStale(eventType, payload) {
-    if (!payload || typeof payload !== "object") {
-      return false;
-    }
-    if (payload.stale === true) {
-      return true;
-    }
-    const currentSequence = Number(payload.event_sequence ?? payload.sequence);
-    const lastSequence = this.sequenceByType.get(eventType);
-    const updatedAt = Number(payload.created_at_ms) || Date.parse(String(payload.updated_at || payload.timestamp || ""));
-    const lastTimestamp = this.timestampByType.get(eventType);
-    const hasSequence = Number.isFinite(currentSequence);
-    const hasLastSequence = Number.isFinite(lastSequence);
-    const hasTimestamp = Number.isFinite(updatedAt);
-    const hasLastTimestamp = Number.isFinite(lastTimestamp);
-
-    // Timestamp is authoritative for staleness because backend sequence counters
-    // intentionally reset to 0 on every runtime stop/start. Without trusting the
-    // timestamp first, dashboards drop every event after a Stop/Start until the
-    // new session sequences catch up to the previous high-water mark.
-    if (hasTimestamp && hasLastTimestamp) {
-      if (updatedAt < lastTimestamp) {
-        return true;
-      }
-      if (updatedAt > lastTimestamp) {
-        if (hasSequence) {
-          this.sequenceByType.set(eventType, currentSequence);
-        }
-        this.timestampByType.set(eventType, updatedAt);
-        return false;
-      }
-    }
-    if (hasSequence && hasLastSequence && currentSequence < lastSequence) {
-      return true;
-    }
-    if (hasSequence) {
-      this.sequenceByType.set(eventType, currentSequence);
-    }
-    if (hasTimestamp) {
-      this.timestampByType.set(eventType, updatedAt);
-    }
-    return false;
+    return isWsEventStale(this._staleGuard, eventType, payload);
   }
 
   handleMessage(rawData) {
     try {
       const message = JSON.parse(rawData);
-      const type = normalizeEventType(message?.type);
+      const type = normalizeWsEventType(message?.type);
       if (type === "hello") {
         return;
       }

@@ -15,21 +15,23 @@ def _is_locked(config: dict | None, desktop: dict | None = None) -> bool:
     """Python mirror of frontend/js/dashboard/desktop-profile-lock.js."""
     payload = config if isinstance(config, dict) else {}
     asr = payload.get("asr", {}) if isinstance(payload.get("asr"), dict) else {}
-    lock = str(asr.get("desktop_profile_lock", "") or "").lower()
-    if lock == "browser_speech":
-        return True
     ctx = desktop if isinstance(desktop, dict) else {}
     if not ctx.get("desktop_mode"):
         return False
+    lock = str(asr.get("desktop_profile_lock", "") or "").lower()
+    if lock == "browser_speech":
+        return True
     if ctx.get("web_speech_only"):
         return True
     return str(ctx.get("startup_mode", "") or "").lower() == "browser_google"
 
 
 class DesktopProfileLockLogicTests(unittest.TestCase):
-    def test_lock_from_config_field(self) -> None:
+    def test_lock_from_config_field_requires_desktop_mode(self) -> None:
+        locked_config = {"asr": {"desktop_profile_lock": "browser_speech", "mode": "browser_google"}}
+        self.assertFalse(_is_locked(locked_config))
         self.assertTrue(
-            _is_locked({"asr": {"desktop_profile_lock": "browser_speech", "mode": "browser_google"}})
+            _is_locked(locked_config, {"desktop_mode": True, "startup_mode": "browser_google"})
         )
 
     def test_lock_from_desktop_startup_mode(self) -> None:
@@ -65,13 +67,13 @@ class DesktopProfileLockBackendTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def test_normalize_asr_forces_browser_mode_when_lock_present(self) -> None:
+    def test_normalize_asr_preserves_local_mode_when_lock_present(self) -> None:
         defaults = self.manager.default_config()["asr"]
         normalized = normalize_asr_config(
             {"mode": "local", "desktop_profile_lock": "browser_speech"},
             defaults=defaults,
         )
-        self.assertEqual(normalized["mode"], "browser_google")
+        self.assertEqual(normalized["mode"], "local")
         self.assertEqual(normalized["desktop_profile_lock"], "browser_speech")
 
     def test_config_manager_roundtrip_preserves_lock(self) -> None:
@@ -88,7 +90,7 @@ class DesktopProfileLockBackendTests(unittest.TestCase):
         self.assertEqual(loaded["asr"]["desktop_profile_lock"], "browser_speech")
         self.assertEqual(loaded["asr"]["mode"], "browser_google")
 
-    def test_save_with_local_mode_and_lock_upgrades_to_browser(self) -> None:
+    def test_save_with_local_mode_and_lock_keeps_local_for_non_desktop_config(self) -> None:
         saved = self.manager.save(
             {
                 "asr": {
@@ -97,7 +99,7 @@ class DesktopProfileLockBackendTests(unittest.TestCase):
                 }
             }
         )
-        self.assertEqual(saved["asr"]["mode"], "browser_google")
+        self.assertEqual(saved["asr"]["mode"], "local")
         self.assertEqual(saved["asr"]["desktop_profile_lock"], "browser_speech")
 
 
@@ -125,7 +127,7 @@ class DesktopProfileLockLauncherTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def _launcher(self, *, web_speech_only: bool = False) -> launcher_module.DesktopLauncher:
-        with mock.patch("desktop.launcher.detect_runtime_paths", return_value=self.paths):
+        with mock.patch("desktop.launcher_bootstrap.detect_runtime_paths", return_value=self.paths):
             return launcher_module.DesktopLauncher(web_speech_only=web_speech_only)
 
     def test_apply_startup_mode_sets_lock_for_browser_quick_start(self) -> None:
@@ -188,11 +190,13 @@ class DesktopProfileLockFrontendContractTests(unittest.TestCase):
         self.assertNotIn("option.hidden = quickStartLocked", combined_asr)
 
     def test_actions_apply_lock_on_set_config(self) -> None:
-        self.assertIn("applyDesktopProfileLockToAsrConfig(normalizeConfigShape(payload))", self.actions_js)
+        self.assertIn("applyDesktopProfileLockToAsrConfig(", self.actions_js)
+        self.assertIn("snapshot.desktop", self.actions_js)
 
-    def test_normalizer_forces_browser_mode_when_lock_present(self) -> None:
+    def test_normalizer_preserves_lock_without_forcing_browser_mode(self) -> None:
         self.assertIn('normalized.asr.desktop_profile_lock = "browser_speech"', self.normalizer_js)
-        self.assertIn("normalized.asr.mode = \"browser_google\"", self.normalizer_js)
+        lock_block = self.normalizer_js.split('normalized.asr.desktop_profile_lock = "browser_speech"', 1)[1]
+        self.assertNotIn('normalized.asr.mode = "browser_google"', lock_block[:400])
 
     def test_dashboard_mounts_before_blocking_on_desktop_bridge(self) -> None:
         mount_pos = self.main_js.find("mountAsrPanel(")

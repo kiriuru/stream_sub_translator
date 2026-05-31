@@ -1,6 +1,6 @@
-# SST Desktop 0.4.3 - Technical Architecture Document
+# SST Desktop 0.4.4 - Technical Architecture Document
 
-Relevant for a code line where `backend/versioning.py` contains `PROJECT_VERSION = "0.4.3"`.
+Relevant for a code line where `backend/versioning.py` contains `PROJECT_VERSION = "0.4.4"`.
 
 This document describes the actual project layout, API/WebSocket contract, domain schemas (Pydantic), configuration pipeline and data flow through runtime. The document is a **canonical full technical reference** (maximum detail on modules, invariants and hot path). README - short review of the product; CHANGELOG - release history; delta installer notes - `docs/DESKTOP_RELEASE_CHANGELOG_*.md`; public release binaries are published in [GitHub Releases](https://github.com/kiriuru/stream_sub_translator/releases).
 
@@ -26,11 +26,13 @@ This document describes the actual project layout, API/WebSocket contract, domai
 - [14. Desktop runtime and release](#14-desktop-runtime-and-release)
 - [15. Storage and paths](#15-storage-and-paths)
 - [16. Frontend (flat, no build-step)](#16-frontend-flat-no-build-step)
+- [16.8 UI localization (i18n)](#168-ui-localization-i18n)
 - [17. Local ASR: Official EU Parakeet Low Latency (NeMo)](#17-local-asr-official-eu-parakeet-low-latency-nemo)
 - [18. Remote mode (frozen surface)](#18-remote-mode-frozen-surface)
 - [19. Versioning and checking for updates](#19-versioning-and-checking-for-updates)
 - [20. Testing](#20-testing)
 - [21. Product invariants saved in 0.4.3](#21-product-invariants-saved-in-043)
+- [21.1 Release line 0.4.4](#211-release-line-044)
 - [22. Known Limitations & Technical Debt](#22-known-limitations-technical-debt)
 - [23. Security & Privacy Model](#23-security-privacy-model)
 - [24. Extension Points (How To Extend Safely)](#24-extension-points-how-to-extend-safely)
@@ -260,6 +262,7 @@ stream-sub-translator/
 │   ├── css/
 │   └── js/
 │       ├── main.js, i18n.js, desktop.js
+│       ├── i18n/                   # locales-bundle.js, dynamic-locales.js, locales/*.js (§16.8)
 │       ├── browser-asr-session-manager.js
 │       ├── browser-web-speech-recognition-policy.js
 │       ├── browser-asr-audio-track-session-manager.js
@@ -562,7 +565,7 @@ ConfigSchema
 ├── config_version: int (=7)
 ├── profile: str
 ├── ui: UiConfig
-│   ├── language: "" | "en" | "ru"
+│   ├── language: "" | "en" | "ru" | "ja" | "ko" | "zh"
 │   ├── theme: "dark" | "light"
 │   └── palette: { accent, accent_secondary, accent_tertiary }
 ├── source_lang: str
@@ -661,6 +664,7 @@ Flow:
 Rules for merging pairs:
 
 - first custom `pairs`, then built-in from JSON (if `include_builtin`), without duplicate keys (`casefold` if `case_insensitive`);
+- built-in JSON (`backend/data/source_text_builtin_pairs.json`) covers **English, Russian, Japanese, Korean, and Chinese** (Latin + CJK); the UI “built-in list” checkbox reflects all five languages;
 - apply `source` length in descending order so that long phrases have priority;
 - replacement via compiled regex; the replacement string is passed through `lambda` to `re.sub` so that `\` characters in the text are not interpreted as backreference.
 
@@ -690,6 +694,8 @@ Regressions: `tests/test_source_text_replacement.py`, `tests/test_config_migrati
 | GET | `/api/openai/recommended-models` | Curated shortlist (without accessing the OpenAI API from the browser) |
 | POST | `/api/openai/models` | Listing of models using the provided key |
 | POST | `/api/openai/usable-models` | Easy model testing via `/responses`, cache 10 minutes |
+
+**OpenAI helper SSRF policy** (`backend/core/outbound_url_policy.py`): when bind is LAN-exposed (`app_host` is `0.0.0.0`/`::` or `SST_ALLOW_LAN=1`), `base_url` must not target loopback, RFC1918, link-local, or reserved/metadata hostnames. Default localhost bind still allows private URLs (local OpenAI-compatible servers). Translation provider outbound URLs are unchanged.
 
 Remote endpoints:
 
@@ -925,27 +931,26 @@ Sources **`desktop/`** and PyInstaller `.spec` **in public repository**; `build-
 
 ### 14.1 Files (sources in the repository)
 
-- `desktop/launcher.py` - main desktop entrypoint:
-- pywebview splash with startup profile selection (or `--web-speech-only` / `LaunchContext.web_speech_only` without profile panel);
-- `_apply_startup_mode_to_config()` - writes/removes `asr.desktop_profile_lock` and `asr.mode` to `user-data/config.json`;
-- bootstrap local runtime via `RuntimeBootstrapper`;
-- **opening the dashboard (`0.4.0`):** `_wait_for_http_ok` to `GET /`, then `_navigate_to_dashboard()` - `window.location.replace` (fallback `load_url`); do not call `window.get_current_url()` from `loaded`-handler; after the transition `_splash_shell_active = false` and splash `evaluate_js` is disabled; verify `/api/health` in the background writes only to `desktop-launcher.log`; `_schedule_dashboard_resize()` by timer;
-- `webview.start(..., storage_path=runtime_root/pywebview-profile)` - Edge/WebView2 profile outside the portable exe folder;
-- launching a Chrome worker window (classic and experimental profiles in different `user-data-dir`);
-- HIGH_PRIORITY + opt-out from EcoQoS;
+- `desktop/launcher.py` - thin facade (re-export); **PyInstaller entrypoint** must include `if __name__ == "__main__": main()` (otherwise `.sst-runtime.exe` imports the module and exits immediately with code 0); `DesktopLauncher` / `main()` live in `desktop/launcher_bootstrap.py` (bootstrap, launch options, config, `run`/`shutdown`); mixins: `desktop/launcher_window.py` (`LauncherWindowMixin` - resize, `load_url`, splash DOM), `desktop/launcher_backend.py` (`LauncherBackendMixin` - subprocess/in-process backend, metrics monitor), `desktop/browser_worker_launcher.py` (`BrowserWorkerLauncherMixin`); constants/HTTP helpers and splash i18n (`_SPLASH_I18N`, `_splash_profile_hint`, UTF-8 literals) - `desktop/launcher_context.py`; pywebview API - `desktop/launcher_api.py`. Unit tests patching symbols inside `DesktopLauncher` should target `desktop.launcher_bootstrap` / `desktop.launcher_backend`, not only the `desktop.launcher` re-export.
+  - pywebview splash with startup profile selection (or `--web-speech-only` / `LaunchContext.web_speech_only` without profile panel);
+  - `_apply_startup_mode_to_config()` - writes/removes `asr.desktop_profile_lock` and `asr.mode` in `user-data/config.json`;
+  - bootstrap local runtime via `RuntimeBootstrapper`;
+  - **opening the dashboard (`0.4.0`):** `_wait_for_http_ok` on `GET /`, then `_navigate_to_dashboard()` - `window.location.replace` (fallback `load_url`); do not call `window.get_current_url()` from `loaded`-handler; after transition `_splash_shell_active = false` and splash `evaluate_js` is disabled; verify `/api/health` in background writes only to `desktop-launcher.log`; `_schedule_dashboard_resize()` by timer;
+  - `webview.start(..., storage_path=runtime_root/pywebview-profile)` - Edge/WebView2 profile outside portable exe folder;
+  - launching Chrome worker windows (classic and experimental profiles in different `user-data-dir`);
+  - HIGH_PRIORITY + opt-out from EcoQoS;
   - migration `user-data/logs/` → `logs/`;
-- **log rotation:** `_rotate_log_file` at startup transfers the previous `desktop-launcher.log` to `desktop-launcher.old.log`, then creates an empty live file. Dashboard/overlay/browser worker events are written to `session-latest.jsonl` through `/api/logs/client-event`; obsolete empty `dashboard-live-events.log` / `overlay-events.log` / `browser-recognition.log` are deleted at startup if the size is 0.
+  - **log rotation:** `_rotate_log_file` at startup moves previous `desktop-launcher.log` to `desktop-launcher.old.log`, then creates empty live file. Dashboard/overlay/browser worker events go to `session-latest.jsonl` via `/api/logs/client-event`; obsolete empty legacy per-page logs deleted at startup when size is 0.
 - `desktop/bootstrap_launcher.py` - public `Stream Subtitle Translator.exe`:
-- silent check of GitHub Releases (HTTP timeout **2.5 s**; if the API is unavailable - silent continue, without blocking the UI longer than this threshold);
-- rotation `bootstrap-launcher.log` → `bootstrap-launcher.old.log` when bootstrap UI starts;
-- Continue/Download dialog if there is an update;
-- extract managed runtime in `app-runtime/`;
-- `--repair`/`--reset-runtime`/maintenance buttons.
-- `desktop/bootstrap_launcher_web_only.py` - public `Stream Subtitle Translator Only Web.exe` (always passes `--web-speech-only` to internal runtime).
-- `desktop/runtime_bootstrap.py` — managed runtime + auto-detect install profile (CPU/NVIDIA).
-- `desktop/bootstrap_payload.py`, `desktop/build_bootstrap_payload.py` - building a payload bootstrap launcher.
-- `Stream Subtitle Translator.spec`, `Stream Subtitle Translator Bootstrap.spec`, `Stream Subtitle Translator Bootstrap Web Only.spec` - PyInstaller spec (in git).
-- `build-desktop.bat`, `build-bootstrap-launcher.bat`, `build-bootstrap-launcher-web-only.bat`, `publish-desktop-releases.ps1`, `publish-desktop-releases-web-only.ps1` - packaging flow (**local files**, not in git; typical order - §20).
+  - silent GitHub Releases check (HTTP timeout **2.5 s**);
+  - rotation `bootstrap-launcher.log` → `bootstrap-launcher.old.log`;
+  - Continue/Download dialog when update available;
+  - extract managed runtime into `app-runtime/`;
+  - `--repair`/`--reset-runtime`/maintenance buttons.
+- `desktop/bootstrap_launcher_web_only.py` - public `Stream Subtitle Translator Only Web.exe` (always passes `--web-speech-only`).
+- `desktop/runtime_bootstrap.py` - managed runtime + auto-detect install profile (CPU/NVIDIA); `_ensure_pip_available()` delegates to `backend/bootstrap_pip_pins.ensure_pip_bootstrap()` (reuse pip ≥24.0 without PyPI; else `ensurepip`, then pin `pip==24.3.1` - **not** `pip install --upgrade pip` to latest).
+- `desktop/bootstrap_payload.py`, `desktop/build_bootstrap_payload.py` - bootstrap payload build.
+- PyInstaller specs and local packaging scripts (§20).
 
 ### 14.2 Desktop launcher profiles
 
@@ -960,7 +965,7 @@ The default behavior remains local-first; remote - explicit launch profile.
 
 ### 14.3 Startup scripts
 
-- `start.bat` — default local startup;
+- `start.bat` — default local startup; step `[4/7]` calls `python -m backend.bootstrap_pip_pins --ensure-pip` (same pip policy as desktop bootstrap).
 - `start-remote-controller.bat` — controller bootstrap (`SST_REMOTE_BOOTSTRAP=1`);
 - `start-remote-worker.bat` — worker bootstrap with LAN bind;
 - `backend/run.py` - common runtime launcher with `--remote-role` and `--allow-lan`;
@@ -1002,12 +1007,13 @@ project-root/
 
 - **Start dashboard (`0.4.0`):** `main.js` mounts panels immediately; `loadDashboardHelpContent()` - in the background after mount; `DesktopBridge.getContext()` and `actions.loadInitialData()` - in the background (do not block the shell on `pywebviewready`). Modular structure: `frontend/js/core/`, `frontend/js/shell/`, `frontend/js/dashboard/actions/`, `frontend/js/panels/`, `frontend/partials/dashboard-help-topics.html`.
 - **Compact layout (`0.4.0`):** `ui.layout` ∈ `{standard, compact}`; `frontend/css/compact-layout.css`, `frontend/js/layout/layout-controller.js` (icon rail, sticky chrome); desktop shell resizes the window when changing layout (standard ~1440×940, compact ~400×844).
-- `frontend/js/i18n.js` - dictionaries (ru/en);
+- `frontend/js/i18n.js` - UI string catalogs (`en`, `ru`, `ja`, `ko`, `zh`); see **§16.8**;
 - `frontend/js/desktop.js` — bridge web ↔ pywebview: `getContext()` returns `immediateDesktopContext()` without API; `scheduleContextRefresh()` loads `get_launch_context` and sends `sst:desktop-context`;
 - `frontend/js/dashboard/desktop-profile-lock.js` — lock Local Parakeet (`syncRecognitionModeSelectLock` removes `<option value="local">`);
 - `frontend/js/state.js`, `frontend/js/app.js`, `frontend/js/api.js`, `frontend/js/ws.js` - legacy compat (gradually being replaced by `core/`);
 - `frontend/js/core/`:
 - `store.js` - central snapshot state + `subscribe` / `subscribeSelector`:
+- slice **`desktop`** + **`patchDesktopContext()`** - single desktop context source (mode, paths, launch metadata); `main.js` listens to `sst:desktop-context` once;
 - `emit()` iterates a **snapshot** of listeners (`Array.from`) and isolates errors (`try/catch` per listener) so that failure of one panel does not stop the rest of the subscribers;
 - synchronous emit remains on the WS/API hot path - panels do not have to do the heavy lifting in the listener.
 - `dom.js` - `setInputValueIfChanged` / `setCheckedIfChanged`: idempotent render controls (does not overwrite focused text inputs, does not reset caret; checkboxes are updated only when the value changes).
@@ -1041,7 +1047,7 @@ project-root/
 
 Files: `overlay/overlay.html`, `overlay/overlay.css`, `overlay/overlay.js`.
 
-- connects to `/ws/events`, filters stale by `event_sequence` / `created_at_ms` (agreed with dashboard);
+- connects to `/ws/events`; stale filter via `frontend/js/core/ws-stale-guard-logic.js` (same algorithm as `WsClient`: timestamp-first when sequence resets after stop/start); reconnect with exponential backoff 1–10s; on disconnect the last frame stays visible until reconnect;
 - at `overlay_update` / lifecycle payload fills `overlayState.completedItems`, `activePartialText`, `lifecycleState`, `hasOverlayLifecycle`;
 - `buildPresentationPayload()` **must** forward `lifecycle_state` to the object for `SubtitleStyleRenderer` - otherwise the live partial in `visible_items[source]`, while the completed translation is visible, is not marked `transient` and the source is redrawn every frame (see §16.7);
 - `render()` causes `SubtitleStyleRenderer.composeRenderRows` + `render(linesContainer, payload, { overlay: true })`;
@@ -1059,9 +1065,9 @@ Full DOM rendering scheme, fast/slow path and carry-over state: **§16.7**.
 - Style tab - theme (light/dark) and accent gradient palette;
 - appearance effects: `none`, `fade`, `subtle_pop`, `slide_up`, `zoom_in`, `blur_in`, `glow`;
 - after `Tools & Data` - `Help` tab with local topic-tabs;
-- in tuning - “feeling” sliders, precise timings / ASR gates - in `Tools & Data`;
+- in tuning - “feeling” sliders; precise timings / ASR gates - **ASR Advanced** tab (`data-tab-panel="asr_advanced"`);
 - `experimental` status for experimental translation providers remains `experimental` (not `degraded`);
-- changing the UI language is saved immediately.
+- UI language switches synchronously (no lazy locale fetch); header/settings change triggers `saveCurrentConfig()` → `ui.language` in `user-data/config.json` plus `localStorage` (`sst.ui.language`); see **§16.8**.
 
 ### 16.6 Stability of UI settings (post-0.4.1 hardening)
 
@@ -1072,11 +1078,33 @@ Panels use `createPanelMount`: render for every `store` update, but **DOM writes
 | `diagnostics-panel` | `configJson` textarea - `setInputValueIfChanged` (does not overwrite JSON while the user is editing with a focused field). |
 | `asr-panel` / `asr-panel-render` | realtime/TTL/RNNoise/checkbox — idempotent setters; Tuning sliders + preset row. |
 | `obs-captions-panel`, `overlay-panel`, `translation-panel` | idempotent inputs/checkboxes; translation panel imports `getLineMap` from shared (fixed `ReferenceError`). |
-| `overlay-panel` preview | `SubtitleStyleRenderer.render` to `#subtitle-output-preview`; **caller** clears `.subtitle-stage-note` and calls `disposeRenderContainer` when unmount/empty preview (§16.7). |
+| `overlay-panel` preview | `SubtitleStyleRenderer.render` to `#subtitle-output-preview`; **caller** clears `.subtitle-stage-note` and calls `disposeRenderContainer` when unmount/empty preview (§16.7). Idle placeholder (`buildPreviewPayload` in `action-helpers.js`) stays until **Start**, even when WS replay sends an empty `overlay_update` after Save. |
 | `profiles-panel`, `remote-panel` | idempotent text fields; remote - without a second subscription to config (mount is already subscribed). |
 | `asr-panel`, `obs-captions-panel` events | checkbox/select - **one** `change` handler (do not duplicate `input`+`change` on the same elements). |
 
-The config is still: `actions.saveConfig()` / load API / runtime snapshot; `Start` can use in-memory snapshot without disk save (§16.1 / README).
+Config is still: `actions.saveConfig()` / load API / runtime snapshot; `Start` can use in-memory snapshot without disk save (§16.1 / README).
+
+### 16.6.1 ASR advanced — contextual field help (dashboard)
+
+Tab **`asr_advanced`** (`frontend/index.html`, mounted via `frontend/js/panels/asr-panel.js`) holds fine-grained Parakeet realtime tuning (VAD, partial emit, segmentation, energy gate, Parakeet-only extras: latency preset, streaming decode, partial emit mode).
+
+| Piece | File / keys | Behavior |
+| --- | --- | --- |
+| `?` button | `.field-help-btn[data-field-help-key]` | At the end of every field label (including checkbox rows). `aria-expanded`, `data-i18n-aria-label="tools.advanced.field_help.aria"`. |
+| Popover | `frontend/js/ui/field-help-popover.js` | `position: fixed`; popover **bottom edge** aligns with the button bottom (grows upward). Text from `I18n.t(helpKey)`. Styles use `--bg-panel-elevated`, `--text-primary`, `--line-subtle`, `--shadow-panel` (light/dark via `data-ui-theme` and `ui-theme.js`). Toggle on same button; close on outside click, `Escape`, `resize`, panel unmount. |
+| Recommended value | `tools.advanced.<field>.note` | Single right-side line (`.inline-field-note`): “Recommended: …” / localized prefix + value. Replaces old `def:… safer:…` hints. |
+| Field help body | `tools.advanced.<field>.help` | Short plain-language explanation of what the setting does and how it affects ASR. |
+| Latency preset copy | `tools.advanced.latency_preset.help/note` | Uses **localized** labels from `tuning.preset.ultra_low_latency` / `balanced` / `quality`, not English slugs in ja/ko/zh UI. |
+
+| Layout | `.asr-advanced-fields-grid` | Two-column CSS grid in standard layout; **compact** forces a single column (`compact-layout.css`). Parakeet-only `#rt-tools-local-parakeet-extras` uses `display: contents`, hidden via `.is-hidden`. |
+
+**Mount:** `mountFieldHelpButtons(document.querySelector('[data-tab-panel="asr_advanced"]'), t)` in `bindAsrEvents`; cleaned up on panel unmount.
+
+**i18n:** all `tools.advanced.*.help` and `.note` keys in `frontend/js/i18n/locales/{en,ru,ja,ko,zh}.js`; bundle in `locales-bundle.js`. Batch CJK patch: `tools/patch_asr_advanced_i18n_cjk.py`. `tools.notes.*` keys removed (duplicated field help).
+
+**Regressions:** `tests/test_field_help_popover.py` (buttons, en/ru keys, ja/ko/zh localization, localized preset names in help, note format, two-column layout without side notes).
+
+**Compact layout:** `.inline-field-note` stays visible in compact mode (`tests/test_frontend_architecture.py`).
 
 ### 16.7 Subtitle renderer (`frontend/js/subtitle-style.js`)
 
@@ -1190,6 +1218,7 @@ Called from `overlay-panel.js` when unmount preview and empty/placeholder previe
 
 `renderPreview()` to `overlay-panel.js`:
 
+- payload from `buildPreviewPayload()` — live `overlay.payload` only when runtime is **running** or the payload has renderable text; otherwise a style placeholder (“Source subtitle preview” / translation labels) for tuning before Start and after Save without ASR running;
 - after `SubtitleStyleRenderer.render` deletes **all** `.subtitle-stage-note` siblings (fast path does not clean container - notes would be multiplied every partial frame);
 - in the absence of payload / empty result - `disposeRenderContainer` before placeholder HTML;
 - `mountOverlayPanel` destroy hook — `disposeRenderContainer(preview)`.
@@ -1211,6 +1240,133 @@ Rings: `window.__sstDashboardSubtitleTrace`, `window.__sstOverlaySubtitleTrace` 
 `tests/test_subtitle_style_effects.py` - static contracts on fast path gate, single innerHTML, fragment classes, lifecycle plumbing, WeakRef/dispose/orphan release, overlay-panel note cleanup.
 
 Translation/router invariants - **not** replace `tests/test_subtitle_router.py`, `tests/test_subtitle_lifecycle_relevance.py`, `tests/test_translation_dispatcher.py`.
+
+### 16.8 UI localization (i18n)
+
+Flat vanilla i18n without Node/Webpack: dashboard, Browser Speech worker, overlay, and most hints go through `window.I18n.t(key)` or `data-i18n*` attributes. **No** separate HTTP locale loader - catalogs are preloaded by synchronous `<script>` tags before `i18n.js` so language changes are instant.
+
+#### 16.8.1 Architecture evolution (0.4.4)
+
+| Stage | State |
+| --- | --- |
+| Before 0.4.4 | Two embedded `ru`/`en` dictionaries inside `frontend/js/i18n.js`; `=== "ru"` branches in panels. |
+| 0.4.4 | **Split locale files** + **dynamic layer** for late keys + **single bundle** for reliable load in embedded WebView2. |
+| Invariant | One key → one catalog string; panels do not keep parallel translation copies. |
+
+Why the change: (1) add **ja / ko / zh** without growing `i18n.js`; (2) avoid 404 races from per-locale script tags in desktop shell; (3) cover ~115 late keys (overlay hints, ASR empty states, `tools.advanced.*.note`, `{placeholder}` format strings) without hand-duplicating every locale for en/ru.
+
+#### 16.8.2 Files and data layers
+
+```
+frontend/js/i18n/
+├── locales/
+│   ├── en.js, ru.js, ja.js, ko.js, zh.js   # window.__SST_I18N_LOCALES.<code>
+├── locales-bundle.js                        # all locales (generated)
+├── dynamic-locales.js                       # window.__SST_I18N_DYNAMIC { en, ru }
+└── (runtime) ../i18n.js                     # merge + I18n API
+
+desktop/ui_locale.py                         # normalize_ui_language() for splash/config
+tools/build_i18n_locale_bundle.py            # locales/*.js → locales-bundle.js
+tools/build_dynamic_i18n.py                  # refresh en/ru in dynamic-locales.js
+tools/generate_i18n_locales.py               # ja/ko/zh from full en catalog
+tools/fix_untranslated_cjk.py                # retry keys where locale text still equals en
+```
+
+| Layer | Content | Locales |
+| --- | --- | --- |
+| `locales/<code>.js` | Main dictionary (~697 keys on 0.4.4) | en, ru, ja, ko, zh |
+| `dynamic-locales.js` | Keys added after static `en.js` stabilized | **only** `en` and `ru` in file; ja/ko/zh get the same keys via `generate_i18n_locales.py` into their `.js` |
+| `i18n.js` | Merge + `t()` / `apply()` / `setLocale()` | all five |
+
+**Catalog merge order** (`getCatalog(locale)` in `i18n.js`):
+
+```
+english = locales.en  ∪  dynamic.en
+catalog[locale] = english  ∪  locales[locale]  ∪  dynamic[locale]   # locale ≠ en
+catalog[en]     = english  ∪  dynamic.en                          # en
+```
+
+If a key exists only in `dynamic.en` and is **missing** from `ja.js`, Japanese UI falls back to the **English** string from the base english catalog. After CJK generation, run `fix_untranslated_cjk.py` for keys where machine translation returned unchanged English.
+
+#### 16.8.3 Page script order
+
+Required order (`frontend/index.html`, `overlay/overlay.html`, `frontend/google_asr*.html`):
+
+1. `locales-bundle.js` - fills `window.__SST_I18N_LOCALES`
+2. `dynamic-locales.js` - fills `window.__SST_I18N_DYNAMIC`
+3. `i18n.js` - builds catalogs, initial `apply(document)`
+4. ES modules (`main.js`, etc.) - import `t` / `getCurrentLocale` from `dashboard/helpers.js`
+
+Query `?v=…` on i18n scripts is **mandatory** on release: embedded WebView2 caches `/static/js/…` aggressively. Without a bump, users keep an old bundle (typical symptom: English overlay hints while ja is selected).
+
+`main.js` loads as a module and does **not** block i18n parse; panels mount after `I18n` is ready.
+
+#### 16.8.4 Public API and persistence
+
+`window.I18n`:
+
+| Method / field | Purpose |
+| --- | --- |
+| `t(key, variables?)` | Translate; `{name}` placeholders; missing key → humanized last segment |
+| `setLocale(code)` | Sync switch + `apply(document)` + `CustomEvent("sst:locale-changed")` |
+| `getLocale()` | Current code |
+| `apply(root?)` | Walk `data-i18n`, `data-i18n-placeholder`, `data-i18n-title`, `data-i18n-aria-label` |
+| `supported` | `["en","ru","ja","ko","zh"]` |
+
+**Startup language sources:**
+
+1. `localStorage["sst.ui.language"]` when ∈ `supported`;
+2. else `navigator.language` → `resolveBrowserLocale()`.
+
+**Config:** `ui.language` in `ConfigSchema` / `backend/data/config.schema.json` - enum `"" | en | ru | ja | ko | zh`. Normalizers: `frontend/js/normalizers/config-normalizer.js` and `desktop/ui_locale.py`.
+
+**UI change path:** `frontend/js/shell/locale-switcher.js` → `actions.setUiLanguage()` (`config-actions.js`): `I18n.setLocale`, `draft.ui.language`, `saveCurrentConfig()` (no extra Save click for language).
+
+#### 16.8.5 `sst:locale-changed` and panels
+
+`I18n.setLocale` dispatches native `window` event `sst:locale-changed` (not dashboard `events` `locale:changed`).
+
+Panels must **re-render** dynamic DOM not covered by `data-i18n`:
+
+| Module | Behavior |
+| --- | --- |
+| `translation-panel.js` | Reset `lastResultsRenderKey`, re-run `renderTranslationResults`; `resultsKey` includes `getCurrentLocale()` |
+| `asr-panel.js`, `style-editor-panel.js`, `layout-controller.js` | Refresh labels / compact nav |
+| `field-help-popover.js` (ASR advanced) | Refresh open popover text on `sst:locale-changed` |
+| `main.js` | Sync `#ui-language-select` and `store.ui.uiLanguage` |
+| `shell/help-topics.js` | Reload help topics |
+| `overlay/overlay.js`, `google_asr*.html` | Re-`I18n.apply` |
+
+ES modules: `import { t, getCurrentLocale } from "../dashboard/helpers.js"`. **0.4.4 regression:** missing `t` import in `style-editor-panel-render.js` caused `ReferenceError` on mount.
+
+#### 16.8.6 What stays English
+
+| Area | Policy |
+| --- | --- |
+| Runtime/deep diagnostics in UI | `helpers.js` - English-only tokens for deep diagnostic labels (all UI locales) |
+| Technical tokens in hints | Latin enum/slug values in `<select>` (`word_growth`, `char_delta`) are OK; user-facing preset help/note uses `tuning.preset.*` labels |
+| Desktop splash before dashboard | `desktop/launcher_context.py` - `_SPLASH_I18N` still **en/ru** on pywebview splash; CJK splash out of 0.4.4 scope |
+| Backend logs / JSONL traces | No i18n |
+
+#### 16.8.7 Maintainer workflow
+
+1. New UI string → key in `frontend/js/i18n/locales/en.js` (and `ru.js`).
+2. Late overlay/ASR/tools keys → also `tools/build_dynamic_i18n.py` / `dynamic-locales.js` for en+ru.
+3. `python tools/generate_i18n_locales.py` - refresh `ja.js`, `ko.js`, `zh.js` from full en catalog (en.js ∪ dynamic.en).
+4. `python tools/fix_untranslated_cjk.py` - retry keys still identical to English.
+5. `python tools/build_i18n_locale_bundle.py` - rebuild `locales-bundle.js`.
+6. Bump `?v=` on i18n scripts in all HTML entrypoints.
+7. Tests: `tests/test_i18n_locales.py`, `tests/test_i18n_dynamic_locales.py`, `tests/test_ui_locale.py`, `tests/test_field_help_popover.py` (ASR advanced note/help).
+
+Coverage check: `python tools/_list_cjk_same_as_en.py`.
+
+#### 16.8.8 Regressions (0.4.4)
+
+- `test_index_eager_loads_locale_bundle_before_i18n` - script order in `index.html`;
+- `test_cjk_locale_files_cover_full_english_catalog` - ja/ko/zh key parity with merged en;
+- `test_cjk_user_facing_strings_use_target_script` - sample strings use target script;
+- `test_dynamic_keys_merged_at_build_time` - merge contract;
+- `test_ui_locale.py` - Python normalization (`ja-JP` → `ja`, etc.).
 
 ## 17. Local ASR: Official EU Parakeet Low Latency (NeMo)
 
@@ -1309,7 +1465,7 @@ Operator procedure:
 
 ## 19. Versioning and checking for updates
 
-- `backend/versioning.py::PROJECT_VERSION = "0.4.3"` — single source of truth.
+- `backend/versioning.py::PROJECT_VERSION = "0.4.4"` — single source of truth.
 - `GET /api/version` gives the current version + `sync` metadata (`provider`, `enabled`, `github_repo`, `release_channel`, `latest_known_version`, `last_checked_utc`, `update_available`, `check_supported`, `message`).
 - `POST /api/updates/check` (via `UpdateService`):
 - checks `updates.enabled` and the presence of `github_repo`;
@@ -1345,8 +1501,9 @@ Extended desktop **release** verification (requires Windows + PyInstaller + opti
 - desktop-only: `test_launcher.py`, `test_bootstrap_launcher.py`, `test_bootstrap_payload.py`, `test_runtime_bootstrap.py`, `test_desktop_profile_lock.py`, `test_desktop_launcher_startup.py`, `test_desktop_launcher_config.py`, `test_desktop_bootstrap_payload.py`
 - local Parakeet / orchestrator refactor: `test_local_asr_pipeline.py`, `test_local_asr_realtime_settings.py`, `test_local_asr_recognition_processing.py`, `test_local_asr_hallucination_filter.py`, `test_local_parakeet_transcript_segment.py`, `test_partial_emit_and_vad_tuning.py`, `test_realtime_transcript_emit_policy.py`, `test_segment_audio_enqueue.py`, `test_parakeet_realtime_streaming.py`, `test_browser_worker_transcript_builders.py`, `test_asr_diagnostics_assembler_browser_status.py`, `test_overlay_broadcaster.py`, `test_parakeet_latency_preset_ui_alignment.py`
 - WebSocket / browser transport: `test_ws_manager.py` (send mutex, `send_direct`, queue backpressure), `test_browser_asr_service.py` (send lock, `send_hello`, idempotent disconnect, stale session)
-- frontend contracts: `test_frontend_modular_vanilla.py` (store emit isolation, dom helpers, panel bindings, config normalizer `continuous_results`, translation panel imports)
-- packaged release folders (after publish): `dist/desktop-releases/v0.4.3/` (`01-bootstrap-onefile/`, `01-bootstrap-web-only-onefile/`, `02-managed-app-onefolder/`, `03-installers-both/`)
+- frontend contracts: `test_frontend_modular_vanilla.py`, `test_ws_stale_guard.py`, `test_frontend_architecture.py`
+- UI i18n (0.4.4): `test_i18n_locales.py`, `test_i18n_dynamic_locales.py`, `test_ui_locale.py` - bundle load order, CJK catalog parity, merge contract, `normalize_ui_language`
+- packaged release folders (after publish): `dist/desktop-releases/v0.4.4/` (`01-bootstrap-onefile/`, `01-bootstrap-web-only-onefile/`, `02-managed-app-onefolder/`, `03-installers-both/`)
 
 Coverage focuses on:
 
@@ -1357,12 +1514,12 @@ Coverage focuses on:
 - subtitle lifecycle and router (`test_subtitle_router.py`, `test_subtitle_lifecycle_relevance.py`, `test_subtitle_style_effects.py`);
 - translation queues and providers (`test_translation_dispatcher.py`, `test_translation_engine.py`, `test_openai_compatible_provider.py`, `test_config_translation_providers.py`, `test_cache_manager.py`);
 - update-service (`test_update_service_check_now.py`, `test_update_service_persistence.py`);
-- OpenAI helper endpoints (`test_openai_models_route.py`);
+- OpenAI helper endpoints (`test_openai_models_route.py`, `test_outbound_url_policy.py`);
 - logging and sessions (`test_logging_and_session.py`, `test_structured_log_compact.py`, `test_structured_runtime_logger.py`, `test_session_logger.py`);
 - API/WebSocket (`test_api_and_websockets.py`, `test_ws_manager.py`, `test_runtime_status_contract.py`);
 - ASR provider and parameters (`test_asr_provider_contract.py`, `test_asr_provider_selection.py`, `test_parakeet_lifecycle.py`, `test_parakeet_model_installer_manifest.py`, `test_vad_engine.py`, `test_segment_queue.py`, `test_rnnoise_processor.py`, `test_source_text_replacement.py`).
 
-Launcher/bootstrap: `test_launcher.py`, `test_bootstrap_*.py`, `test_desktop_profile_lock.py`, `test_desktop_launcher_*.py` - sources in `tests/`, import modules from tracked `desktop/`.
+Launcher/bootstrap: `test_launcher.py`, `test_launcher_module_layout.py`, `test_bootstrap_*.py`, `test_desktop_profile_lock.py`, `test_desktop_launcher_*.py`, `test_run_bind_policy.py`, `test_bootstrap_pip_pins.py` - sources in `tests/`, import modules from tracked `desktop/`.
 
 ## 21. Product invariants saved in 0.4.3
 
@@ -1383,13 +1540,25 @@ Launcher/bootstrap: `test_launcher.py`, `test_bootstrap_*.py`, `test_desktop_pro
 - desktop/bootstrap logs — rotation to `.old.log` at startup (§10, §14.1);
 - Parakeet integrity SHA-256 — module-level cache in `model_installer.py` (§17.x); idle-latency `/api/runtime/status` drops from 3–10 s to milliseconds on fresh installations;
 - bootstrap install/repair (`desktop/bootstrap_payload.py`) clears stale `app-runtime/` before extracting a new payload - drop-in replacement of exe gives a clean managed runtime;
-- vendored `antlr4-python3-runtime==4.9.3` wheel (`vendor/python-wheels/`) + `backend/bootstrap_pip_pins.py` - eliminates flaky NeMo sdist assembly on Windows;
+- vendored `antlr4-python3-runtime==4.9.3` wheel (`vendor/python-wheels/`) + `backend/bootstrap_pip_pins.py` - antlr4 pin before NeMo; since 0.4.4 also `ensure_pip_bootstrap()` / `--ensure-pip` (§21.1);
 - subtitle styles (backend): §13 — themed presets, bundled `fonts/`, font catalog merge on save;
 - subtitle renderer (frontend): §16.7 — incremental fragment effects, shape-signature fast path, slow-path completed-surface reuse, WeakRef carry-over, `disposeRenderContainer`;
 - compact layout: hide rules exclude `data-tab-panel="recognition|tuning|asr_advanced"` - Parakeet technical tips are visible in compact mode;
 - opt-in deep diagnostics: `backend/core/diagnostic_flags.py` + `SST_DEEP_DIAGNOSTICS` / `SST_TRACE_*` — JSONL-traces and `runtime_lifecycle.*` are disabled by default; backbone logs (`backend.log`, `runtime-events.log`, `session-latest.jsonl`) as in 0.4.1 baseline.
 
 The orchestrator decomposition (stages A–D) is completed; see §6 and `backend/core/runtime/`.
+
+### 21.1 Release line 0.4.4
+
+**Backlog (public CHANGELOG):** SSRF guard for OpenAI helper routes (`outbound_url_policy.py`); `store.js` desktop slice + `patchDesktopContext()`; overlay WS stale/reconnect via `ws-stale-guard-logic.js`; split `desktop/launcher.py` into modules; dashboard bootstrap-errors banner; `escapeHtml` in compact nav; bind/profile tests (`resolve_bind_host`, `ProfileManager.resolve`); **UI i18n** - ja/ko/zh locales, bundle+dynamic architecture, synchronous language switch (§16.8); **ASR Advanced** - field help `?`, two-column grid, recommended hints (§16.6.1); **idle dashboard preview** - placeholder until Start after Save (§16.7.6).
+
+**Bootstrap/runtime maintenance (TECH only, not product changelog):**
+
+- **PyInstaller entrypoint:** `desktop/launcher.py` must include `if __name__ == "__main__": main()` — otherwise frozen `.sst-runtime.exe` exits immediately without splash (`test_launcher_module_layout.py`).
+- **Splash i18n:** `_SPLASH_I18N["ru"]` and `_splash_profile_hint()` live in `desktop/launcher_context.py` as UTF-8 literals.
+- **Pip bootstrap policy:** `backend/bootstrap_pip_pins.py` — `BOOTSTRAP_PIP_MIN_VERSION=(24,0)`, `BOOTSTRAP_PIP_INSTALL_VERSION="24.3.1"`, `ensure_pip_bootstrap()` + CLI `--ensure-pip`. Used from `desktop/runtime_bootstrap.py` and `start.bat` step `[4/7]`. Not `pip install --upgrade pip` to latest.
+
+Invariants from §21 (0.4.3) and §12.3 / §16.7 **preserved**.
 
 ## 22. Known Limitations & Technical Debt
 

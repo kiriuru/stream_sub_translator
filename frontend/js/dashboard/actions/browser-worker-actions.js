@@ -1,7 +1,4 @@
-import {
-  getCurrentLocale,
-  isExperimentalBrowserRecognitionMode,
-} from "../helpers.js";
+import { getCurrentLocale, isExperimentalBrowserRecognitionMode, t } from "../helpers.js";
 import { buildPreviewPayload, getResolvedSubtitleStyle } from "../action-helpers.js";
 
 export function createBrowserWorkerActions({ store, logger }) {
@@ -27,11 +24,7 @@ export function createBrowserWorkerActions({ store, logger }) {
     if (window.DesktopBridge?.isDesktopMode?.()) {
       const opened = await window.DesktopBridge.openExternalUrl(browserAsrUrl);
       if (!opened) {
-        logger(
-          getCurrentLocale() === "ru"
-            ? "[browser-asr] не удалось открыть внешний browser worker"
-            : "[browser-asr] failed to open external browser worker"
-        );
+        logger(t("worker.open_external_failed_log"));
       }
       return;
     }

@@ -1,5 +1,5 @@
 import { fillSelectOptions } from "../../core/dom.js";
-import { getCurrentLocale, t } from "../../dashboard/helpers.js";
+import { t } from "../../dashboard/helpers.js";
 
 export const FALLBACK_LINE_SLOTS = [
   "source",
@@ -14,31 +14,31 @@ export function getUiThemePresets() {
   return [
     {
       id: "custom",
-      label: () => (getCurrentLocale() === "ru" ? "Пользовательский" : "Custom"),
+      label: () => t("style.ui_theme.custom"),
       theme: null,
       palette: null,
     },
     {
       id: "ocean",
-      label: () => (getCurrentLocale() === "ru" ? "Океан" : "Ocean"),
+      label: () => t("style.ui_theme.ocean"),
       theme: "dark",
       palette: { accent: "#6cc7ff", accent_secondary: "#4fe3ff", accent_tertiary: "#7ce3ad" },
     },
     {
       id: "neon",
-      label: () => (getCurrentLocale() === "ru" ? "Неон" : "Neon"),
+      label: () => t("style.ui_theme.neon"),
       theme: "dark",
       palette: { accent: "#8bddff", accent_secondary: "#ff6ce6", accent_tertiary: "#ffd166" },
     },
     {
       id: "sunset",
-      label: () => (getCurrentLocale() === "ru" ? "Закат" : "Sunset"),
+      label: () => t("style.ui_theme.sunset"),
       theme: "dark",
       palette: { accent: "#ffb703", accent_secondary: "#ff5c7a", accent_tertiary: "#6cc7ff" },
     },
     {
       id: "paper",
-      label: () => (getCurrentLocale() === "ru" ? "Бумага" : "Paper"),
+      label: () => t("style.ui_theme.paper"),
       theme: "light",
       palette: { accent: "#2563eb", accent_secondary: "#db2777", accent_tertiary: "#059669" },
     },

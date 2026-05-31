@@ -177,7 +177,7 @@ class LocalConfigManager:
         defaults = self.default_config()["ui"]
         current = payload if isinstance(payload, dict) else {}
         language = str(current.get("language", defaults["language"]) or "").strip().lower()
-        if language not in {"en", "ru"}:
+        if language not in {"en", "ru", "ja", "ko", "zh"}:
             language = ""
         theme = str(current.get("theme", defaults.get("theme", "dark")) or "dark").strip().lower()
         if theme not in {"dark", "light"}:

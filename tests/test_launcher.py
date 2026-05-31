@@ -9,6 +9,20 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+
+
+class _FakeSubprocess:
+    """Hashable stand-in for subprocess.Popen in launcher browser-worker tests."""
+
+    pid = 0
+
+    def poll(self):
+        return None
+
+    def wait(self, timeout=None):
+        return 0
+
+
 from unittest import mock
 
 from desktop import launcher as launcher_module
@@ -59,7 +73,7 @@ class LauncherTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def _launcher(self, *, web_speech_only: bool = False) -> launcher_module.DesktopLauncher:
-        with mock.patch("desktop.launcher.detect_runtime_paths", return_value=self.paths):
+        with mock.patch("desktop.launcher_bootstrap.detect_runtime_paths", return_value=self.paths):
             return launcher_module.DesktopLauncher(web_speech_only=web_speech_only)
 
     def test_is_port_in_use_detects_bound_socket(self) -> None:
@@ -71,7 +85,10 @@ class LauncherTests(unittest.TestCase):
 
     def test_format_port_error_includes_detected_owner(self) -> None:
         launcher = self._launcher()
-        with mock.patch("desktop.launcher._describe_port_owner", return_value="Detected another process on port."):
+        with mock.patch(
+            "desktop.launcher_backend._describe_port_owner",
+            return_value="Detected another process on port.",
+        ):
             message = launcher._format_port_error()
         self.assertIn("127.0.0.1:8765", message)
         self.assertIn("Detected another process on port.", message)
@@ -83,7 +100,9 @@ class LauncherTests(unittest.TestCase):
             create_window=mock.Mock(return_value=fake_window),
             start=mock.Mock(side_effect=RuntimeError("webview boom")),
         )
-        with mock.patch.dict(sys.modules, {"webview": fake_webview}), mock.patch("desktop.launcher._show_error_dialog") as dialog:
+        with mock.patch.dict(sys.modules, {"webview": fake_webview}), mock.patch(
+            "desktop.launcher_bootstrap._show_error_dialog"
+        ) as dialog:
             result = launcher.run()
 
         self.assertEqual(result, 1)
@@ -92,8 +111,8 @@ class LauncherTests(unittest.TestCase):
     def test_bootstrap_stops_when_local_port_is_busy(self) -> None:
         launcher = self._launcher()
         window = _FakeWindow()
-        with mock.patch("desktop.launcher._is_port_in_use", return_value=True), mock.patch(
-            "desktop.launcher._show_error_dialog"
+        with mock.patch("desktop.launcher_bootstrap._is_port_in_use", return_value=True), mock.patch(
+            "desktop.launcher_bootstrap._show_error_dialog"
         ) as dialog:
             launcher.bootstrap(window)
 
@@ -120,19 +139,21 @@ class LauncherTests(unittest.TestCase):
 
         threading.Thread(target=close_soon, daemon=True).start()
         with self.assertRaises(launcher_module.LaunchSelectionCancelled):
-            with mock.patch("desktop.launcher.auto_detect_install_profile", return_value="cpu"):
+            with mock.patch(
+                "desktop.launcher_bootstrap.auto_detect_install_profile", return_value="cpu"
+            ):
                 launcher._wait_for_launch_option_selection(window)
 
     def test_bootstrap_launch_selection_cancelled_skips_error_dialog(self) -> None:
         launcher = self._launcher()
         window = _FakeWindow()
-        with mock.patch("desktop.launcher._is_port_in_use", return_value=False):
+        with mock.patch("desktop.launcher_bootstrap._is_port_in_use", return_value=False):
             with mock.patch.object(
                 launcher,
                 "_wait_for_launch_option_selection",
                 side_effect=launcher_module.LaunchSelectionCancelled,
             ):
-                with mock.patch("desktop.launcher._show_error_dialog") as dialog_mock:
+                with mock.patch("desktop.launcher_bootstrap._show_error_dialog") as dialog_mock:
                     launcher.bootstrap(window)
         self.assertIsNone(launcher._startup_error_message)
         dialog_mock.assert_not_called()
@@ -181,13 +202,17 @@ class LauncherTests(unittest.TestCase):
         with (
             mock.patch.object(launcher, "_find_chromium_browser", return_value=browser_path),
             mock.patch.object(launcher, "_opt_out_chrome_power_throttling") as opt_out_mock,
-            mock.patch("desktop.launcher.subprocess.Popen") as popen_mock,
+            mock.patch("desktop.browser_worker_launcher.logged_popen") as popen_mock,
         ):
-            popen_mock.return_value = SimpleNamespace(pid=4242)
+            fake = _FakeSubprocess()
+            fake.pid = 4242
+            popen_mock.return_value = fake
             launched = launcher._open_browser_worker_window("http://127.0.0.1:8765/google-asr")
 
         self.assertTrue(launched)
-        args = popen_mock.call_args.args[0]
+        popen_mock.assert_called_once()
+        self.assertEqual(popen_mock.call_args.args[0], "browser_worker")
+        args = popen_mock.call_args.args[1]
         self.assertIn("--new-window", args)
         self.assertIn("--no-first-run", args)
         self.assertIn("--no-default-browser-check", args)
@@ -236,13 +261,17 @@ class LauncherTests(unittest.TestCase):
         with (
             mock.patch.object(launcher, "_find_chromium_browser", return_value=browser_path),
             mock.patch.object(launcher, "_opt_out_chrome_power_throttling") as opt_out_mock,
-            mock.patch("desktop.launcher.subprocess.Popen") as popen_mock,
+            mock.patch("desktop.browser_worker_launcher.logged_popen") as popen_mock,
         ):
-            popen_mock.return_value = SimpleNamespace(pid=4343)
+            fake = _FakeSubprocess()
+            fake.pid = 4343
+            popen_mock.return_value = fake
             launched = launcher._open_external_url("http://127.0.0.1:8765/google-asr-experimental")
 
         self.assertTrue(launched)
-        args = popen_mock.call_args.args[0]
+        popen_mock.assert_called_once()
+        self.assertEqual(popen_mock.call_args.args[0], "browser_worker")
+        args = popen_mock.call_args.args[1]
         self.assertIn("--new-window", args)
         self.assertIn("--no-first-run", args)
         self.assertIn("--no-default-browser-check", args)
@@ -306,7 +335,7 @@ class LauncherTests(unittest.TestCase):
     def test_web_speech_only_skips_launch_option_wait(self) -> None:
         launcher = self._launcher(web_speech_only=True)
         window = _FakeWindow()
-        with mock.patch("desktop.launcher.auto_detect_install_profile", return_value="cpu"):
+        with mock.patch("desktop.launcher_bootstrap.auto_detect_install_profile", return_value="cpu"):
             startup_mode, install_profile, remote_role, allow_lan = launcher._wait_for_launch_option_selection(window)
         self.assertEqual(startup_mode, launcher_module.STARTUP_MODE_BROWSER)
         self.assertEqual(install_profile, "cpu")

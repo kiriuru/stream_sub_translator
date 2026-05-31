@@ -22,10 +22,14 @@ class ProfileManager:
         return sorted(p.stem for p in self.profiles_dir.glob("*.json"))
 
     def _profile_path(self, name: str) -> Path:
-        safe_name = name.strip().replace("..", "").replace("/", "").replace("\\", "")
-        if not safe_name:
-            raise ValueError("Profile name cannot be empty.")
-        return self.profiles_dir / f"{safe_name}.json"
+        raw = name.strip()
+        if not raw or ".." in raw or "/" in raw or "\\" in raw:
+            raise ValueError("Invalid profile name.")
+        target = (self.profiles_dir / f"{raw}.json").resolve()
+        profiles_root = self.profiles_dir.resolve()
+        if not target.is_relative_to(profiles_root):
+            raise ValueError("Invalid profile name.")
+        return target
 
     def load_profile(self, name: str) -> dict[str, Any]:
         path = self._profile_path(name)

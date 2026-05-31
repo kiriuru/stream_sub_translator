@@ -40,12 +40,12 @@ export function fillAudioInputDevices(elements, snapshot) {
   fillSelectOptions(elements.audioInputSelect, snapshot.audioDevices || [], {
     getValue: (device) => device.id,
     getLabel: (device) =>
-      `${device.name}${device.is_default ? (getCurrentLocale() === "ru" ? " (по умолчанию)" : " (default)") : ""}`,
+      `${device.name}${device.is_default ? t("asr.device.default_suffix") : ""}`,
     getDataset: (device) => ({
-      meta:
-        getCurrentLocale() === "ru"
-          ? `каналы: ${device.max_input_channels}, частота: ${device.default_samplerate || "n/a"} Гц`
-          : `channels: ${device.max_input_channels}, rate: ${device.default_samplerate || "n/a"} Hz`,
+      meta: t("asr.device.meta", {
+        channels: device.max_input_channels,
+        rate: device.default_samplerate || "n/a",
+      }),
     }),
     selectedValue: snapshot.ui.selectedAudioInputId,
   });
@@ -54,13 +54,13 @@ export function fillAudioInputDevices(elements, snapshot) {
   if (elements.audioInputMeta) {
     elements.audioInputMeta.textContent = browserMode
       ? t("overview.recognition.browser_mic_note")
-      : selected?.dataset.meta || (getCurrentLocale() === "ru" ? "Устройство не выбрано." : "No device selected.");
+      : selected?.dataset.meta || t("asr.device.not_selected");
   }
 }
 
-function isLocalParakeetMode(config) {
+function isLocalParakeetMode(config, desktop) {
   const mode = config?.asr?.mode || "local";
-  return !isBrowserRecognitionMode(mode) && !isDesktopBrowserQuickStartLocked(config);
+  return !isBrowserRecognitionMode(mode) && !isDesktopBrowserQuickStartLocked(config, desktop);
 }
 
 // Parakeet tuning controls (latency preset, incremental streaming decode,
@@ -72,8 +72,8 @@ function isLocalParakeetMode(config) {
 // Parakeet ahead of a mode switch. Matches the 0.4.1 main-branch
 // expectation that these knobs are visible in the standard layout for
 // any non-quick-start install regardless of the currently selected mode.
-function isLocalParakeetTuningAvailable(config) {
-  return !isDesktopBrowserQuickStartLocked(config);
+function isLocalParakeetTuningAvailable(config, desktop) {
+  return !isDesktopBrowserQuickStartLocked(config, desktop);
 }
 
 export function createAsrConfigMutators(elements, actions) {
@@ -155,20 +155,19 @@ export function renderAsrPanel(snapshot, elements) {
   fillRecognitionLanguages(elements.languageSelect);
   if (elements.partialTranscript) {
     elements.partialTranscript.textContent =
-      snapshot.transcript.partial || (getCurrentLocale() === "ru" ? "Ожидание речи..." : "Waiting for speech...");
+      snapshot.transcript.partial || t("asr.transcript.waiting_partial");
   }
   if (elements.finalTranscript) {
     elements.finalTranscript.textContent = snapshot.transcript.finals?.length
       ? snapshot.transcript.finals.join("\n")
-      : getCurrentLocale() === "ru"
-        ? "Пока нет завершённого текста."
-        : "No final transcript yet.";
+      : t("asr.transcript.no_finals");
   }
   const config = snapshot.config;
   if (!config) {
     return;
   }
-  const quickStartLocked = isDesktopBrowserQuickStartLocked(config);
+  const desktop = snapshot.desktop || null;
+  const quickStartLocked = isDesktopBrowserQuickStartLocked(config, desktop);
   const mode = config.asr?.mode || "local";
   const browserMode = isBrowserRecognitionMode(mode);
   if (elements.modeSelect) {
@@ -208,7 +207,7 @@ export function renderAsrPanel(snapshot, elements) {
     }
   }
   fillAudioInputDevices(elements, snapshot);
-  const parakeetTuningVisible = isLocalParakeetTuningAvailable(config);
+  const parakeetTuningVisible = isLocalParakeetTuningAvailable(config, desktop);
   setElementVisibility(elements.parakeetLatencyPresetRow, parakeetTuningVisible);
   setElementVisibility(elements.rtToolsLocalParakeetExtras, parakeetTuningVisible);
   const realtime = config.asr?.realtime || {};

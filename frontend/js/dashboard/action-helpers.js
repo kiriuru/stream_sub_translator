@@ -1,5 +1,5 @@
 import { normalizeConfigShape } from "../normalizers/config-normalizer.js";
-import { formatList, getCurrentLocale } from "./helpers.js";
+import { formatList, t } from "./helpers.js";
 
 export const BROWSER_WORKER_SETTINGS_STORAGE_KEY = "sst.browser_worker.settings.v1";
 export const BROWSER_WORKER_EXPERIMENTAL_SETTINGS_STORAGE_KEY = "sst.browser_worker.experimental.settings.v1";
@@ -50,22 +50,22 @@ export function mirrorBrowserWorkerSettingsToLocalStorage(savedPayload) {
 export function getRestartRequiredReasons(previousPayload, nextPayload) {
   const reasons = [];
   if ((previousPayload?.audio?.input_device_id ?? null) !== (nextPayload?.audio?.input_device_id ?? null)) {
-    reasons.push(getCurrentLocale() === "ru" ? "микрофон" : "microphone device");
+    reasons.push(t("config.restart_reason.microphone"));
   }
   if (String(previousPayload?.asr?.mode || "local") !== String(nextPayload?.asr?.mode || "local")) {
-    reasons.push(getCurrentLocale() === "ru" ? "режим распознавания" : "recognition mode");
+    reasons.push(t("config.restart_reason.recognition_mode"));
   }
   if (String(previousPayload?.asr?.provider_preference || "") !== String(nextPayload?.asr?.provider_preference || "")) {
-    reasons.push(getCurrentLocale() === "ru" ? "ASR-провайдер" : "ASR provider");
+    reasons.push(t("config.restart_reason.asr_provider"));
   }
   if (Boolean(previousPayload?.asr?.prefer_gpu) !== Boolean(nextPayload?.asr?.prefer_gpu)) {
-    reasons.push(getCurrentLocale() === "ru" ? "политика GPU" : "GPU policy");
+    reasons.push(t("config.restart_reason.gpu_policy"));
   }
   if (
     String(previousPayload?.asr?.browser?.recognition_language || "ru-RU") !==
     String(nextPayload?.asr?.browser?.recognition_language || "ru-RU")
   ) {
-    reasons.push(getCurrentLocale() === "ru" ? "язык Web Speech" : "Web Speech recognition language");
+    reasons.push(t("config.restart_reason.web_speech_language"));
   }
   return reasons;
 }
@@ -90,12 +90,33 @@ export function addTranslationEntry(state, sequence, sourceText) {
   return entry;
 }
 
+export function hasRenderableOverlayContent(payload) {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+  const visibleItems = Array.isArray(payload.visible_items)
+    ? payload.visible_items.filter((item) => String(item?.text || "").trim())
+    : [];
+  if (visibleItems.length > 0) {
+    return true;
+  }
+  return Boolean(String(payload.active_partial_text || "").trim());
+}
+
+export function shouldUseLiveOverlayPreview(state) {
+  const payload = state?.overlay?.payload;
+  if (state?.runtime?.is_running === true) {
+    return Boolean(payload);
+  }
+  return hasRenderableOverlayContent(payload);
+}
+
 export function buildPreviewPayload(state, { getResolvedSubtitleStyle }) {
   const config = state.config;
   if (!config) {
     return null;
   }
-  if (state.overlay?.payload) {
+  if (shouldUseLiveOverlayPreview(state)) {
     return {
       ...state.overlay.payload,
       style: getResolvedSubtitleStyle(config, state.subtitleStylePresets),
@@ -118,7 +139,7 @@ export function buildPreviewPayload(state, { getResolvedSubtitleStyle }) {
           kind: "source",
           lang: config.source_lang || "auto",
           style_slot: "source",
-          text: getCurrentLocale() === "ru" ? "Предпросмотр исходной строки" : "Source subtitle preview",
+          text: t("preview.source_line"),
         });
       }
       return;
@@ -149,9 +170,7 @@ export function buildPreviewPayload(state, { getResolvedSubtitleStyle }) {
     visible_items: visibleItems,
     active_partial_text:
       visibleItems.length === 0 && config.subtitle_output?.show_source !== false
-        ? getCurrentLocale() === "ru"
-          ? "Предпросмотр live-partial"
-          : "Live partial preview"
+        ? t("preview.live_partial")
         : "",
     style: getResolvedSubtitleStyle(config, state.subtitleStylePresets),
     sequence: 0,
@@ -179,30 +198,16 @@ export function runtimeSnapshotSignature(runtime) {
 
 export function buildSaveStatusMessage(liveApplied, restartReasons, runtime) {
   if (!restartReasons.length) {
-    return liveApplied
-      ? getCurrentLocale() === "ru"
-        ? "Сохранено и сразу применено."
-        : "Saved and applied immediately."
-      : getCurrentLocale() === "ru"
-        ? "Сохранено локально."
-        : "Saved locally.";
+    return liveApplied ? t("config.save.applied_immediately") : t("config.save.saved_locally");
   }
   const subject = formatList(restartReasons);
   const restartLabel = runtime?.is_running
-    ? getCurrentLocale() === "ru"
-      ? "после Стоп/Старт"
-      : "after Stop/Start"
-    : getCurrentLocale() === "ru"
-      ? "при следующем Старт"
-      : "on the next Start";
+    ? t("config.save.restart_after_stop_start")
+    : t("config.save.restart_on_next_start");
   if (liveApplied) {
-    return getCurrentLocale() === "ru"
-      ? `Сохранено и сразу применено. Изменения для: ${subject} вступят в силу ${restartLabel}.`
-      : `Saved and applied immediately. ${subject} changes will take effect ${restartLabel}.`;
+    return t("config.save.applied_with_restart", { subject, restartLabel });
   }
-  return getCurrentLocale() === "ru"
-    ? `Сохранено локально. Изменения для: ${subject} вступят в силу ${restartLabel}.`
-    : `Saved locally. ${subject} changes will take effect ${restartLabel}.`;
+  return t("config.save.local_with_restart", { subject, restartLabel });
 }
 
 export function getResolvedSubtitleStyle(config, presets) {

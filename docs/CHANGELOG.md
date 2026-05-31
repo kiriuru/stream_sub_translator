@@ -8,6 +8,72 @@
 
 ## Unreleased
 
+_(пусто — см. [0.4.4](#044))_
+
+## 0.4.4
+
+Patch release. `PROJECT_VERSION` в `backend/versioning.py` — **0.4.4**; `config_version` **7**. Публичные HTTP/WebSocket route contracts и subtitle/translation lifecycle **не менялись**.
+
+### Security (OpenAI helper routes)
+
+- **`backend/core/outbound_url_policy.py`**: SSRF-политика для `POST /api/openai/models` и `POST /api/openai/usable-models` — при LAN-exposed bind (`0.0.0.0`/`::` или `SST_ALLOW_LAN=1`) запрещены loopback, RFC1918, link-local и metadata hostnames в `base_url`; при default localhost bind частные URL по-прежнему разрешены (локальные OpenAI-compatible серверы). Outbound URL translation providers **не затронуты**.
+- Регрессии: `tests/test_outbound_url_policy.py`, расширен `tests/test_openai_models_route.py`.
+
+### Frontend store и desktop bridge
+
+- **`frontend/js/core/store.js`**: slice `desktop` + `patchDesktopContext()` — единый snapshot desktop-контекста для dashboard.
+- **`frontend/js/main.js`**: один listener `sst:desktop-context`; `DesktopBridge.getContext()` без дублирующих вызовов.
+- **`frontend/js/desktop.js`**: удалены мёртвые записи в `window.AppState`.
+- Регрессии: `tests/test_frontend_architecture.py`, `tests/test_desktop_profile_lock.py`.
+
+### Overlay WebSocket
+
+- **`frontend/js/core/ws-stale-guard-logic.js`**: общий stale-алгоритм (timestamp-first при reset sequence после stop/start).
+- **`frontend/js/core/ws-client.js`**: рефакторинг на shared module.
+- **`overlay/overlay.js`**: тот же stale-filter, exponential reconnect 1–10 s; при disconnect последний кадр сохраняется до reconnect (OBS UX).
+- Регрессии: `tests/test_ws_stale_guard.py`.
+
+### Desktop launcher (module split)
+
+- **`desktop/launcher.py`**: тонкий facade (re-export); **`desktop/launcher_bootstrap.py`**: `DesktopLauncher`, `main()`, bootstrap/run; mixins **`launcher_window.py`**, **`launcher_backend.py`**, **`browser_worker_launcher.py`**; **`launcher_context.py`**, **`launcher_api.py`**.
+- Регрессии: `tests/test_launcher.py`, `tests/test_launcher_module_layout.py`.
+
+### Dashboard polish и bind/profile tests
+
+- Bootstrap errors banner в dashboard (`frontend/js/main.js`, `frontend/js/dashboard/actions/data-actions.js`).
+- `escapeHtml(label)` в compact nav (`frontend/js/layout/layout-controller.js`).
+- **`backend/run.py`**: `resolve_bind_host()` для тестируемой bind-политики; **`ProfileManager`**: `resolve()` + `is_relative_to()` для path safety.
+- Регрессии: `tests/test_bind_policy.py`, `tests/test_profile_manager_paths.py`.
+
+### UI localization (ja / ko / zh)
+
+- **Локали:** dashboard, Browser Speech worker и OBS overlay — **en**, **ru**, **ja**, **ko**, **zh**; выбор в header/settings, сохранение в `ui.language` (`config.json`) и `localStorage` (`sst.ui.language`).
+- **Смена архитектуры i18n (кратко):** вместо двух встроенных словарей в `i18n.js` — отдельные файлы `frontend/js/i18n/locales/*.js`, синхронный **`locales-bundle.js`** (все локали одним script для WebView2), слой **`dynamic-locales.js`** для en/ru «поздних» ключей; runtime merge в `i18n.js` (`english ∪ locale ∪ dynamic[locale]`). Генерация CJK: `tools/generate_i18n_locales.py`, дозаполнение `tools/fix_untranslated_cjk.py`, сборка bundle `tools/build_i18n_locale_bundle.py`.
+- **Поведение:** мгновенное переключение без fetch; `sst:locale-changed` для панелей с динамическим DOM (translation results, ASR, style, overlay); смена языка сразу пишет конфиг через `saveCurrentConfig()`.
+- **`desktop/ui_locale.py`**: общая нормализация `ui.language` для splash/desktop API.
+- Регрессии: `tests/test_i18n_locales.py`, `tests/test_i18n_dynamic_locales.py`, `tests/test_ui_locale.py`.
+- Подробно: **§16.8** в `docs/TECHNICAL_ARCHITECTURE.md`.
+
+### Dashboard — ASR advanced (вкладка «ASR расширенные»)
+
+- **`frontend/index.html`**, **`frontend/js/ui/field-help-popover.js`**, **`frontend/js/panels/asr-panel.js`**: у каждого поля расширенного ASR-тюнинга — кнопка `?` и всплывающая справка (нижний край popover на уровне кнопки; закрытие по повторному клику, клику снаружи, `Esc`); mount на `[data-tab-panel="asr_advanced"]`, обновление текста на `sst:locale-changed`.
+- **Подписи рекомендуемых значений:** вместо двойных hint-строк вида `по умолчанию:… безопаснее:…` — одна строка `Рекомендуемое: …` / `Recommended: …` / `推奨:` / `권장:` / `推荐:` (`tools.advanced.*.note`).
+- **i18n:** полные тексты справки `tools.advanced.*.help` и `tools.advanced.field_help.aria` для **en**, **ru**, **ja**, **ko**, **zh**; в описании пресета задержки — локализованные имена пресетов из `tuning.preset.*` (не slug `balanced` / `ultra low latency` в CJK UI).
+- **CSS:** `frontend/css/app.css` — `.field-help-btn`, `.field-help-popover`, `.inline-field-title`; двухколоночная сетка `.asr-advanced-fields-grid` (одна колонка на узких экранах); popover/button используют токены темы (`--bg-panel-elevated`, `--line-subtle`), а не захардкоженный тёмный fallback.
+- **Layout:** боковый блок `tools.notes.*` удалён — пояснения только через `?` у каждого поля; Parakeet-only extras (`#rt-tools-local-parakeet-extras`) участвуют в сетке через `display: contents`; в **compact** — одна колонка (`compact-layout.css`).
+- **Сопровождение:** `tools/patch_asr_advanced_i18n_cjk.py` (пакетное обновление note/help для ja/ko/zh); после правок locale-файлов — `python tools/build_i18n_locale_bundle.py`.
+- Регрессии: `tests/test_field_help_popover.py`.
+
+### Dashboard preview (idle, до Start)
+
+- **`frontend/js/dashboard/action-helpers.js`**: `buildPreviewPayload` не подменяет style-placeholder пустым `overlay_update` с WS после Save, пока runtime не запущен — можно настраивать стили до явного Start.
+- Регрессии: `tests/test_dashboard_idle_preview.py`.
+
+### Документация
+
+- `docs/TECHNICAL_ARCHITECTURE.md`, `docs/TECHNICAL_ARCHITECTURE.en.md` — синхронизированы с 0.4.4 (launcher layout, store/overlay WS, pip bootstrap policy, SSRF, **§16.6.1 ASR advanced**, **§16.8 UI i18n**, idle preview §16.7.6).
+- `README.md`, `README.ru.md`, `docs/WIKI.en.md`, `docs/WIKI.ru.md` — версия и операционные заметки по изменениям 0.4.4.
+
 ## 0.4.3
 
 Patch release. `PROJECT_VERSION` в `backend/versioning.py` — **0.4.3**; `config_version` **7**. Публичные HTTP/WebSocket route contracts и subtitle/translation lifecycle **не менялись**.

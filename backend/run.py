@@ -14,6 +14,7 @@ from backend.core.remote_mode import (
 )
 import uvicorn
 
+from backend.core.bind_policy import resolve_bind_host
 from backend.server_runtime import describe_port_owner, is_port_in_use, wait_for_health
 
 
@@ -76,9 +77,7 @@ def main(
     )
     args = parser.parse_args()
 
-    bind_host = (str(args.host).strip() if args.host else "")
-    if not bind_host:
-        bind_host = "0.0.0.0" if args.allow_lan else settings.app_host
+    bind_host = resolve_bind_host(host=args.host, allow_lan=bool(args.allow_lan))
     bind_port = int(args.port) if args.port is not None else int(settings.app_port)
     remote_role = normalize_remote_role(args.remote_role)
 

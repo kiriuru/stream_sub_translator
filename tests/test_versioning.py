@@ -26,12 +26,12 @@ class VersioningTests(unittest.TestCase):
                     "enabled": True,
                     "provider": "github_releases",
                     "github_repo": "example/repo",
-                    "latest_known_version": "0.4.4",
+                    "latest_known_version": "0.4.5",
                 }
             }
         )
 
-        self.assertEqual(payload["current_version"], "0.4.3")
+        self.assertEqual(payload["current_version"], "0.4.4")
         self.assertTrue(payload["sync"]["update_available"])
 
     def test_extract_latest_release_prefers_highest_semver(self) -> None:

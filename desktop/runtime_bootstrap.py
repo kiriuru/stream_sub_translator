@@ -546,11 +546,13 @@ class RuntimeBootstrapper:
         return profile
 
     def _ensure_pip_available(self) -> None:
-        self._status("Updating pip in the local environment...")
-        self._run_command(
-            [str(self._paths.venv_python), "-m", "pip", "install", "--upgrade", "pip"],
-            description="upgrade pip",
+        self._status("Validating pip in the local environment...")
+        from backend.bootstrap_pip_pins import ensure_pip_bootstrap
+
+        ensure_pip_bootstrap(
+            self._paths.venv_python,
             env=build_runtime_environment(self._paths),
+            log=self._log,
         )
 
     def _torch_runtime_matches_profile(self, install_profile: str) -> bool:

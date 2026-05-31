@@ -68,6 +68,20 @@ class FrontendArchitectureTests(unittest.TestCase):
         self.assertIn("return structuredClone(value)", store_js)
         self.assertIn("export function updateState(patch)", store_js)
         self.assertIn("Object.assign(state, nextPatch)", store_js)
+        self.assertIn("desktop: null", store_js)
+        self.assertIn("export function patchDesktopContext", store_js)
+
+    def test_dashboard_modules_do_not_use_app_state_desktop(self) -> None:
+        dashboard_modules = [
+            JS_ROOT / "main.js",
+            JS_ROOT / "desktop.js",
+            JS_ROOT / "dashboard" / "helpers.js",
+            JS_ROOT / "dashboard" / "desktop-profile-lock.js",
+            JS_ROOT / "panels" / "asr-panel.js",
+        ]
+        for path in dashboard_modules:
+            source = path.read_text(encoding="utf-8")
+            self.assertNotIn("AppState", source, msg=str(path.relative_to(PROJECT_ROOT)))
 
     def test_index_loads_shared_redaction_and_diagnostics_export_button(self) -> None:
         index_html = (FRONTEND_ROOT / "index.html").read_text(encoding="utf-8")
@@ -254,7 +268,6 @@ class FrontendArchitectureTests(unittest.TestCase):
         # These selectors used to exist and have been deliberately removed.
         forbidden_strip_selectors = (
             'body.sst-layout-compact .dashboard-recognition-panel .dashboard-hint-text',
-            'body.sst-layout-compact .asr-advanced-notes',
             'body.sst-layout-compact [data-tab-panel="asr_advanced"] .inline-field-note',
         )
         for selector in forbidden_strip_selectors:
@@ -272,6 +285,14 @@ class FrontendArchitectureTests(unittest.TestCase):
         # runtime status placeholders like #font-source-status / #ui-theme-status
         # which JS uses to surface live state.
         self.assertIn(":not([id])", compact_css)
+
+    def test_compact_layout_asr_advanced_single_column(self) -> None:
+        compact_css = (FRONTEND_ROOT / "css" / "compact-layout.css").read_text(encoding="utf-8")
+        self.assertIn(
+            'body.sst-layout-compact [data-tab-panel="asr_advanced"] .asr-advanced-fields-grid',
+            compact_css,
+        )
+        self.assertIn("grid-template-columns: 1fr !important;", compact_css)
 
     def test_overview_preview_card_sits_under_completed_transcript_and_hides_in_compact(self) -> None:
         """The live snapshot ('Текущий срез') sits inside the left overview column

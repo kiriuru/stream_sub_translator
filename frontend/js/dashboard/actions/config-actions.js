@@ -3,7 +3,7 @@ import { applyDesktopProfileLockToAsrConfig, isDesktopBrowserQuickStartLocked } 
 import {
   applyUiThemeFromConfigPayload,
 } from "../../ui-theme.js";
-import { clone, getCurrentLocale, normalizeSupportedUiLanguage } from "../helpers.js";
+import { clone, getCurrentLocale, normalizeSupportedUiLanguage, t } from "../helpers.js";
 import {
   buildSaveStatusMessage,
   getRestartRequiredReasons,
@@ -14,7 +14,7 @@ import { isBrowserRecognitionMode } from "../helpers.js";
 
 export function createConfigActions({ store, api, logger, events }) {
   function syncLanguageSelects(locale) {
-    const value = normalizeSupportedUiLanguage(locale);
+    const value = normalizeSupportedUiLanguage(locale) || getCurrentLocale();
     ["#ui-language-select", "#ui-language-select-settings"].forEach((selector) => {
       const element = document.querySelector(selector);
       if (element) {
@@ -24,10 +24,15 @@ export function createConfigActions({ store, api, logger, events }) {
   }
 
   function setConfig(payload) {
-    const normalized = applyDesktopProfileLockToAsrConfig(normalizeConfigShape(payload));
-    const locale = normalizeSupportedUiLanguage(normalized.ui?.language);
-    if (window.I18n?.setLocale && locale !== getCurrentLocale()) {
-      window.I18n.setLocale(locale);
+    const snapshot = store.getState();
+    const normalized = applyDesktopProfileLockToAsrConfig(
+      normalizeConfigShape(payload),
+      snapshot.desktop
+    );
+    const configuredLanguage = normalizeSupportedUiLanguage(normalized.ui?.language);
+    const activeLocale = configuredLanguage || getCurrentLocale();
+    if (window.I18n?.setLocale && configuredLanguage && configuredLanguage !== getCurrentLocale()) {
+      window.I18n.setLocale(configuredLanguage);
     }
     applyUiThemeFromConfigPayload(normalized);
     if (window.SstLayout?.syncLayoutControlsFromConfig) {
@@ -46,7 +51,7 @@ export function createConfigActions({ store, api, logger, events }) {
       config: normalized,
       subtitleStylePresets: nextState.subtitleStylePresets || {},
       ui: {
-        uiLanguage: locale,
+        uiLanguage: activeLocale,
         selectedAudioInputId: normalized.audio.input_device_id || null,
         selectedTranslationLanguage: translationSelection,
         selectedSubtitleOrderItem: subtitleSelection,
@@ -60,8 +65,8 @@ export function createConfigActions({ store, api, logger, events }) {
     const snapshot = store.getState();
     const draft = normalizeConfigShape(clone(snapshot.config || {}));
     mutator(draft);
-    if (isDesktopBrowserQuickStartLocked(draft)) {
-      applyDesktopProfileLockToAsrConfig(draft);
+    if (isDesktopBrowserQuickStartLocked(draft, snapshot.desktop)) {
+      applyDesktopProfileLockToAsrConfig(draft, snapshot.desktop);
     }
     setConfig(draft);
   }
@@ -100,22 +105,20 @@ export function createConfigActions({ store, api, logger, events }) {
       });
       events?.emit?.("config:saved", { payload: savedPayload, live_applied: response.live_applied });
       logger(
-        getCurrentLocale() === "ru"
-          ? `[config] сохранено локально${response.live_applied ? " и применено сразу" : ""}`
-          : `[config] saved locally${response.live_applied ? " and applied live" : ""}`
+        t("config.save.live_applied_log", {
+          suffix: response.live_applied ? t("config.save.live_suffix") : "",
+        })
       );
       return response;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Save failed.";
       store.updateState({
         ui: {
-          saveStatus: getCurrentLocale() === "ru" ? `Сохранение не удалось: ${message}` : `Save failed: ${message}`,
+          saveStatus: t("config.save.failed_ui", { message }),
           saveTone: "error",
         },
       });
-      logger(
-        getCurrentLocale() === "ru" ? `[config] ошибка сохранения -> ${message}` : `[config] save failed -> ${message}`
-      );
+      logger(t("config.save.failed_log", { message }));
       return null;
     } finally {
       store.updateState({ ui: { saving: false } });
@@ -123,7 +126,7 @@ export function createConfigActions({ store, api, logger, events }) {
   }
 
   function setUiLanguage(locale) {
-    const nextLocale = normalizeSupportedUiLanguage(locale);
+    const nextLocale = normalizeSupportedUiLanguage(locale) || "en";
     window.I18n?.setLocale?.(nextLocale);
     mutateConfig((draft) => {
       draft.ui.language = nextLocale;
@@ -162,7 +165,7 @@ export function createConfigActions({ store, api, logger, events }) {
     const importedPayload = response.payload || payload;
     setConfig(importedPayload);
     mirrorBrowserWorkerSettingsToLocalStorage(importedPayload);
-    logger(getCurrentLocale() === "ru" ? "[config] импорт выполнен" : "[config] imported");
+    logger(t("config.imported_log"));
     return response;
   }
 
@@ -175,7 +178,7 @@ export function createConfigActions({ store, api, logger, events }) {
     anchor.download = "config.export.json";
     anchor.click();
     URL.revokeObjectURL(url);
-    logger(getCurrentLocale() === "ru" ? "[config] экспорт выполнен" : "[config] exported");
+    logger(t("config.exported_log"));
   }
 
   return {

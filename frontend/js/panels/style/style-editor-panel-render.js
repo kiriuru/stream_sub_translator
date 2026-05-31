@@ -1,4 +1,4 @@
-import { getCurrentLocale } from "../../dashboard/helpers.js";
+import { getCurrentLocale, t } from "../../dashboard/helpers.js";
 import {
   buildFontCatalogSignature,
   buildPresetCatalogSignature,
@@ -188,26 +188,22 @@ export function renderStyleEditorPanel(snapshot, elements, { actions }, catalogS
   if (elements.description) {
     elements.description.textContent =
       style.description ||
-      (getCurrentLocale() === "ru" ? "Выберите пресет и подстройте его локально." : "Choose a preset and tweak it locally.");
+      t("style.preset.default_description");
   }
   if (elements.status) {
     elements.status.textContent =
       style.built_in === false
-        ? getCurrentLocale() === "ru"
-          ? `Редактируется пользовательский пресет "${style.label || style.preset}".`
-          : `Editing custom preset "${style.label || style.preset}".`
-        : getCurrentLocale() === "ru"
-          ? `Редактируется встроенный пресет "${style.label || style.preset}".`
-          : `Editing built-in preset "${style.label || style.preset}".`;
+        ? t("style.preset.editing_custom", { name: style.label || style.preset })
+        : t("style.preset.editing_builtin", { name: style.label || style.preset });
   }
   if (elements.projectFontsDir) {
     elements.projectFontsDir.textContent = snapshot.fontCatalog?.project_fonts_dir || "fonts";
   }
   if (elements.fontSourceStatus) {
-    elements.fontSourceStatus.textContent =
-      getCurrentLocale() === "ru"
-        ? `Шрифтов проекта: ${snapshot.fontCatalog?.project_local?.length || 0}. Системных шрифтов: ${snapshot.fontCatalog?.system?.length || 0}.`
-        : `Project-local fonts: ${snapshot.fontCatalog?.project_local?.length || 0}. System fonts: ${snapshot.fontCatalog?.system?.length || 0}.`;
+    elements.fontSourceStatus.textContent = t("style.font_catalog.counts", {
+      projectCount: snapshot.fontCatalog?.project_local?.length || 0,
+      systemCount: snapshot.fontCatalog?.system?.length || 0,
+    });
   }
   if (elements.uiTheme.mode) {
     elements.uiTheme.mode.value = String(ui?.theme || "dark");
@@ -266,12 +262,8 @@ export function renderStyleEditorPanel(snapshot, elements, { actions }, catalogS
   }
   if (elements.lineSlots.description) {
     elements.lineSlots.description.textContent = slotEnabled
-      ? getCurrentLocale() === "ru"
-        ? `Выбран слот: ${styleSlotLabel(activeSlot)}. Пустое значение означает "наследовать базовый стиль".`
-        : `Selected slot: ${styleSlotLabel(activeSlot)}. Empty values inherit from base.`
-      : getCurrentLocale() === "ru"
-        ? `Выбран слот: ${styleSlotLabel(activeSlot)}. Включите "Переопределить", чтобы показать настройки слота.`
-        : `Selected slot: ${styleSlotLabel(activeSlot)}. Enable Override to reveal slot controls.`;
+      ? t("style.slot.enabled_hint", { slotLabel: styleSlotLabel(activeSlot) })
+      : t("style.slot.disabled_hint", { slotLabel: styleSlotLabel(activeSlot) });
   }
   if (elements.lineSlots.fieldsContainer) {
     elements.lineSlots.fieldsContainer.hidden = !slotEnabled;
@@ -310,8 +302,7 @@ export function renderStyleEditorPanel(snapshot, elements, { actions }, catalogS
     const slotPresetSignatureKey = `slot:${slotPresetSignature}`;
     if (catalogState.lastLineSlotPresetSignature !== slotPresetSignatureKey) {
       catalogState.lastLineSlotPresetSignature = slotPresetSignatureKey;
-      const placeholderLabel =
-        getCurrentLocale() === "ru" ? "— выбрать пресет —" : "— pick preset —";
+      const placeholderLabel = t("style.slot.pick_preset_placeholder");
       const presetOptions = [
         { value: "", label: placeholderLabel },
         ...Object.entries(presets).map(([presetName, preset]) => ({

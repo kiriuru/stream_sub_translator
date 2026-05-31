@@ -121,7 +121,28 @@ function normalizeDisplayOrderFromLines(displayOrder, lines) {
 
 function normalizeUiLanguage(value) {
   const current = String(value || "").trim().toLowerCase();
-  return ["en", "ru"].includes(current) ? current : "en";
+  if (!current) {
+    return "";
+  }
+  if (["en", "ru", "ja", "ko", "zh"].includes(current)) {
+    return current;
+  }
+  if (current.startsWith("ru")) {
+    return "ru";
+  }
+  if (current.startsWith("zh")) {
+    return "zh";
+  }
+  if (current.startsWith("ja")) {
+    return "ja";
+  }
+  if (current.startsWith("ko")) {
+    return "ko";
+  }
+  if (current.startsWith("en")) {
+    return "en";
+  }
+  return "";
 }
 
 function normalizeUiTheme(value) {
@@ -281,9 +302,6 @@ export function normalizeConfigShape(config) {
   const profileLock = String(normalized.asr.desktop_profile_lock || "").toLowerCase();
   if (profileLock === "browser_speech") {
     normalized.asr.desktop_profile_lock = "browser_speech";
-    if (!isBrowserRecognitionMode(normalized.asr.mode)) {
-      normalized.asr.mode = "browser_google";
-    }
   } else {
     delete normalized.asr.desktop_profile_lock;
   }

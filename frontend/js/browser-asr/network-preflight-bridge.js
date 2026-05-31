@@ -6,6 +6,10 @@
 
   const ASR = (global.SstBrowserAsr = global.SstBrowserAsr || {});
 
+  function workerT(key, variables) {
+    return global.I18n?.t ? global.I18n.t(key, variables) : key;
+  }
+
   const PREFLIGHT_URL = "https://www.google.com/generate_204";
 
   ASR.registerNetworkErrorForPreflight = function registerNetworkErrorForPreflight(manager) {
@@ -52,16 +56,8 @@
       manager._clearAllTimers();
       manager._setSupervisorState("fatal");
       manager._setTerminalDegradedReason("recognition_network_unreachable");
-      manager._setStatus(
-        manager._locale() === "ru"
-          ? "сеть недоступна для Web Speech"
-          : "recognition cloud unreachable"
-      );
-      manager._appendLog(
-        manager._locale() === "ru"
-          ? "Web Speech: сетевой preflight provalil — облако распознавания недоступно. Проверьте VPN/firewall/DNS/прокси и нажмите Start заново."
-          : "Web Speech: network preflight failed — recognition cloud unreachable. Check VPN/firewall/DNS/proxy and press Start again."
-      );
+      manager._setStatus(workerT("browser_asr.network.status_unreachable"));
+      manager._appendLog(workerT("browser_asr.network.preflight_failed_log"));
       await ASR.releaseWakeLock(manager, "network-preflight-failed");
       manager._emitWorkerStatus("terminal-network-unreachable");
       return false;

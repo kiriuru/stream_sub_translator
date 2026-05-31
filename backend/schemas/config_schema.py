@@ -39,7 +39,7 @@ class UiPaletteConfig(SchemaModel):
 
 
 class UiConfig(SchemaModel):
-    language: Literal["", "en", "ru"] = ""
+    language: Literal["", "en", "ru", "ja", "ko", "zh"] = ""
     layout: Literal["standard", "compact"] = "standard"
     show_remote_tools: bool = False
     theme: Literal["dark", "light"] = "dark"

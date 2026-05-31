@@ -9,6 +9,9 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.config import settings
+from backend.core.outbound_url_policy import assert_openai_base_url_allowed
+
 router = APIRouter(prefix="/api/openai", tags=["openai"])
 
 RECOMMENDED_OPENAI_TEXT_MODELS = [
@@ -47,7 +50,10 @@ def _normalize_base_url(value: str | None) -> str:
         base = "https://api.openai.com/v1"
     if not (base.startswith("http://") or base.startswith("https://")):
         raise HTTPException(status_code=400, detail="base_url must start with http:// or https://")
-    return base
+    return assert_openai_base_url_allowed(
+        base,
+        bind_host=settings.app_host,
+    )
 
 
 def _is_likely_text_model(model_id: str) -> bool:

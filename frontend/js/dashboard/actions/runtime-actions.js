@@ -4,9 +4,9 @@ import { normalizeRuntimeStatus } from "../../normalizers/runtime-normalizer.js"
 import { runtimeSnapshotSignature } from "../action-helpers.js";
 import {
   clone,
-  getCurrentLocale,
   isBrowserRecognitionMode,
   isExperimentalBrowserRecognitionMode,
+  t,
 } from "../helpers.js";
 import { traceRuntimeStatusTransition, traceRuntimeVisualState, traceUi } from "../ui-trace.js";
 
@@ -82,15 +82,9 @@ export function createRuntimeActions({ store, api, logger, events }) {
         status: "starting",
         status_message: isBrowserRecognitionMode(mode)
           ? isExperimentalBrowserRecognitionMode(mode)
-            ? getCurrentLocale() === "ru"
-              ? "Подготавливается Web Speech (Experimental)..."
-              : "Preparing Web Speech (Experimental)..."
-            : getCurrentLocale() === "ru"
-              ? "Подготавливается Web Speech..."
-              : "Preparing Web Speech..."
-          : getCurrentLocale() === "ru"
-            ? "Подготавливается ASR runtime..."
-            : "Preparing ASR runtime...",
+            ? t("runtime.start.preparing_experimental")
+            : t("runtime.start.preparing_web_speech")
+          : t("runtime.start.preparing_asr"),
         last_error: null,
       },
     });

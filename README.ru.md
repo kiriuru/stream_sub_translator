@@ -10,7 +10,7 @@
   <a href="./docs/CHANGELOG.md">Changelog</a>
 </p>
 
-SST Desktop — локальное Windows-приложение для стримеров и авторов, которым нужны субтитры в реальном времени с опциональным переводом. Оно объединяет live ASR, стилизацию субтитров, маршрутизацию и вывод в OBS в одном desktop-процессе. Проект local-first по умолчанию (`127.0.0.1`) и поддерживает как browser speech, так и local AI runtime paths. Текущая линия кода: `0.4.3`.
+SST Desktop — локальное Windows-приложение для стримеров и авторов, которым нужны субтитры в реальном времени с опциональным переводом. Оно объединяет live ASR, стилизацию субтитров, маршрутизацию и вывод в OBS в одном desktop-процессе. Проект local-first по умолчанию (`127.0.0.1`) и поддерживает как browser speech, так и local AI runtime paths. Текущая линия кода: `0.4.4`.
 
 ## ✨ Ключевые возможности
 
@@ -175,14 +175,14 @@ Build output:
 - bootstrap launchers:
   - `dist\bootstrap-launcher\Stream Subtitle Translator.exe`
   - `dist\bootstrap-launcher-web-only\Stream Subtitle Translator Only Web.exe`
-- versioned release bundle (local): `dist\desktop-releases\v0.4.3\` (`01-bootstrap-onefile\`, `01-bootstrap-web-only-onefile\`, `02-managed-app-onefolder\`, `03-installers-both\`, `README.txt`) для этой линии; старые деревья могут по-прежнему содержать `v0.4.1\` или `v0.4.0\`.
+- versioned release bundle (local): `dist\desktop-releases\v0.4.4\` (`01-bootstrap-onefile\`, `01-bootstrap-web-only-onefile\`, `02-managed-app-onefolder\`, `03-installers-both\`, `README.txt`) для этой линии; старые деревья могут по-прежнему содержать `v0.4.1\` или `v0.4.0\`.
 - publish script defaults (оба exe попадают в каждую папку):
   - `F:\AI\stream-sub-translator-desktop-release`
   - `F:\AI\stream-sub-translator-desktop-release-clean`
 
 Release package notes:
 
-- `Stream Subtitle Translator.exe` - стандартный bootstrap (payload следует `PROJECT_VERSION`, сейчас `0.4.3`)
+- `Stream Subtitle Translator.exe` - стандартный bootstrap (payload следует `PROJECT_VERSION`, сейчас `0.4.4`)
 - `Stream Subtitle Translator Only Web.exe` - только Web Speech (добавлен в `0.4.0`; по-прежнему поддерживается)
 - При первом запуске bootstrap launcher распаковывает managed runtime рядом с собой и запускает desktop runtime с диска.
 
@@ -264,7 +264,7 @@ Worker pipeline теперь добавляет несколько защит п
 - legacy language-based `subtitle_output.display_order` значения мигрируют в slot ids вида `translation_1`;
 - `/api/runtime/start` может применить optional normalized `config_payload` snapshot для runtime-only изменений без сохранения `user-data/config.json` (tracked через `active_config_source = runtime_start_snapshot`, `active_config_persisted = false`, `active_config_hash`);
 - config writes атомарны на Windows (temporary file рядом + `os.replace()`); поврежденный `user-data/config.json` ротируется в `*.corrupt-<timestamp>.json` и defaults восстанавливаются;
-- `backend/versioning.py` (`PROJECT_VERSION = "0.4.3"`) остается single source of truth.
+- `backend/versioning.py` (`PROJECT_VERSION = "0.4.4"`) остается single source of truth.
 
 ## Remote Notes
 
@@ -369,13 +369,12 @@ Dashboard settings UX (`0.4.1+`) использует idempotent DOM updates, т
 
 - Recognition behavior sliders: appearance speed, finalize speed, stability/noise sensitivity.
 - Опциональный RNNoise path.
-- Точные ASR timings остаются в `Tools & Data`.
+- Точный Parakeet realtime-тюнинг — вкладка **ASR Advanced** (кнопка `?` у каждого поля, однострочные «рекомендуемое» подсказки).
 
 ### Tools & Data
 
 - Runtime diagnostics/latency metrics.
 - Translation queue/provider state, Web Speech connectivity, OBS CC state, log locations.
-- Advanced ASR timing/gate values.
 - Live event feed, localization coverage, config/profile import-export controls.
 - `Export Diagnostics` создает локальный ZIP с redacted config, runtime/preflight snapshots, session log, backend log.
 
@@ -454,7 +453,7 @@ GitHub-tracked suite:
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
 ```
 
-Для `0.4.3` запускайте:
+Для `0.4.4` запускайте:
 
 ```powershell
 python -m unittest discover -s tests
@@ -468,7 +467,8 @@ python -m unittest discover -s tests
 
 ## Release Version
 
-- `0.4.3` (current code line)
+- `0.4.4` (current code line)
+- `0.4.3`
 - `0.4.1`
 - `0.4.0`
 - Version source of truth: `backend/versioning.py` (`PROJECT_VERSION`)

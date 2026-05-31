@@ -27,6 +27,9 @@
             <select id="ui-language-select">
               <option value="en" data-i18n="language.en">English</option>
               <option value="ru" data-i18n="language.ru">Русский</option>
+              <option value="ja" data-i18n="language.ja">日本語</option>
+              <option value="ko" data-i18n="language.ko">한국어</option>
+              <option value="zh" data-i18n="language.zh">中文</option>
             </select>
           </label>
         </div>
@@ -878,7 +881,7 @@
         <div class="toggle-row">
           <label class="checkbox-row">
             <input id="str-repl-builtin" type="checkbox" />
-            <span data-i18n="tools.source_replacement.builtin">Include built-in profanity list (English + Russian)</span>
+            <span data-i18n="tools.source_replacement.builtin">Include built-in profanity list (English, Russian, Japanese, Korean, Chinese)</span>
           </label>
         </div>
         <div class="toggle-row">
@@ -951,13 +954,15 @@
             <h2 data-i18n="tools.advanced.summary">Advanced Recognition &amp; Diagnostics</h2>
           </div>
         </div>
-        <div class="grid details-grid asr-advanced-grid">
-          <article class="asr-advanced-tuning-article">
-          <div class="actions">
-            <label class="inline-field annotated-field">
+        <article class="asr-advanced-tuning-article">
+          <div class="asr-advanced-fields-grid">
+            <div class="inline-field annotated-field">
               <div class="inline-field-head">
-                <span data-i18n="tools.advanced.vad_mode">VAD mode</span>
-                <strong class="inline-field-note" data-i18n="tools.advanced.vad_mode.note">def:3 safer:2</strong>
+                <span class="inline-field-title">
+                  <span data-i18n="tools.advanced.vad_mode">VAD mode</span>
+                </span>
+                <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.vad_mode.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+                <strong class="inline-field-note" data-i18n="tools.advanced.vad_mode.note">Recommended: 2</strong>
               </div>
               <select id="rt-vad-mode">
                 <option value="0" data-i18n="tools.advanced.vad_mode.0">0 - Fastest, most sensitive to speech and noise</option>
@@ -965,12 +970,15 @@
                 <option value="2" data-i18n="tools.advanced.vad_mode.2">2 - Stricter, calmer mode</option>
                 <option value="3" data-i18n="tools.advanced.vad_mode.3">3 - Strictest, least likely to trigger on noise</option>
               </select>
-            </label>
-            <div id="rt-tools-local-parakeet-extras" class="actions is-hidden">
-              <label class="inline-field annotated-field">
+            </div>
+            <div id="rt-tools-local-parakeet-extras" class="asr-advanced-parakeet-extras is-hidden">
+              <div class="inline-field annotated-field">
                 <div class="inline-field-head">
-                  <span data-i18n="tools.advanced.latency_preset">Latency preset</span>
-                  <strong class="inline-field-note" data-i18n="tools.advanced.latency_preset.note">same as Tuning tab</strong>
+                  <span class="inline-field-title">
+                    <span data-i18n="tools.advanced.latency_preset">Latency preset</span>
+                  </span>
+                  <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.latency_preset.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+                  <strong class="inline-field-note" data-i18n="tools.advanced.latency_preset.note">Recommended: Balanced</strong>
                 </div>
                 <select id="rt-tools-latency-preset">
                   <option value="ultra_low_latency" data-i18n="tuning.preset.ultra_low_latency">Ultra low latency</option>
@@ -978,141 +986,172 @@
                   <option value="quality" data-i18n="tuning.preset.quality">Quality</option>
                   <option value="custom" data-i18n="tuning.preset.custom">Custom</option>
                 </select>
-              </label>
-              <label class="checkbox-row">
+              </div>
+              <div class="checkbox-row checkbox-row-with-help">
                 <input id="rt-streaming-decode" type="checkbox" />
-                <span data-i18n="tools.advanced.streaming_decode">Incremental streaming decode (NeMo)</span>
-              </label>
-              <label class="inline-field annotated-field">
+                <label for="rt-streaming-decode" class="checkbox-row-label">
+                  <span data-i18n="tools.advanced.streaming_decode">Incremental streaming decode (NeMo)</span>
+                </label>
+                <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.streaming_decode.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+              </div>
+              <div class="inline-field annotated-field">
                 <div class="inline-field-head">
-                  <span data-i18n="tools.advanced.partial_emit_mode">Partial emit mode</span>
-                  <strong class="inline-field-note" data-i18n="tools.advanced.partial_emit_mode.note">word_growth recommended</strong>
+                  <span class="inline-field-title">
+                    <span data-i18n="tools.advanced.partial_emit_mode">Partial emit mode</span>
+                  </span>
+                  <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.partial_emit_mode.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+                  <strong class="inline-field-note" data-i18n="tools.advanced.partial_emit_mode.note">Recommended: word_growth</strong>
                 </div>
                 <select id="rt-partial-emit-mode">
                   <option value="word_growth">word_growth</option>
                   <option value="char_delta">char_delta</option>
                 </select>
-              </label>
-              <label class="inline-field annotated-field">
+              </div>
+              <div class="inline-field annotated-field">
                 <div class="inline-field-head">
-                  <span data-i18n="tools.advanced.partial_min_new_words">Min new words per partial</span>
-                  <strong class="inline-field-note" data-i18n="tools.advanced.partial_min_new_words.note">def:1</strong>
+                  <span class="inline-field-title">
+                    <span data-i18n="tools.advanced.partial_min_new_words">Min new words per partial</span>
+                  </span>
+                  <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.partial_min_new_words.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+                  <strong class="inline-field-note" data-i18n="tools.advanced.partial_min_new_words.note">Recommended: 1</strong>
                 </div>
                 <input id="rt-partial-min-new-words" type="number" min="1" max="8" step="1" />
-              </label>
-            </div>
-            <label class="inline-field annotated-field">
+              </div>
+            <div class="inline-field annotated-field">
               <div class="inline-field-head">
-                <span data-i18n="tools.advanced.partial_emit">Partial emit</span>
-                <strong class="inline-field-note" data-i18n="tools.advanced.partial_emit.note">def:450 safer:380-450</strong>
+                <span class="inline-field-title">
+                  <span data-i18n="tools.advanced.partial_emit">Partial emit</span>
+                </span>
+                <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.partial_emit.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+                <strong class="inline-field-note" data-i18n="tools.advanced.partial_emit.note">Recommended: 380-450</strong>
               </div>
               <input id="rt-partial-emit-interval" type="number" min="60" step="10" />
-            </label>
-            <label class="inline-field annotated-field">
+            </div>
+            <div class="inline-field annotated-field">
               <div class="inline-field-head">
-                <span data-i18n="tools.advanced.min_speech">Min speech</span>
-                <strong class="inline-field-note" data-i18n="tools.advanced.min_speech.note">def:180 safer:180-220</strong>
+                <span class="inline-field-title">
+                  <span data-i18n="tools.advanced.min_speech">Min speech</span>
+                </span>
+                <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.min_speech.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+                <strong class="inline-field-note" data-i18n="tools.advanced.min_speech.note">Recommended: 180-220</strong>
               </div>
               <input id="rt-min-speech" type="number" min="0" step="10" />
-            </label>
-          </div>
-          <div class="actions">
-            <label class="inline-field annotated-field">
+            </div>
+
+            <div class="inline-field annotated-field">
               <div class="inline-field-head">
-                <span data-i18n="tools.advanced.silence_hold">Silence hold</span>
-                <strong class="inline-field-note" data-i18n="tools.advanced.silence_hold.note">def:180 safer:160-220</strong>
+                <span class="inline-field-title">
+                  <span data-i18n="tools.advanced.silence_hold">Silence hold</span>
+                </span>
+                <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.silence_hold.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+                <strong class="inline-field-note" data-i18n="tools.advanced.silence_hold.note">Recommended: 160-220</strong>
               </div>
               <input id="rt-silence-hold" type="number" min="60" step="10" />
-            </label>
-            <label class="inline-field annotated-field">
+            </div>
+            <div class="inline-field annotated-field">
               <div class="inline-field-head">
-                <span data-i18n="tools.advanced.pause_finalize">Pause to finalize</span>
-                <strong class="inline-field-note" data-i18n="tools.advanced.pause_finalize.note">def:350 safer:350-450</strong>
+                <span class="inline-field-title">
+                  <span data-i18n="tools.advanced.pause_finalize">Pause to finalize</span>
+                </span>
+                <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.pause_finalize.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+                <strong class="inline-field-note" data-i18n="tools.advanced.pause_finalize.note">Recommended: 350-450</strong>
               </div>
               <input id="rt-finalization-hold" type="number" min="60" step="10" />
-            </label>
-          </div>
-          <div class="actions">
-            <label class="inline-field annotated-field">
+            </div>
+
+            <div class="inline-field annotated-field">
               <div class="inline-field-head">
-                <span data-i18n="tools.advanced.max_phrase">Hard max phrase</span>
-                <strong class="inline-field-note" data-i18n="tools.advanced.max_phrase.note">def:5500 safer:6000</strong>
+                <span class="inline-field-title">
+                  <span data-i18n="tools.advanced.max_phrase">Hard max phrase</span>
+                </span>
+                <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.max_phrase.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+                <strong class="inline-field-note" data-i18n="tools.advanced.max_phrase.note">Recommended: 6000</strong>
               </div>
               <input id="rt-max-segment" type="number" min="500" step="50" />
-            </label>
-            <label class="inline-field annotated-field">
+            </div>
+            <div class="inline-field annotated-field">
               <div class="inline-field-head">
-                <span data-i18n="tools.advanced.min_delta">Minimum text change before updating (chars)</span>
-                <strong class="inline-field-note" data-i18n="tools.advanced.min_delta.note">def:4 safer:10</strong>
+                <span class="inline-field-title">
+                  <span data-i18n="tools.advanced.min_delta">Minimum text change before updating (chars)</span>
+                </span>
+                <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.min_delta.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+                <strong class="inline-field-note" data-i18n="tools.advanced.min_delta.note">Recommended: 10</strong>
               </div>
               <input id="rt-partial-min-delta" type="number" min="0" step="1" />
-            </label>
-          </div>
-          <div class="actions">
-            <label class="inline-field annotated-field">
+            </div>
+
+            <div class="inline-field annotated-field">
               <div class="inline-field-head">
-                <span data-i18n="tools.advanced.coalescing">Partial coalescing</span>
-                <strong class="inline-field-note" data-i18n="tools.advanced.coalescing.note">def:160 safer:140-180</strong>
+                <span class="inline-field-title">
+                  <span data-i18n="tools.advanced.coalescing">Partial coalescing</span>
+                </span>
+                <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.coalescing.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+                <strong class="inline-field-note" data-i18n="tools.advanced.coalescing.note">Recommended: 140-180</strong>
               </div>
               <input id="rt-partial-coalescing" type="number" min="0" step="10" />
-            </label>
-            <label class="inline-field annotated-field">
+            </div>
+            <div class="inline-field annotated-field">
               <div class="inline-field-head">
-                <span data-i18n="tools.advanced.chunk_window">Chunk window</span>
-                <strong class="inline-field-note" data-i18n="tools.advanced.chunk_window.note">def:0 safer:0</strong>
+                <span class="inline-field-title">
+                  <span data-i18n="tools.advanced.chunk_window">Chunk window</span>
+                </span>
+                <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.chunk_window.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+                <strong class="inline-field-note" data-i18n="tools.advanced.chunk_window.note">Recommended: 0</strong>
               </div>
               <input id="rt-chunk-window" type="number" min="0" step="50" />
-            </label>
-          </div>
-          <div class="actions">
-            <label class="inline-field annotated-field">
+            </div>
+
+            <div class="inline-field annotated-field">
               <div class="inline-field-head">
-                <span data-i18n="tools.advanced.chunk_overlap">Chunk overlap</span>
-                <strong class="inline-field-note" data-i18n="tools.advanced.chunk_overlap.note">def:0 safer:0</strong>
+                <span class="inline-field-title">
+                  <span data-i18n="tools.advanced.chunk_overlap">Chunk overlap</span>
+                </span>
+                <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.chunk_overlap.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+                <strong class="inline-field-note" data-i18n="tools.advanced.chunk_overlap.note">Recommended: 0</strong>
               </div>
               <input id="rt-chunk-overlap" type="number" min="0" step="50" />
-            </label>
-          </div>
-          <div class="toggle-row">
-            <label class="checkbox-row">
+            </div>
+            <div class="checkbox-row checkbox-row-with-help asr-advanced-checkbox-field">
               <input id="rt-energy-gate-enabled" type="checkbox" />
-              <span data-i18n="tools.advanced.ignore_quiet">Ignore very quiet input before ASR</span>
-            </label>
-          </div>
-          <div class="actions">
-            <label class="inline-field annotated-field">
+              <label for="rt-energy-gate-enabled" class="checkbox-row-label">
+                <span data-i18n="tools.advanced.ignore_quiet">Ignore very quiet input before ASR</span>
+              </label>
+              <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.ignore_quiet.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+            </div>
+
+            <div class="inline-field annotated-field">
               <div class="inline-field-head">
-                <span data-i18n="tools.advanced.min_rms">Min RMS</span>
-                <strong class="inline-field-note" data-i18n="tools.advanced.min_rms.note">def:0.0018 safer:off</strong>
+                <span class="inline-field-title">
+                  <span data-i18n="tools.advanced.min_rms">Min RMS</span>
+                </span>
+                <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.min_rms.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+                <strong class="inline-field-note" data-i18n="tools.advanced.min_rms.note">Recommended: off</strong>
               </div>
               <input id="rt-min-rms" type="number" min="0" max="0.05" step="0.0001" />
-            </label>
-            <label class="inline-field annotated-field">
+            </div>
+            <div class="inline-field annotated-field">
               <div class="inline-field-head">
-                <span data-i18n="tools.advanced.min_voiced_ratio">Min voiced ratio</span>
-                <strong class="inline-field-note" data-i18n="tools.advanced.min_voiced_ratio.note">def:0.0 safer:0.25</strong>
+                <span class="inline-field-title">
+                  <span data-i18n="tools.advanced.min_voiced_ratio">Min voiced ratio</span>
+                </span>
+                <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.min_voiced_ratio.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+                <strong class="inline-field-note" data-i18n="tools.advanced.min_voiced_ratio.note">Recommended: 0.25</strong>
               </div>
               <input id="rt-min-voiced-ratio" type="number" min="0" max="1" step="0.01" />
-            </label>
-          </div>
-          <div class="actions">
-            <label class="inline-field annotated-field">
+            </div>
+
+            <div class="inline-field annotated-field">
               <div class="inline-field-head">
-                <span data-i18n="tools.advanced.first_partial">First partial speech</span>
-                <strong class="inline-field-note" data-i18n="tools.advanced.first_partial.note">def:180 safer:180-250</strong>
+                <span class="inline-field-title">
+                  <span data-i18n="tools.advanced.first_partial">First partial speech</span>
+                </span>
+                <button type="button" class="field-help-btn" data-field-help-key="tools.advanced.first_partial.help" data-i18n-aria-label="tools.advanced.field_help.aria" aria-expanded="false">?</button>
+                <strong class="inline-field-note" data-i18n="tools.advanced.first_partial.note">Recommended: 180-250</strong>
               </div>
               <input id="rt-first-partial-min-speech" type="number" min="0" step="10" />
-            </label>
+            </div>
           </div>
-          </article>
-          <article class="asr-advanced-notes">
-            <p class="muted" data-i18n="tools.notes.1">Lower partial emit and silence hold values feel faster, but can increase flicker.</p>
-            <p class="muted" data-i18n="tools.notes.2">`Pause to finalize` controls when a spoken phrase becomes one completed subtitle block.</p>
-            <p class="muted" data-i18n="tools.notes.3">`Chunk window` and `chunk overlap` remain advanced compatibility controls. Leave them at `0` unless you are testing a specific backend tuning case.</p>
-            <p class="muted" data-i18n="tools.notes.4">`Min RMS` and `Min voiced ratio` are optional filters for quiet room noise and weak false starts. If recognition quality drops, turn the quiet-input gate back off.</p>
-            <p class="muted" data-i18n="tools.notes.vad">VAD modes: 0 = fastest and most sensitive, 1 = responsive balanced, 2 = stricter and calmer, 3 = strictest and least likely to trigger on noise.</p>
-          </article>
-        </div>
+        </article>
             </section>
         </div>
 
@@ -1247,6 +1286,9 @@
           <select id="ui-language-select-settings">
             <option value="en" data-i18n="language.en">English</option>
             <option value="ru" data-i18n="language.ru">Русский</option>
+            <option value="ja" data-i18n="language.ja">日本語</option>
+            <option value="ko" data-i18n="language.ko">한국어</option>
+            <option value="zh" data-i18n="language.zh">中文</option>
           </select>
         </label>
         <label class="checkbox-row settings-remote-tools-toggle">
@@ -1312,13 +1354,15 @@
     <footer class="app-footer">
       <span>Powered by Kiriuru</span>
     </footer>
-    <div class="project-version-tag" title="Project version">v0.4.3</div>
+    <div class="project-version-tag" title="Project version">v0.4.4</div>
 
     <script src="/static/js/core/redaction.js?v=20260505a"></script>
     <script src="/static/js/subtitle-style.js?v=20260525a"></script>
     <script src="/static/js/desktop-ui-trace.js?v=20260524a"></script>
     <script src="/static/js/desktop.js?v=20260524a"></script>
-    <script src="/static/js/i18n.js?v=20260525a"></script>
-    <script type="module" src="/static/js/main.js?v=20260525a"></script>
+    <script src="/static/js/i18n/locales-bundle.js?v=20260601b"></script>
+    <script src="/static/js/i18n/dynamic-locales.js?v=20260601b"></script>
+    <script src="/static/js/i18n.js?v=20260601b"></script>
+    <script type="module" src="/static/js/main.js?v=20260531e"></script>
   </body>
 </html>

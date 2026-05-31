@@ -22,6 +22,35 @@ This WIKI is written as an operational guide for each UI element:
 
 ---
 
+## 0.1 Notes for 0.4.4
+
+### Element: OpenAI provider `base_url` (Translation panel)
+- **What it does:** when the app is bound beyond localhost (LAN remote / `SST_ALLOW_LAN=1`), OpenAI helper routes block private/loopback/metadata URLs in `base_url` to reduce SSRF risk.
+- **Default local use:** on `127.0.0.1` bind, local OpenAI-compatible servers (`http://127.0.0.1:...`) remain allowed.
+- **Impact:** only `/api/openai/models` and `/api/openai/usable-models`; translation providers are unchanged.
+
+### Element: overlay during WebSocket disconnect
+- **What it does:** OBS overlay keeps the last rendered subtitle frame while reconnecting.
+- **How:** shared stale guard + exponential reconnect (1–10 s) aligned with dashboard `WsClient`.
+- **When to use:** normal OBS operation; no manual refresh required after brief backend restarts.
+
+### Element: desktop context in dashboard store
+- **What it does:** desktop launch metadata (paths, mode, profile lock hints) lives in `store.desktop` instead of scattered `AppState` writes.
+- **Impact:** panels read the same snapshot after `sst:desktop-context`; fewer race conditions on pywebview startup.
+
+### Element: interface language (EN / RU / JA / KO / ZH)
+- **What it does:** switches dashboard, Browser Speech worker, and OBS overlay strings via `window.I18n` (`frontend/js/i18n.js`).
+- **Architecture (0.4.4):** split `frontend/js/i18n/locales/*.js` plus synchronous `locales-bundle.js` (single script for WebView2) and `dynamic-locales.js` for late en/ru keys; ja/ko/zh are full catalogs in `ja.js` / `ko.js` / `zh.js`. Language changes are instant (no network fetch).
+- **Impact:** tab labels, buttons, hints (including overlay preset hints), translation/ASR empty states; persisted in `ui.language` and `localStorage` (`sst.ui.language`); selector change saves config immediately (no extra Save).
+- **Details:** `docs/TECHNICAL_ARCHITECTURE.en.md` §16.8.
+
+### Element: subtitle preview before Start
+- **What it does:** in the “Current slice” block, placeholder text (“Source subtitle preview” / translation labels) stays visible while tuning styles and after **Save** until runtime is started.
+- **Why:** style calibration without running ASR; empty post-save `overlay_update` from WS no longer clears the dashboard preview.
+- **Details:** `docs/TECHNICAL_ARCHITECTURE.en.md` §16.7.6.
+
+---
+
 ## 1. Quick Start
 
 ### Element: startup profile
@@ -268,7 +297,11 @@ After tuning, save config/profile and restart runtime (`Stop` -> `Start`).
 
 ## 10. Advanced Recognition & Diagnostics
 
-This section is for fine-grained adaptation to mic quality, room noise, and speaking rhythm.
+This section is for fine-grained adaptation to mic quality, room noise, and speaking rhythm. Open the **ASR Advanced** dashboard tab.
+
+### Element: `?` help button (each field)
+- **What it does:** opens a short popover explaining that setting and how it affects recognition.
+- **Recommended line:** the value on the right (`Recommended: …`) is a practical starting point, not a hard limit.
 
 ### Group: sensitivity and thresholds
 - Controls VAD/noise gating behavior.
@@ -298,7 +331,7 @@ This section is for fine-grained adaptation to mic quality, room noise, and spea
 - **Why useful:** moderation, brand term normalization, repeated ASR correction.
 
 ### Element: built-in profanity list
-- **What it does:** quickly enables RU+EN baseline filtering.
+- **What it does:** quickly enables baseline filtering for English, Russian, Japanese, Korean, and Chinese.
 - **Impact:** translation receives already replaced text, not original raw token.
 
 ### Element: matching rules (`Case-insensitive`, `Whole words only`)

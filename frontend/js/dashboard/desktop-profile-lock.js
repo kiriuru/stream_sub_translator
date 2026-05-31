@@ -1,13 +1,13 @@
 export const DESKTOP_PROFILE_LOCK_BROWSER_SPEECH = "browser_speech";
 
 export function isDesktopBrowserQuickStartLocked(config, desktopContext = null) {
+  const desktop = desktopContext && typeof desktopContext === "object" ? desktopContext : {};
+  if (!desktop.desktop_mode) {
+    return false;
+  }
   const lock = String(config?.asr?.desktop_profile_lock || "").toLowerCase();
   if (lock === DESKTOP_PROFILE_LOCK_BROWSER_SPEECH) {
     return true;
-  }
-  const desktop = desktopContext || (typeof window !== "undefined" ? window.AppState?.desktop : null) || {};
-  if (!desktop.desktop_mode) {
-    return false;
   }
   if (desktop.web_speech_only) {
     return true;
@@ -15,11 +15,11 @@ export function isDesktopBrowserQuickStartLocked(config, desktopContext = null) 
   return String(desktop.startup_mode || "").toLowerCase() === "browser_google";
 }
 
-export function applyDesktopProfileLockToAsrConfig(config) {
+export function applyDesktopProfileLockToAsrConfig(config, desktopContext = null) {
   if (!config || typeof config !== "object") {
     return config;
   }
-  if (!isDesktopBrowserQuickStartLocked(config)) {
+  if (!isDesktopBrowserQuickStartLocked(config, desktopContext)) {
     return config;
   }
   if (!config.asr || typeof config.asr !== "object") {

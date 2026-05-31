@@ -1,6 +1,6 @@
 import { collectElements, setCheckedIfChanged, setInputValueIfChanged } from "../core/dom.js";
 import { createPanelMount } from "../core/panel-mount.js";
-import { escapeHtml, getCurrentLocale, setElementVisibility, t } from "../dashboard/helpers.js";
+import { escapeHtml, setElementVisibility, t } from "../dashboard/helpers.js";
 import { traceUi } from "../dashboard/ui-trace.js";
 import { renderSubtitleDisplayOrder } from "./overlay/overlay-display-order-view.js";
 
@@ -75,11 +75,11 @@ function renderPreview(container, payload, state) {
   }
   if (!payload) {
     window.SubtitleStyleRenderer?.disposeRenderContainer?.(container);
-    container.innerHTML = `<p class="muted">${escapeHtml(getCurrentLocale() === "ru" ? "Предпросмотр стиля субтитров появится после загрузки config." : "Subtitle style preview is unavailable until config loads.")}</p>`;
+    container.innerHTML = `<p class="muted">${escapeHtml(t("overlay.preview.config_not_loaded"))}</p>`;
     return;
   }
   if (!window.SubtitleStyleRenderer) {
-    container.innerHTML = `<p class="muted">${escapeHtml(getCurrentLocale() === "ru" ? "SubtitleStyleRenderer недоступен." : "SubtitleStyleRenderer unavailable.")}</p>`;
+    container.innerHTML = `<p class="muted">${escapeHtml(t("overlay.preview.renderer_unavailable"))}</p>`;
     return;
   }
   const subtitleDebug = isSubtitleDebugEnabled();
@@ -90,7 +90,7 @@ function renderPreview(container, payload, state) {
   });
   if (result.empty) {
     window.SubtitleStyleRenderer?.disposeRenderContainer?.(container);
-    container.innerHTML = `<p class="muted">${escapeHtml(getCurrentLocale() === "ru" ? "По текущим настройкам сейчас нет видимых строк субтитров." : "No visible subtitle lines for the current settings yet.")}</p>`;
+    container.innerHTML = `<p class="muted">${escapeHtml(t("overlay.preview.no_visible_lines"))}</p>`;
     return;
   }
   // The renderer owns the `.subtitle-stage-shell` wrapper inside `container`
@@ -104,12 +104,10 @@ function renderPreview(container, payload, state) {
   staleNotes.forEach((node) => node.remove());
   if (state.overlay?.payload) {
     const noteText = payload.completed_block_visible
-      ? getCurrentLocale() === "ru"
-        ? `Живой блок субтитров${payload.sequence ? ` #${payload.sequence}` : ""}.`
-        : `Live subtitle block${payload.sequence ? ` #${payload.sequence}` : ""}.`
-      : getCurrentLocale() === "ru"
-        ? "Предпросмотр live-partial."
-        : "Live partial preview.";
+      ? t("overlay.preview.live_block", {
+          suffix: payload.sequence ? ` #${payload.sequence}` : "",
+        })
+      : t("overlay.preview.live_partial");
     const note = document.createElement("p");
     note.className = "subtitle-stage-note";
     note.textContent = noteText;
@@ -131,16 +129,10 @@ function renderOverlayPanel(snapshot, elements, { actions }) {
     const preset = config.overlay?.preset || "single";
     elements.presetHint.textContent =
       preset === "single"
-        ? getCurrentLocale() === "ru"
-          ? "Одна строка: все видимые элементы выводятся в одном физическом ряду слева направо по сохранённому порядку."
-          : "Single: all visible subtitle items are rendered inside one physical row in the saved order."
+        ? t("overlay.preset_hint.single")
         : preset === "dual-line"
-          ? getCurrentLocale() === "ru"
-            ? "Две строки: первый видимый элемент идёт в верхний ряд, остальные делят нижний ряд."
-            : "Dual-line: the first visible item uses the top row, and the remaining visible items share the second row."
-          : getCurrentLocale() === "ru"
-            ? "Стопка: каждый видимый элемент получает собственный ряд."
-            : "Stacked: each visible subtitle item gets its own row.";
+          ? t("overlay.preset_hint.dual_line")
+          : t("overlay.preset_hint.stacked");
   }
   renderSubtitleDisplayOrder(elements.displayOrder, snapshot, {
     onSelect: (code) => actions.updateSubtitleSelection(code),

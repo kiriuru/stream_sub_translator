@@ -1,6 +1,6 @@
 import { normalizeDiagnostics } from "../../normalizers/diagnostics-normalizer.js";
 import { mergeFontCatalogPreservingSystem } from "../action-helpers.js";
-import { getCurrentLocale } from "../helpers.js";
+import { t } from "../helpers.js";
 
 // Caches the most recent system-font catalog snapshot in localStorage so that
 // the dropdown re-populates without requiring the user to click "Refresh
@@ -71,13 +71,9 @@ export function createDataActions({ store, api, logger, configActions }) {
       },
     });
     if (currentDevices.length) {
-      logger(
-        getCurrentLocale() === "ru"
-          ? `[audio] найдено входных устройств: ${currentDevices.length}`
-          : `[audio] detected ${currentDevices.length} input device(s)`
-      );
+      logger(t("log.audio.devices_found", { count: currentDevices.length }));
     } else {
-      logger(getCurrentLocale() === "ru" ? "[audio] входные устройства не найдены" : "[audio] no input devices found");
+      logger(t("log.audio.no_devices"));
     }
   }
 
@@ -132,16 +128,37 @@ export function createDataActions({ store, api, logger, configActions }) {
   }
 
   async function loadInitialData() {
+    const errors = [];
     // Restore any system fonts the user picked in a previous session so the
     // selector is usable immediately, even before they grant Local Font Access
     // again. Fresh enumeration still happens on demand via refreshSystemFonts.
     hydrateSystemFontsFromCache();
     const [versionInfo, health, obs, settings, audioInputs] = await Promise.all([
-      api.getVersionInfo().catch(() => null),
-      api.getHealth().catch(() => null),
-      api.getObsUrl().catch(() => null),
-      api.loadSettings(),
-      api.getAudioInputs(),
+      api.getVersionInfo().catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(t("bootstrap.error.version", { error: message }));
+        return null;
+      }),
+      api.getHealth().catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(t("bootstrap.error.health", { error: message }));
+        return null;
+      }),
+      api.getObsUrl().catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(t("bootstrap.error.obs_url", { error: message }));
+        return null;
+      }),
+      api.loadSettings().catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(t("bootstrap.error.settings", { error: message }));
+        return null;
+      }),
+      api.getAudioInputs().catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(t("bootstrap.error.audio", { error: message }));
+        return null;
+      }),
     ]);
 
     if (versionInfo) {
@@ -183,6 +200,18 @@ export function createDataActions({ store, api, logger, configActions }) {
     if (health?.translation_diagnostics?.summary) {
       logger(`[translation] ${health.translation_diagnostics.summary}`);
     }
+    if (errors.length > 0) {
+      const message = t("bootstrap.incomplete", { errors: errors.join("; ") });
+      store.patchUi({
+        saveStatus: message,
+        saveTone: settings ? "warn" : "error",
+      });
+      logger(`[bootstrap] ${message}`);
+      if (!settings) {
+        throw new Error(message);
+      }
+    }
+    return { ok: errors.length === 0, errors };
   }
 
   async function exportDiagnostics() {
@@ -197,7 +226,7 @@ export function createDataActions({ store, api, logger, configActions }) {
     anchor.download = download.filename || "sst-diagnostics.zip";
     anchor.click();
     URL.revokeObjectURL(url);
-    logger(getCurrentLocale() === "ru" ? "[diagnostics] архив экспортирован" : "[diagnostics] bundle exported");
+    logger(t("log.diagnostics.exported"));
   }
 
   async function listOpenAiModels({ apiKey, baseUrl, showAll } = {}) {

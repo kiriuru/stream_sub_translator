@@ -1,6 +1,6 @@
 import { collectElements, setCheckedIfChanged, setInputValueIfChanged } from "../core/dom.js";
 import { createPanelMount } from "../core/panel-mount.js";
-import { getCurrentLocale, t } from "../dashboard/helpers.js";
+import { t } from "../dashboard/helpers.js";
 
 function renderObsCaptionsPanel(snapshot, elements) {
   const config = snapshot.config?.obs_closed_captions;
@@ -26,25 +26,15 @@ function renderObsCaptionsPanel(snapshot, elements) {
     return;
   }
   if (!diagnostics.enabled) {
-    elements.statusText.textContent =
-      getCurrentLocale() === "ru"
-        ? "OBS Closed Captions выключены. На browser overlay это не влияет."
-        : "OBS Closed Captions are disabled. The browser overlay remains unchanged.";
+    elements.statusText.textContent = t("obs.cc.status.disabled");
   } else if (diagnostics.connection_state === "connected") {
-    elements.statusText.textContent =
-      getCurrentLocale() === "ru"
-        ? `OBS websocket подключён, режим: ${diagnostics.output_mode || config.output_mode}.`
-        : `Connected to OBS websocket, mode: ${diagnostics.output_mode || config.output_mode}.`;
+    elements.statusText.textContent = t("obs.cc.status.connected", {
+      mode: diagnostics.output_mode || config.output_mode,
+    });
   } else if (diagnostics.last_error) {
-    elements.statusText.textContent =
-      getCurrentLocale() === "ru"
-        ? `OBS captions включены, но не подключены: ${diagnostics.last_error}`
-        : `OBS captions are enabled but not connected: ${diagnostics.last_error}`;
+    elements.statusText.textContent = t("obs.cc.status.error", { error: diagnostics.last_error });
   } else {
-    elements.statusText.textContent =
-      getCurrentLocale() === "ru"
-        ? "OBS captions включены и ждут подключение к OBS websocket."
-        : "OBS captions are enabled and waiting for the OBS websocket connection.";
+    elements.statusText.textContent = t("obs.cc.status.waiting");
   }
 }
 

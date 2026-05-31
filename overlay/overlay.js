@@ -47,11 +47,16 @@
   };
 
   const debugEntries = [];
-  const staleGuards = {
-    overlay_update: { lastCreatedAt: 0, lastSequence: 0 },
-    transcript_update: { lastCreatedAt: 0, lastSequence: 0 },
+  const staleGuard = window.SstWsStaleGuard?.createWsStaleGuardState?.() || {
+    sequenceByType: new Map(),
+    timestampByType: new Map(),
   };
+  const normalizeWsEventType = window.SstWsStaleGuard?.normalizeWsEventType || ((type) => String(type || "").trim().toLowerCase());
+  const isWsEventStale = window.SstWsStaleGuard?.isWsEventStale || (() => false);
   let connectionId = 0;
+  let reconnectBackoffMs = 1000;
+  const maxReconnectBackoffMs = 10000;
+  let reconnectTimer = null;
 
   function sendUiTracePayload(payload) {
     const body = JSON.stringify(payload);
@@ -325,13 +330,9 @@
   }
 
   function applyOverlayPayload(payload) {
-    const createdAt = Number(payload?.created_at_ms) || 0;
-    if (Number.isFinite(createdAt) && createdAt > 0 && createdAt < staleGuards.overlay_update.lastCreatedAt) {
+    if (isWsEventStale(staleGuard, "overlay_update", payload)) {
       writeDebug("overlay payload", "ignored stale overlay_update");
       return;
-    }
-    if (Number.isFinite(createdAt) && createdAt > 0) {
-      staleGuards.overlay_update.lastCreatedAt = createdAt;
     }
     overlayState.hasOverlayLifecycle = true;
     clearLegacyTranscriptState();
@@ -402,6 +403,7 @@
         }
         return;
       }
+      reconnectBackoffMs = 1000;
       writeDebug("ws connected", `profile=${profile}, preset=${overlayState.preset}, debug=${debugMode ? "on" : "off"}`);
     });
 
@@ -411,25 +413,18 @@
       }
       try {
         const data = JSON.parse(event.data);
-        if (data.type === "transcript_update" && data.payload) {
-          const createdAt = Number(data.payload?.created_at_ms) || 0;
-          const sequence = Number(data.payload?.event_sequence ?? data.payload?.sequence) || 0;
-          if (Number.isFinite(createdAt) && createdAt > 0 && createdAt < staleGuards.transcript_update.lastCreatedAt) {
+        const eventType = normalizeWsEventType(data.type);
+        if (eventType === "transcript_update" && data.payload) {
+          if (isWsEventStale(staleGuard, eventType, data.payload)) {
             return;
-          }
-          if (Number.isFinite(sequence) && sequence > 0 && sequence < staleGuards.transcript_update.lastSequence) {
-            return;
-          }
-          if (Number.isFinite(createdAt) && createdAt > 0) {
-            staleGuards.transcript_update.lastCreatedAt = createdAt;
-          }
-          if (Number.isFinite(sequence) && sequence > 0) {
-            staleGuards.transcript_update.lastSequence = sequence;
           }
           applyTranscript(data.payload);
           return;
         }
-        if (data.type === "overlay_update" && data.payload) {
+        if (eventType === "overlay_update" && data.payload) {
+          if (isWsEventStale(staleGuard, eventType, data.payload)) {
+            return;
+          }
           applyOverlayPayload(data.payload);
         }
       } catch (_error) {
@@ -441,9 +436,15 @@
       if (currentConnectionId !== connectionId) {
         return;
       }
-      clearOverlayPresentation("websocket disconnected");
-      writeDebug("ws disconnected", "reconnecting in 1s");
-      setTimeout(connect, 1000);
+      writeDebug("ws disconnected", `keeping last frame; reconnect in ${reconnectBackoffMs}ms`);
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+      }
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, reconnectBackoffMs);
+      reconnectBackoffMs = Math.min(maxReconnectBackoffMs, reconnectBackoffMs * 2);
     });
 
     ws.addEventListener("error", () => {

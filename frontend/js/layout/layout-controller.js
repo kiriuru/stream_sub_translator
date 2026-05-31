@@ -1,3 +1,5 @@
+import { escapeHtml } from "../dashboard/helpers.js";
+
 const LAYOUT_STANDARD = "standard";
 const LAYOUT_COMPACT = "compact";
 
@@ -281,7 +283,7 @@ function renderCompactNav(root, actions) {
     navBtn.dataset.compactTabTarget = item.target;
     navBtn.title = label;
     navBtn.setAttribute("aria-label", label);
-    navBtn.innerHTML = `<span class="compact-nav-item-icon" aria-hidden="true">${item.icon}</span><span class="compact-nav-item-label">${label}</span>`;
+    navBtn.innerHTML = `<span class="compact-nav-item-icon" aria-hidden="true">${item.icon}</span><span class="compact-nav-item-label">${escapeHtml(label)}</span>`;
     navBtn.addEventListener("click", () => {
       activateCompactTab(item.target, actions);
       closeCompactNav(root);

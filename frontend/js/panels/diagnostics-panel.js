@@ -1,7 +1,7 @@
 import { collectElements, setInputValueIfChanged } from "../core/dom.js";
 import { createPanelMount } from "../core/panel-mount.js";
 import { selectAsrMode } from "../core/selectors.js";
-import { formatMetric, formatOptionalMetric, isBrowserRecognitionMode, t } from "../dashboard/helpers.js";
+import { formatDiagnosticMetric, formatMetric, isBrowserRecognitionMode, t } from "../dashboard/helpers.js";
 
 function renderDiagnosticsPanel(snapshot, elements) {
   const diagnostics = snapshot.diagnostics?.asr || {};
@@ -19,15 +19,15 @@ function renderDiagnosticsPanel(snapshot, elements) {
       elements.localParakeetSavedConfigSummary.hidden = false;
       const rt = snapshot.config?.asr?.realtime || {};
       const preset = String(rt.latency_preset || "balanced");
-      const incremental = rt.streaming_decode !== false;
+      const incremental = rt.streaming_decode !== false ? "on" : "off";
       const emitMode = String(rt.partial_emit_mode || "word_growth");
       const minWords = Math.max(1, Number(rt.partial_min_new_words ?? 1) || 1);
       const raw = snapshot.diagnostics?.asr?.raw;
       const engineKnown = raw && typeof raw === "object" && "true_streaming" in raw;
-      const engine = engineKnown ? (raw.true_streaming === true ? t("common.yes") : t("common.no")) : t("common.not_available");
-      elements.localParakeetSavedConfigSummary.textContent = t("runtime.local_realtime.line", {
+      const engine = engineKnown ? (raw.true_streaming === true ? "yes" : "no") : "n/a";
+      elements.localParakeetSavedConfigSummary.textContent = t("diagnostics.local_parakeet.line", {
         preset,
-        incremental: incremental ? t("common.on") : t("common.off"),
+        incremental,
         emitMode,
         minWords: String(minWords),
         engine,
@@ -75,7 +75,7 @@ function renderDiagnosticsPanel(snapshot, elements) {
   if (elements.translationRuntimeText) {
     elements.translationRuntimeText.textContent = [
       `queue: ${translationDiagnostics.queue_depth ?? metrics.translation_queue_depth ?? 0}`,
-      `provider latency: ${formatOptionalMetric(translationDiagnostics.provider_latency_ms)}`,
+      `provider latency: ${formatDiagnosticMetric(translationDiagnostics.provider_latency_ms)}`,
     ].join(" | ");
   }
   if (elements.browserWorkerDiagnosticsText) {

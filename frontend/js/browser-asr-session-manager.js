@@ -563,7 +563,9 @@
         this._setLastError("not-allowed", message);
         this.state.desiredRunning = false;
         this._setSupervisorState("fatal");
-        this._setStatus(this._locale() === "ru" ? `ошибка микрофона: ${message}` : `mic-error: ${message}`);
+        this._setStatus(
+          (global.I18n?.t ? global.I18n.t("browser_asr.mic_error_status", { message }) : `mic-error: ${message}`)
+        );
         this._setTerminalDegradedReason("permission_denied");
         this._emitWorkerStatus("microphone-permission-failed");
         return;

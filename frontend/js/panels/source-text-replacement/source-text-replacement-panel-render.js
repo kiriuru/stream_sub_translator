@@ -1,5 +1,5 @@
 import { collectElements } from "../../core/dom.js";
-import { getCurrentLocale } from "../../dashboard/helpers.js";
+import { t } from "../../dashboard/helpers.js";
 
 export const MAX_PAIRS = 100;
 export const MAX_FIELD_LEN = 240;
@@ -105,9 +105,5 @@ export function ensureReplacementBlock(draft) {
 }
 
 export function logPairLimit(logger) {
-  logger(
-    getCurrentLocale() === "ru"
-      ? `[source-text-replacement] не более ${MAX_PAIRS} своих пар`
-      : `[source-text-replacement] at most ${MAX_PAIRS} custom pairs`
-  );
+  logger(t("source_text_replacement.pair_limit_log", { max: MAX_PAIRS }));
 }

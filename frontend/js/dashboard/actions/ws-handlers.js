@@ -2,7 +2,7 @@ import { normalizeDiagnostics } from "../../normalizers/diagnostics-normalizer.j
 import { normalizeModelStatus } from "../../normalizers/model-normalizer.js";
 import { normalizeOverlayPayload } from "../../normalizers/overlay-normalizer.js";
 import { normalizeTranslationResult } from "../../normalizers/translation-normalizer.js";
-import { clone, getCurrentLocale, getProviderMeta } from "../helpers.js";
+import { clone, getProviderMeta, t } from "../helpers.js";
 import { addTranslationEntry } from "../action-helpers.js";
 
 export function createWsHandlers({ store, runtimeActions, events }) {
@@ -52,25 +52,19 @@ export function createWsHandlers({ store, runtimeActions, events }) {
     const meta = normalized.provider ? getProviderMeta(normalized.provider) : null;
     const labelParts = [];
     if (normalized.provider) {
-      labelParts.push(
-        getCurrentLocale() === "ru"
-          ? `Провайдер: ${meta?.label || normalized.provider}`
-          : `Provider: ${meta?.label || normalized.provider}`
-      );
+      labelParts.push(t("translation.ws.provider", { label: meta?.label || normalized.provider }));
     }
     if (normalized.provider_group) {
-      labelParts.push(
-        getCurrentLocale() === "ru" ? `Группа: ${normalized.provider_group}` : `Group: ${normalized.provider_group}`
-      );
+      labelParts.push(t("translation.ws.group", { group: normalized.provider_group }));
     }
     if (normalized.local_provider) {
-      labelParts.push(getCurrentLocale() === "ru" ? "Локальный провайдер" : "Local provider");
+      labelParts.push(t("translation.ws.local_provider"));
     }
     if (normalized.experimental) {
-      labelParts.push(getCurrentLocale() === "ru" ? "Экспериментально" : "Experimental");
+      labelParts.push(t("translation.ws.experimental"));
     }
     if (normalized.used_default_prompt) {
-      labelParts.push(getCurrentLocale() === "ru" ? "Prompt по умолчанию" : "Default prompt");
+      labelParts.push(t("translation.ws.default_prompt"));
     }
     entry.providerLabel = labelParts.join(" | ");
     entry.statusMessage = normalized.status_message || "";

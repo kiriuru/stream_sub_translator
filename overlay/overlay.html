@@ -15,7 +15,13 @@
         <div id="line-2" class="overlay-line overlay-line-secondary"></div>
       </div>
     </div>
-    <script src="/static/js/i18n.js?v=20260422a"></script>
+    <script src="/static/js/i18n/locales-bundle.js?v=20260601b"></script>
+    <script src="/static/js/i18n/dynamic-locales.js?v=20260601b"></script>
+    <script src="/static/js/i18n.js?v=20260601b"></script>
+    <script type="module">
+      import * as SstWsStaleGuard from "/static/js/core/ws-stale-guard-logic.js";
+      window.SstWsStaleGuard = SstWsStaleGuard;
+    </script>
     <script src="/static/js/subtitle-style.js?v=20260525a"></script>
     <script src="/overlay-assets/overlay.js?v=20260525a"></script>
   </body>

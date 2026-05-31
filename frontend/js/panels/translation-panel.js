@@ -125,7 +125,7 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
       return;
     }
     const entry = snapshot.translation?.currentEntry;
-    const resultsKey = buildTranslationResultsKey(entry);
+    const resultsKey = `${getCurrentLocale()}|${buildTranslationResultsKey(entry)}`;
     if (resultsKey === lastResultsRenderKey) {
       return;
     }
@@ -315,15 +315,12 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
       applyModelSelectOptions({ showAll: elements.modelShowAll?.checked });
       if (elements.modelStatus) {
         const count = lastLoadedModels.length;
-        elements.modelStatus.textContent =
-          getCurrentLocale() === "ru" ? `Моделей загружено: ${count}.` : `Loaded ${count} models.`;
+        elements.modelStatus.textContent = t("translation.models.loaded_count", { count });
       }
       return;
     }
     if (elements.modelStatus) {
-      elements.modelStatus.textContent = getCurrentLocale() === "ru"
-        ? "Загрузка рекомендуемого списка..."
-        : "Loading recommended list...";
+      elements.modelStatus.textContent = t("translation.models.loading_recommended");
     }
     if (elements.modelSelect) {
       elements.modelSelect.innerHTML = "";
@@ -336,15 +333,12 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
       lastLoadedModels = models;
       applyModelSelectOptions({ showAll: elements.modelShowAll?.checked });
       if (elements.modelStatus) {
-        elements.modelStatus.textContent = getCurrentLocale() === "ru"
-          ? `Список загружен: ${models.length} моделей.`
-          : `Loaded ${models.length} models.`;
+        elements.modelStatus.textContent = t("translation.models.list_loaded", { count: models.length });
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load models.";
       if (elements.modelStatus) {
-        elements.modelStatus.textContent =
-          getCurrentLocale() === "ru" ? `Ошибка: ${message}` : `Error: ${message}`;
+        elements.modelStatus.textContent = t("translation.models.error", { message });
       }
     }
   }
@@ -492,7 +486,17 @@ export function mountTranslationPanel(root, { store, actions, logger }) {
     actions.updateTranslationSelection(null);
     logger(`[translation] removed line ${selectedSlotId}`);
   });
+  const onLocaleChanged = () => {
+    lastResultsRenderKey = "";
+    cachedProviderOptionsLocale = "";
+    render(store.getState());
+  };
+  window.addEventListener("sst:locale-changed", onLocaleChanged);
+
   render(store.getState());
   const unsubscribe = subscribe(render);
-  return () => unsubscribe();
+  return () => {
+    unsubscribe();
+    window.removeEventListener("sst:locale-changed", onLocaleChanged);
+  };
 }

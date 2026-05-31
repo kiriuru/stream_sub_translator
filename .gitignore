@@ -72,6 +72,7 @@ desktop remote clean/
 *-desktop-remote-release-clean/
 
 # Local-only docs (do not publish)
+docs/plans/
 docs/ETALON_RUNTIME_VERIFICATION.md
 docs/MANUAL_SMOKE_*.md
 docs/SMOKE_CHECKLIST_*.md

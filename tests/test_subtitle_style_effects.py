@@ -575,10 +575,11 @@ class SubtitleStyleRendererJsTests(unittest.TestCase):
         )
 
         # i18n entries for the new label.
-        i18n_path = Path(__file__).resolve().parents[1] / "frontend" / "js" / "i18n.js"
-        i18n_source = i18n_path.read_text(encoding="utf-8")
-        self.assertIn('"style.slots.apply_preset": "Apply preset to this slot"', i18n_source)
-        self.assertIn('"style.slots.apply_preset": "Применить пресет к этому слоту"', i18n_source)
+        locales_dir = Path(__file__).resolve().parents[1] / "frontend" / "js" / "i18n" / "locales"
+        en_source = (locales_dir / "en.js").read_text(encoding="utf-8")
+        ru_source = (locales_dir / "ru.js").read_text(encoding="utf-8")
+        self.assertIn('"style.slots.apply_preset": "Apply preset to this slot"', en_source)
+        self.assertIn('"style.slots.apply_preset": "Применить пресет к этому слоту"', ru_source)
 
     def test_overlay_normalizer_preserves_lifecycle_state(self) -> None:
         """The dashboard receives subtitle payloads via the websocket and

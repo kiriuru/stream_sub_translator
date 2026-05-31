@@ -404,7 +404,9 @@
       <span>Powered by Kiriuru</span>
     </footer>
 
-    <script src="/static/js/i18n.js?v=20260423c"></script>
+    <script src="/static/js/i18n/locales-bundle.js?v=20260601b"></script>
+    <script src="/static/js/i18n/dynamic-locales.js?v=20260601b"></script>
+    <script src="/static/js/i18n.js?v=20260601b"></script>
     <script src="/static/js/browser-web-speech-recognition-policy.js?v=20260514a"></script>
     <script src="/static/js/browser-asr/session-defaults.js?v=20260516o"></script>
     <script src="/static/js/browser-asr/session-state.js?v=20260516o"></script>
@@ -430,6 +432,12 @@
       (() => {
         const t = (key, variables) => (window.I18n?.t ? window.I18n.t(key, variables) : key);
         const locale = () => window.I18n?.getLocale?.() || "en";
+        function recognitionStatusLabel(value) {
+          const normalized = String(value || "").replace(/-/g, "_");
+          const key = `worker.recognition.status.${normalized}`;
+          const translated = t(key);
+          return translated !== key ? translated : String(value || "");
+        }
         const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
         const statusEl = document.getElementById("worker-status");
         const onSoundEl = document.getElementById("on-sound-status");
@@ -670,9 +678,7 @@
         }
 
         function defaultSettingsSaveStatusText() {
-          return locale() === "ru"
-            ? "Настройки этого окна сначала берутся из localStorage worker-а, а затем при возможности синхронизируются в backend config."
-            : "This window prioritizes its own localStorage settings and mirrors them to backend config when possible.";
+          return t("worker.settings.default_status");
         }
 
         function setSettingsSaveStatus(message, isError = false) {
@@ -889,10 +895,7 @@
           if (restartRecognition) {
             sessionManager.maybeRestartAfterSettingsChange("settings_change");
           }
-          setSettingsSaveStatus(
-            locale() === "ru" ? "Сохранение настроек..." : "Saving settings...",
-            false
-          );
+          setSettingsSaveStatus(t("worker.settings.saving"), false);
           if (saveSettingsButton) {
             saveSettingsButton.disabled = true;
           }
@@ -914,21 +917,14 @@
               appendLog(
                 `worker settings saved to localStorage+backend (${reason}): lang=${savedBrowser.recognition_language}, interim=${savedBrowser.interim_results}, continuous=${savedBrowser.continuous_results}, force_finalization=${savedBrowser.force_finalization_enabled}`
               );
-              setSettingsSaveStatus(
-                locale() === "ru"
-                  ? `Сохранено локально и синхронизировано с backend в ${formatNow()}`
-                  : `Saved locally and mirrored to backend at ${formatNow()}`,
-                false
-              );
+              setSettingsSaveStatus(t("worker.settings.saved_backend", { time: formatNow() }), false);
             })
             .catch((error) => {
               const message = error instanceof Error ? error.message : String(error || "");
               state.currentConfigPayload = previousPayload;
               appendLog(`worker settings backend mirror failed (${reason}): ${message}`);
               setSettingsSaveStatus(
-                locale() === "ru"
-                  ? `Сохранено локально; backend sync failed: ${message || "неизвестная ошибка"}`
-                  : `Saved locally; backend sync failed: ${message || "unknown error"}`,
+                t("worker.settings.saved_local_backend_failed", { message: message || t("common.unknown") }),
                 true
               );
             })
@@ -945,32 +941,14 @@
             return;
           }
           if (document.hidden) {
-            visibilityWarningText.textContent = locale() === "ru"
-              ? "Окно Web Speech сейчас скрыто или свернуто. В таком состоянии распознавание может подвисать, завершаться через onend или переставать выдавать partial/final результаты."
-              : "The Web Speech window is currently hidden or minimized. In this state, recognition can stall, end via onend, or stop producing partial/final results.";
+            visibilityWarningText.textContent = t("worker.visibility.hidden_warning");
             return;
           }
           visibilityWarningText.textContent = t("worker.warning.body");
         }
 
         function localizeStatus(value) {
-          const map = {
-            idle: locale() === "ru" ? "ожидание" : "idle",
-            ready: locale() === "ru" ? "готово" : "ready",
-            listening: locale() === "ru" ? "слушает" : "listening",
-            "capturing-audio": locale() === "ru" ? "идёт захват аудио" : "capturing-audio",
-            "forced-finalized": locale() === "ru" ? "принудительно завершено" : "forced-finalized",
-            "waiting-for-websocket": locale() === "ru" ? "ожидание websocket" : "waiting-for-websocket",
-            "socket-reconnecting": locale() === "ru" ? "переподключение websocket" : "socket-reconnecting",
-            "socket-error": locale() === "ru" ? "ошибка websocket" : "socket-error",
-            restarting: locale() === "ru" ? "перезапуск" : "restarting",
-            stopped: locale() === "ru" ? "остановлено" : "stopped",
-            stopping: locale() === "ru" ? "остановка" : "stopping",
-            interim: locale() === "ru" ? "получен partial" : "interim",
-            final: locale() === "ru" ? "получен final" : "final",
-            "unsupported-browser": locale() === "ru" ? "браузер не поддерживается" : "unsupported-browser",
-          };
-          return map[value] || value;
+          return recognitionStatusLabel(value);
         }
 
         function setStatus(value) {
@@ -986,9 +964,10 @@
           appSendCountEl.textContent = String(state.appSendCount);
           onSoundEl.textContent = state.onSound ? t("common.yes") : t("common.no");
           socketStatusEl.textContent = state.websocketReady ? t("common.connected") : t("common.disconnected");
-          configuredLanguageEl.textContent = locale() === "ru"
-            ? `${state.configuredLanguage} -> источник ${state.sourceLang}`
-            : `${state.configuredLanguage} -> source ${state.sourceLang}`;
+          configuredLanguageEl.textContent = t("worker.counters.language_line", {
+            configured: state.configuredLanguage,
+            source: state.sourceLang,
+          });
         }
 
         async function loadSettings() {

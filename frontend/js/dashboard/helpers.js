@@ -35,9 +35,32 @@ export function getCurrentLocale() {
   return window.I18n?.getLocale?.() || "en";
 }
 
+export const SUPPORTED_UI_LANGUAGES = ["en", "ru", "ja", "ko", "zh"];
+
 export function normalizeSupportedUiLanguage(value) {
   const current = String(value || "").trim().toLowerCase();
-  return ["en", "ru"].includes(current) ? current : "en";
+  if (!current) {
+    return "";
+  }
+  if (SUPPORTED_UI_LANGUAGES.includes(current)) {
+    return current;
+  }
+  if (current.startsWith("ru")) {
+    return "ru";
+  }
+  if (current.startsWith("zh")) {
+    return "zh";
+  }
+  if (current.startsWith("ja")) {
+    return "ja";
+  }
+  if (current.startsWith("ko")) {
+    return "ko";
+  }
+  if (current.startsWith("en")) {
+    return "en";
+  }
+  return "";
 }
 
 export function parseIntegerOr(value, fallback) {
@@ -122,8 +145,11 @@ export {
   syncRecognitionModeSelectLock,
 } from "./desktop-profile-lock.js";
 
-export function getDesktopLaunchContext() {
-  return window.AppState?.desktop || {};
+export function getDesktopLaunchContext(snapshot) {
+  if (snapshot && typeof snapshot === "object" && snapshot.desktop) {
+    return snapshot.desktop;
+  }
+  return {};
 }
 
 export function setElementVisibility(element, visible) {
@@ -170,7 +196,12 @@ export function formatMetric(value) {
 export function formatOptionalMetric(value) {
   return typeof value === "number"
     ? `${Number(value).toFixed(1)} ms`
-    : (getCurrentLocale() === "ru" ? "нет данных" : "not available");
+    : t("common.not_available");
+}
+
+/** Deep runtime diagnostics: English-only tokens (all UI locales). */
+export function formatDiagnosticMetric(value) {
+  return typeof value === "number" ? `${Number(value).toFixed(1)} ms` : "not available";
 }
 
 export function formatSecondsFromMs(value, fallbackMs) {
@@ -191,11 +222,12 @@ export function formatList(items) {
     return items[0];
   }
   if (items.length === 2) {
-    return getCurrentLocale() === "ru" ? `${items[0]} и ${items[1]}` : `${items[0]} and ${items[1]}`;
+    return t("format.list.two", { first: items[0], second: items[1] });
   }
-  return getCurrentLocale() === "ru"
-    ? `${items.slice(0, -1).join(", ")} и ${items[items.length - 1]}`
-    : `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+  return t("format.list.many", {
+    head: items.slice(0, -1).join(", "),
+    last: items[items.length - 1],
+  });
 }
 
 export function appendTextLog(target, message) {

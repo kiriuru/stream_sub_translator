@@ -92,6 +92,21 @@ class SourceTextReplacementTests(unittest.TestCase):
         event = TranscriptEvent(event="partial", text="bad", sequence=1, segment=None)
         self.assertIs(apply_to_transcript_event(event, cfg), event)
 
+    def test_builtin_cjk_profanity_replaced(self) -> None:
+        cfg = {
+            "source_text_replacement": {
+                "enabled": True,
+                "include_builtin": True,
+                "case_insensitive": True,
+                "whole_words": False,
+                "pairs": [],
+            }
+        }
+        self.assertEqual(apply_source_text_replacement("これは くそ だ", cfg), "これは *** だ")
+        self.assertEqual(apply_source_text_replacement("아 씨발 진짜", cfg), "아 *** 진짜")
+        self.assertEqual(apply_source_text_replacement("你他妈的", cfg), "你***")
+        self.assertEqual(apply_source_text_replacement("真是个傻逼", cfg), "真是个***")
+
 
 if __name__ == "__main__":
     unittest.main()

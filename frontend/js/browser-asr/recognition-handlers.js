@@ -6,6 +6,10 @@
 
   const ASR = (global.SstBrowserAsr = global.SstBrowserAsr || {});
 
+  function workerT(key, variables) {
+    return global.I18n?.t ? global.I18n.t(key, variables) : key;
+  }
+
   function overlapSlotInactive(manager, overlapSlotIndex) {
     return (
       overlapSlotIndex != null
@@ -25,11 +29,7 @@
         manager.state.webSpeechPhraseHintsSuppressed = true;
         manager.state.pendingRestartReason = "normal_onend";
         manager._setStatus("restarting");
-        manager._appendLog(
-          manager._locale() === "ru"
-            ? "Web Speech: phrases-not-supported — повтор без on-device phrase hints."
-            : "Web Speech: phrases-not-supported — retrying without on-device phrase hints."
-        );
+        manager._appendLog(workerT("browser_asr.error.phrases_retry"));
         manager._emitWorkerStatus("recognition-error");
         return;
       case "language_retry": {
@@ -40,11 +40,7 @@
         stripTargets.forEach((rec) => manager._stripWebSpeechExperimentalHints(rec));
         manager.state.pendingRestartReason = "normal_onend";
         manager._setStatus("restarting");
-        manager._appendLog(
-          manager._locale() === "ru"
-            ? "Web Speech: language-not-supported — одна попытка повтора после сброса on-device подсказок."
-            : "Web Speech: language-not-supported — one retry after clearing on-device hints."
-        );
+        manager._appendLog(workerT("browser_asr.error.language_retry"));
         manager._emitWorkerStatus("recognition-error");
         return;
       }
@@ -93,7 +89,7 @@
         manager.state.pendingStart = false;
         manager._clearAllTimers();
         manager._setSupervisorState("fatal");
-        manager._setStatus(manager._locale() === "ru" ? `ошибка: ${errorKind}` : `error: ${errorKind}`);
+        manager._setStatus(workerT("browser_asr.error.terminal_status", { errorKind }));
         manager._setTerminalDegradedReason(classified.terminalReason);
         manager._emitWorkerStatus("terminal-error");
         return;
@@ -102,7 +98,7 @@
         manager.state.pendingStart = false;
         manager._clearAllTimers();
         manager._setSupervisorState("fatal");
-        manager._setStatus(manager._locale() === "ru" ? `ошибка: ${errorKind}` : `error: ${errorKind}`);
+        manager._setStatus(workerT("browser_asr.error.terminal_status", { errorKind }));
         manager._setTerminalDegradedReason("permission_denied");
         manager._emitWorkerStatus("terminal-error");
         return;

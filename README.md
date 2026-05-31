@@ -10,7 +10,7 @@
   <a href="./docs/CHANGELOG.md">Changelog</a>
 </p>
 
-SST Desktop is a local Windows app for streamers and creators who need real-time subtitles with optional translation. It combines live ASR, subtitle styling, routing, and OBS output in one desktop workflow. The project is local-first by default (`127.0.0.1`) and supports both browser speech and local AI runtime paths. Current code line: `0.4.3`.
+SST Desktop is a local Windows app for streamers and creators who need real-time subtitles with optional translation. It combines live ASR, subtitle styling, routing, and OBS output in one desktop workflow. The project is local-first by default (`127.0.0.1`) and supports both browser speech and local AI runtime paths. Current code line: `0.4.4`.
 
 ## ✨ Key Features
 
@@ -175,14 +175,14 @@ Build output:
 - bootstrap launchers:
   - `dist\bootstrap-launcher\Stream Subtitle Translator.exe`
   - `dist\bootstrap-launcher-web-only\Stream Subtitle Translator Only Web.exe`
-- versioned release bundle (local): `dist\desktop-releases\v0.4.3\` (`01-bootstrap-onefile\`, `01-bootstrap-web-only-onefile\`, `02-managed-app-onefolder\`, `03-installers-both\`, `README.txt`) when publishing this line; older trees may still show `v0.4.1\` or `v0.4.0\`.
+- versioned release bundle (local): `dist\desktop-releases\v0.4.4\` (`01-bootstrap-onefile\`, `01-bootstrap-web-only-onefile\`, `02-managed-app-onefolder\`, `03-installers-both\`, `README.txt`) when publishing this line; older trees may still show `v0.4.1\` or `v0.4.0\`.
 - publish script defaults (both exes end up in each folder):
   - `F:\AI\stream-sub-translator-desktop-release`
   - `F:\AI\stream-sub-translator-desktop-release-clean`
 
 Release package notes:
 
-- `Stream Subtitle Translator.exe` - standard bootstrap (payload tracks `PROJECT_VERSION`, currently `0.4.3`)
+- `Stream Subtitle Translator.exe` - standard bootstrap (payload tracks `PROJECT_VERSION`, currently `0.4.4`)
 - `Stream Subtitle Translator Only Web.exe` - Web Speech only (introduced in `0.4.0`; still supported)
 - On first launch, the bootstrap launcher extracts managed runtime near itself and starts desktop runtime from disk.
 
@@ -264,7 +264,7 @@ These hardening pieces apply to both classic Web Speech and Web Speech Experimen
 - legacy language-based `subtitle_output.display_order` values are migrated to slot ids like `translation_1`;
 - `/api/runtime/start` can apply an optional normalized `config_payload` snapshot for runtime-only changes without persisting `user-data/config.json` (tracked via `active_config_source = runtime_start_snapshot`, `active_config_persisted = false`, `active_config_hash`);
 - config writes are atomic on Windows (temporary file in same folder + `os.replace()`); a corrupt `user-data/config.json` is rotated into `*.corrupt-<timestamp>.json` and defaults are restored;
-- `backend/versioning.py` (`PROJECT_VERSION = "0.4.3"`) remains single source of truth.
+- `backend/versioning.py` (`PROJECT_VERSION = "0.4.4"`) remains single source of truth.
 
 ## Remote Notes
 
@@ -369,13 +369,12 @@ Dashboard settings UX (`0.4.1+`) uses idempotent DOM updates so focused inputs/c
 
 - Recognition behavior sliders: appearance speed, finalize speed, stability/noise sensitivity.
 - Optional RNNoise path.
-- Exact ASR timings remain under `Tools & Data`.
+- Fine-grained Parakeet realtime timings and gates — **ASR Advanced** tab (contextual `?` help per field, single-line recommended hints).
 
 ### Tools & Data
 
 - Runtime diagnostics/latency metrics.
 - Translation queue/provider state, Web Speech connectivity, OBS CC state, log locations.
-- Advanced ASR timing/gate values.
 - Live event feed, localization coverage, config/profile import-export controls.
 - `Export Diagnostics` builds local ZIP with redacted config, runtime/preflight snapshots, session log, backend log.
 
@@ -454,7 +453,7 @@ GitHub-tracked suite:
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
 ```
 
-For `0.4.3`: run:
+For `0.4.4`: run:
 
 ```powershell
 python -m unittest discover -s tests
@@ -468,7 +467,8 @@ python -m unittest discover -s tests
 
 ## Release Version
 
-- `0.4.3` (current code line)
+- `0.4.4` (current code line)
+- `0.4.3`
 - `0.4.1`
 - `0.4.0`
 - Version source of truth: `backend/versioning.py` (`PROJECT_VERSION`)

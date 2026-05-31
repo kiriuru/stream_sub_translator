@@ -64,6 +64,20 @@ class RuntimeBootstrapperSeedTests(unittest.TestCase):
         self.assertTrue((target_site_packages / "lightning-2.4.0.dist-info" / "METADATA").exists())
         self.assertTrue(any("Seeded offline AI package: lightning" in line for line in self.logs))
 
+    def test_ensure_pip_available_delegates_to_pinned_bootstrap(self) -> None:
+        with (
+            mock.patch("backend.bootstrap_pip_pins.ensure_pip_bootstrap") as ensure_pip,
+            mock.patch("desktop.runtime_bootstrap.build_runtime_environment", return_value={}),
+        ):
+            self.bootstrapper._ensure_pip_available()
+        ensure_pip.assert_called_once()
+
+    def test_start_bat_uses_pinned_pip_bootstrap(self) -> None:
+        start_bat = Path(__file__).resolve().parents[1] / "start.bat"
+        source = start_bat.read_text(encoding="utf-8")
+        self.assertIn("backend.bootstrap_pip_pins --ensure-pip", source)
+        self.assertNotIn("pip install --upgrade pip", source)
+
     def test_detect_runtime_paths_places_logs_under_project_root(self) -> None:
         fake_bundle_root = self.root / "bundle-root"
         fake_bundle_root.mkdir(parents=True, exist_ok=True)

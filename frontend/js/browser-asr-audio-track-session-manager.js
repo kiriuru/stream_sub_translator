@@ -1,6 +1,10 @@
 (function attachBrowserAsrAudioTrackSessionManager(global) {
   "use strict";
 
+  function workerT(key, variables) {
+    return global.I18n?.t ? global.I18n.t(key, variables) : key;
+  }
+
   const BaseSessionManager = global.BrowserAsrSessionManager;
   if (!BaseSessionManager) {
     return;
@@ -96,25 +100,13 @@
         const audioTracks = typeof stream.getAudioTracks === "function" ? stream.getAudioTracks() : [];
         const audioTrack = audioTracks[0] || null;
         if (!audioTrack) {
-          throw new Error(
-            this._locale() === "ru"
-              ? "Браузер не вернул audio track."
-              : "The browser did not return an audio track."
-          );
+          throw new Error(workerT("browser_asr.error.no_audio_track"));
         }
         if (audioTrack.kind !== "audio") {
-          throw new Error(
-            this._locale() === "ru"
-              ? `Ожидался audio track, получено: ${audioTrack.kind || "unknown"}`
-              : `Expected an audio track, got: ${audioTrack.kind || "unknown"}`
-          );
+          throw new Error(workerT("browser_asr.error.wrong_track_kind", { kind: audioTrack.kind || "unknown" }));
         }
         if (audioTrack.readyState !== "live") {
-          throw new Error(
-            this._locale() === "ru"
-              ? `Audio track не live: ${audioTrack.readyState || "unknown"}`
-              : `Audio track is not live: ${audioTrack.readyState || "unknown"}`
-          );
+          throw new Error(workerT("browser_asr.error.track_not_live", { state: audioTrack.readyState || "unknown" }));
         }
         this._releaseAudioTrack("replace-track");
         this.state.mediaStream = stream;
@@ -134,12 +126,7 @@
         this._refreshHealthSignals();
         return audioTrack;
       } catch (error) {
-        const message = this._buildErrorMessage(
-          error,
-          this._locale() === "ru"
-            ? "Не удалось открыть микрофонный audio track."
-            : "Could not open microphone audio track."
-        );
+        const message = this._buildErrorMessage(error, workerT("browser_asr.error.open_mic_track"));
         this.state.lastAudioTrackError = message;
         this.state.getUserMediaLastError = message;
         this._setLastError("audio-capture", message);
@@ -232,12 +219,7 @@
           }
           this._scheduleRestart("watchdog_stall");
         } catch (error) {
-          const message = this._buildErrorMessage(
-            error,
-            this._locale() === "ru"
-              ? "Audio track recovery failed."
-              : "Audio track recovery failed."
-          );
+          const message = this._buildErrorMessage(error, workerT("browser_asr.error.track_recovery_failed"));
           this.state.lastAudioTrackError = message;
           this._setHealthDegradedReason("mic_track_unavailable");
           this._appendLog(`experimental audio track recovery failed: ${message}`);
@@ -282,9 +264,7 @@
     }
 
     async _tryDefaultFallbackStart(recognition) {
-      const fallbackMessage = this._locale() === "ru"
-        ? "Не удалось переключиться на обычный recognition.start()."
-        : "Could not fall back to the default recognition.start().";
+      const fallbackMessage = workerT("browser_asr.error.fallback_default_start");
       this.state.startMode = "fallback_default_start";
       this.state.fallbackUsed = true;
       this._emitWorkerStatus("fallback-default-start-attempt");
@@ -360,12 +340,7 @@
             this._emitWorkerStatus("audio-track-start-success");
             return;
           } catch (error) {
-            const message = this._buildErrorMessage(
-              error,
-              this._locale() === "ru"
-                ? "Не удалось запустить экспериментальное браузерное распознавание."
-                : "Could not start experimental Web Speech recognition."
-            );
+            const message = this._buildErrorMessage(error, workerT("browser_asr.error.experimental_start_failed"));
             this.state.lastStartError = message;
             this.state.audioTrackStartFailures = Number(this.state.audioTrackStartFailures || 0) + 1;
             this._appendLog(`experimental audio-track start failed: ${message}`);
@@ -384,12 +359,7 @@
           this._appendLog(`experimental recognition.start (${reason})`);
         }
       } catch (error) {
-        const message = this._buildErrorMessage(
-          error,
-          this._locale() === "ru"
-            ? "Не удалось запустить экспериментальное браузерное распознавание."
-            : "Could not start experimental Web Speech recognition."
-        );
+        const message = this._buildErrorMessage(error, workerT("browser_asr.error.experimental_start_failed"));
         if (String(message).toLowerCase().includes("already started")) {
           this._setSupervisorState("running");
           this._setRecognitionState("running");

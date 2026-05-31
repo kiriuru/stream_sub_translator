@@ -162,3 +162,15 @@ class OpenAIModelsRouteTests(unittest.TestCase):
         models = body.get("models") or []
         self.assertIn("gpt-4o-mini", models)
 
+    def test_models_route_blocks_private_base_url_when_lan_bind(self) -> None:
+        from backend.config import settings
+
+        with AppStateSandbox() as _sandbox, TestClient(app_module.app) as client:
+            with mock.patch.object(settings, "app_host", "0.0.0.0"):
+                response = client.post(
+                    "/api/openai/models",
+                    json={"api_key": "sk-test", "base_url": "http://127.0.0.1:1234/v1"},
+                )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("LAN bind", response.json().get("detail", ""))
+

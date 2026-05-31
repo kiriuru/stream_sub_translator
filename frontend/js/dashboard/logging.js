@@ -1,5 +1,4 @@
 import { DASHBOARD_EVENTS } from "../core/events.js";
-import { getCurrentLocale } from "./helpers.js";
 import { traceUi } from "./ui-trace.js";
 
 export function shouldPersistDashboardLog(message) {
@@ -101,11 +100,6 @@ export function createLogger({ store, events, api }) {
     }
   }
 
-  log(
-    getCurrentLocale() === "ru"
-      ? "[ui] dashboard frontend modules initialized"
-      : "[ui] dashboard frontend modules initialized",
-    { persist: false }
-  );
+  log("[ui] dashboard frontend modules initialized", { persist: false });
   return log;
 }

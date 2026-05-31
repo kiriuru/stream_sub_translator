@@ -1,11 +1,12 @@
 import { createEventBus, DASHBOARD_EVENTS } from "./core/events.js";
 import { createApiClient, createDashboardApi } from "./core/api-client.js";
 import * as store from "./core/store.js";
+const { patchDesktopContext } = store;
 import { WsClient } from "./core/ws-client.js";
 import { createDashboardActions } from "./dashboard/actions.js";
 import { createLogger } from "./dashboard/logging.js";
 import { configureUiTrace, traceUi } from "./dashboard/ui-trace.js";
-import { getCurrentLocale } from "./dashboard/helpers.js";
+import { getCurrentLocale, t } from "./dashboard/helpers.js";
 import { mountAsrPanel } from "./panels/asr-panel.js";
 import { mountDiagnosticsPanel } from "./panels/diagnostics-panel.js";
 import { mountSourceTextReplacementPanel } from "./panels/source-text-replacement-panel.js";
@@ -25,8 +26,64 @@ import { initializeTabs } from "./shell/tabs.js";
 
 let actionsRef = null;
 
+function showBootstrapFailure(message) {
+  const text = String(message || "Dashboard bootstrap failed.").trim();
+  console.error(`[bootstrap] ${text}`);
+  const target = document.querySelector("#save-status-text");
+  if (target) {
+    target.textContent = text;
+    target.dataset.tone = "error";
+  }
+}
+
+function mountDashboardPanels(actions, store, api, ws, logger, events) {
+  const mounts = [];
+  const mountSteps = [
+    ["runtime", () => mountRuntimePanel(document, { store, actions, api, ws, logger, events })],
+    ["asr", () => mountAsrPanel(document, { store, actions, api, ws, logger, events })],
+    ["translation", () => mountTranslationPanel(document, { store, actions, api, ws, logger, events })],
+    ["overlay", () => mountOverlayPanel(document, { store, actions, api, ws, logger, events })],
+    ["obs-captions", () => mountObsCaptionsPanel(document, { store, actions, api, ws, logger, events })],
+    ["diagnostics", () => mountDiagnosticsPanel(document, { store, actions, api, ws, logger, events })],
+    ["source-text-replacement", () => mountSourceTextReplacementPanel(document, { store, actions, api, ws, logger, events })],
+    ["style-editor", () => mountStyleEditorPanel(document, { store, actions, api, ws, logger, events })],
+    ["profiles", () => mountProfilesPanel(document, { store, actions, api, ws, logger, events })],
+    ["remote", () => mountRemotePanel(document, { store, actions, api, ws, logger, events })],
+    ["model-manager", () => mountModelManagerPanel(document, { store, actions, api, ws, logger, events })],
+  ];
+  for (const [name, mount] of mountSteps) {
+    try {
+      mounts.push(mount());
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error || "");
+      throw new Error(`Panel mount failed (${name}): ${detail}`);
+    }
+  }
+  return mounts;
+}
+
+function applyDesktopContext(context) {
+  if (!context || typeof context !== "object") {
+    return;
+  }
+  patchDesktopContext(context);
+}
+
 async function bootstrap() {
+  try {
+    await bootstrapDashboard();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || "");
+    showBootstrapFailure(message);
+    throw error;
+  }
+}
+
+async function bootstrapDashboard() {
   const events = createEventBus();
+  document.addEventListener("sst:desktop-context", (event) => {
+    applyDesktopContext(event?.detail);
+  });
   const client = createApiClient({
     onBusyChange(busyKey, isBusy) {
       actionsRef?.updateBusyState?.(busyKey, isBusy);
@@ -51,14 +108,6 @@ async function bootstrap() {
   window.Api = api;
   window.__appLog = logger;
   window.__persistDashboardLog = logger;
-  void window.DesktopBridge?.getContext?.().then((context) => {
-    traceUi("dashboard", "ui", "bootstrap", {
-      desktop_mode: Boolean(context?.desktop_mode),
-      startup_mode: context?.startup_mode || null,
-      install_profile: context?.install_profile || null,
-    });
-  });
-
   const destroyLocaleSwitcher = initializeLocaleSwitcher(actions);
   initializeTabs(actions, store);
   const destroyLayoutController = mountLayoutController(document, { actions });
@@ -73,19 +122,7 @@ async function bootstrap() {
     store.updateState({ ui: { uiLanguage: getCurrentLocale() } });
   });
 
-  const mounts = [
-    mountRuntimePanel(document, { store, actions, api, ws, logger, events }),
-    mountAsrPanel(document, { store, actions, api, ws, logger, events }),
-    mountTranslationPanel(document, { store, actions, api, ws, logger, events }),
-    mountOverlayPanel(document, { store, actions, api, ws, logger, events }),
-    mountObsCaptionsPanel(document, { store, actions, api, ws, logger, events }),
-    mountDiagnosticsPanel(document, { store, actions, api, ws, logger, events }),
-    mountSourceTextReplacementPanel(document, { store, actions, api, ws, logger, events }),
-    mountStyleEditorPanel(document, { store, actions, api, ws, logger, events }),
-    mountProfilesPanel(document, { store, actions, api, ws, logger, events }),
-    mountRemotePanel(document, { store, actions, api, ws, logger, events }),
-    mountModelManagerPanel(document, { store, actions, api, ws, logger, events }),
-  ];
+  const mounts = mountDashboardPanels(actions, store, api, ws, logger, events);
 
   void (async () => {
     try {
@@ -95,7 +132,7 @@ async function bootstrap() {
     } catch (error) {
       const root = document.querySelector("[data-help-content-mount]");
       if (root) {
-        root.innerHTML = `<p class="muted">${getCurrentLocale() === "ru" ? "Не удалось загрузить справку." : "Failed to load help content."}</p>`;
+        root.innerHTML = `<p class="muted">${t("help.load_failed")}</p>`;
       }
       logger(`[help] load failed -> ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -103,14 +140,18 @@ async function bootstrap() {
 
   void window.DesktopBridge?.getContext?.()
     .then((context) => {
-      if (context && window.AppState) {
-        window.AppState.desktop = { ...window.AppState.desktop, ...context };
-      }
+      traceUi("dashboard", "ui", "bootstrap", {
+        desktop_mode: Boolean(context?.desktop_mode),
+        startup_mode: context?.startup_mode || null,
+        install_profile: context?.install_profile || null,
+      });
+      applyDesktopContext(context);
       if (context?.desktop_mode) {
         logger(
-          getCurrentLocale() === "ru"
-            ? `[desktop] desktop launcher активен | startup=${context.startup_mode || "local"} | remote_role=${context.remote_role || "disabled"}`
-            : `[desktop] desktop launcher active | startup=${context.startup_mode || "local"} | remote_role=${context.remote_role || "disabled"}`,
+          t("log.desktop.launcher_active", {
+            startup: context.startup_mode || "local",
+            remoteRole: context.remote_role || "disabled",
+          }),
           {
             source: "desktop",
             details: {
@@ -134,7 +175,14 @@ async function bootstrap() {
     .loadInitialData()
     .then(() => window.SstLayout?.syncDesktopWindowSize?.())
     .then(() => actions.pollRuntimeStatus())
-    .catch(() => null);
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : String(error || "");
+      store.patchUi({
+        saveStatus: t("bootstrap.load_dashboard_failed", { message }),
+        saveTone: "error",
+      });
+      logger(`[bootstrap] ${message}`);
+    });
 
   actions.refreshSystemFonts().catch(() => {
     // keep font picker usable with project-local + fallback fonts
@@ -161,6 +209,22 @@ async function bootstrap() {
   });
 }
 
+window.addEventListener("error", (event) => {
+  const message = event?.error instanceof Error ? event.error.message : String(event?.message || "");
+  if (message) {
+    showBootstrapFailure(message);
+  }
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event?.reason;
+  const message = reason instanceof Error ? reason.message : String(reason || "");
+  if (message) {
+    showBootstrapFailure(message);
+  }
+});
+
 bootstrap().catch((error) => {
-  console.error(error);
+  const message = error instanceof Error ? error.message : String(error || "");
+  showBootstrapFailure(message);
 });

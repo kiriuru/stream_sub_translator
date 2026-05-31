@@ -20,6 +20,7 @@ const state = {
     project_fonts_dir: "fonts",
   },
   remote: null,
+  desktop: null,
   ui: {
     activeTab: "runtime",
     saving: false,
@@ -125,4 +126,12 @@ export function patchUi(patch) {
     return;
   }
   updateState({ ui: patch });
+}
+
+export function patchDesktopContext(patch) {
+  if (!patch || typeof patch !== "object") {
+    return;
+  }
+  state.desktop = { ...(state.desktop || {}), ...patch };
+  emit();
 }

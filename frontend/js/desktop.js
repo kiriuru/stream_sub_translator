@@ -96,9 +96,6 @@
       .get_launch_context()
       .then((payload) => {
         cachedContext = { ...DEFAULT_CONTEXT, ...(payload || {}), desktop_mode: true };
-        if (window.AppState) {
-          window.AppState.desktop = cachedContext;
-        }
         traceDesktop("launch_context_loaded", {
           gui: payload?.pywebview_gui || PYWEBVIEW_GUI,
           storage_path: payload?.pywebview_storage_path || null,
