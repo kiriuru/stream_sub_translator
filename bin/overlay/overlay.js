@@ -237,8 +237,25 @@
     );
   }
 
+  function hasVisibleRenderedFrame() {
+    if (!overlayState.lastRenderSignature) {
+      return false;
+    }
+    const emptySignature = JSON.stringify({
+      preset: overlayState.preset,
+      compact: overlayState.compact,
+      completedItems: [],
+      activePartialText: "",
+      style: overlayState.lastPayloadStyle,
+      rendered: [],
+    });
+    return overlayState.lastRenderSignature !== emptySignature;
+  }
+
   function clearOverlayPresentation(reason) {
-    if (isOverlayPresentationEmpty()) {
+    // State may already be cleared (e.g. idle TTL path clears completedItems first),
+    // but the renderer DOM can still show the last frame until render/dispose runs.
+    if (isOverlayPresentationEmpty() && !hasVisibleRenderedFrame()) {
       return;
     }
     clearLegacyTranscriptState();

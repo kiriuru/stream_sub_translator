@@ -170,6 +170,29 @@ export interface RuntimeStatus {
   metrics?: Record<string, unknown>;
 }
 
+export interface ReleaseSyncStatus {
+  provider?: string;
+  enabled?: boolean;
+  github_repo?: string | null;
+  release_channel?: string;
+  latest_known_version?: string | null;
+  last_checked_utc?: string | null;
+  update_available?: boolean;
+  check_supported?: boolean;
+  check_active?: boolean;
+  release_url?: string | null;
+  message?: string | null;
+}
+
+export interface VersionInfo {
+  ok?: boolean;
+  current_version?: string;
+  version?: string;
+  product?: string;
+  release_track?: string;
+  sync?: ReleaseSyncStatus;
+}
+
 export interface WsMessage {
   type: string;
   payload?: Record<string, unknown>;

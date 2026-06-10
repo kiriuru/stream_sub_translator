@@ -79,6 +79,16 @@ pub fn list_output_devices() -> Result<Vec<AudioOutputDevice>, AudioError> {
     result
 }
 
+/// Enumerate WASAPI endpoints on a dedicated thread so IPC handlers never block.
+pub fn list_output_devices_on_thread() -> Result<Vec<AudioOutputDevice>, AudioError> {
+    std::thread::Builder::new()
+        .name("voicesub-audio-enum".into())
+        .spawn(list_output_devices)
+        .map_err(|err| AudioError::PlaybackFailed(format!("audio enum thread spawn failed: {err}")))?
+        .join()
+        .map_err(|_| AudioError::PlaybackFailed("audio enum thread panicked".into()))?
+}
+
 /// Route render output for `pid` to `device_id`. Empty `device_id` clears per-process override.
 pub fn set_process_output_device(pid: u32, device_id: &str) -> Result<(), AudioError> {
     if pid == 0 {

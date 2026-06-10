@@ -80,14 +80,8 @@ pub fn embedded_binary_path(tts_module_dir: &Path) -> PathBuf {
         .join(file_name)
 }
 
-fn build_hint(tts_module_dir: &Path) -> String {
-    let script = tts_module_dir.join("build_runtime.bat");
-    if cfg!(windows) && script.is_file() {
-        format!("Run `{}` to build the embedded fetcher (Nuitka).", script.display())
-    } else {
-        let py = tts_module_dir.join("build_runtime.py");
-        format!("Run `python {}` to build the embedded fetcher (Nuitka).", py.display())
-    }
+fn build_hint(_tts_module_dir: &Path) -> String {
+    "Reinstall VoiceSub or restore bin/modules/tts/runtime/{platform}/google_tts_fetch.exe from the release package.".to_string()
 }
 
 fn system_python_invocations() -> Vec<Vec<String>> {

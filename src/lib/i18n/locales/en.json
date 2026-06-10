@@ -823,5 +823,8 @@
   "style.preset.desc.comic_burst": "Bangers in comic-yellow with a chunky black outline and a hot-red shadow — Marvel SFX panel energy.",
   "style.preset.desc.cyberpunk_neon": "Orbitron Black in hot magenta with a cyan halo glow on a deep navy plate.",
   "style.preset.desc.noir_typewriter": "Special Elite typewriter on a deep ink plate — 1940s detective / typewritten dossier mood.",
-  "style.preset.desc.vlog_pastel": "Poppins on a warm pastel pill — cozy lifestyle / vlog look, plays nicely with soft backgrounds."
+  "style.preset.desc.vlog_pastel": "Poppins on a warm pastel pill — cozy lifestyle / vlog look, plays nicely with soft backgrounds.",
+  "updates.banner.message": "VoiceSub {latest} is available — you are on {current}.",
+  "updates.banner.close": "Close",
+  "updates.banner.download": "Download"
 }

@@ -13,6 +13,7 @@ import type {
   TranscriptState,
   TranslationResultEntry,
   TranslationResultState,
+  VersionInfo,
   WsMessage,
 } from "../types";
 
@@ -28,6 +29,8 @@ export interface AppSnapshot {
   activeTab: TabId;
   saveStatus: SaveStatusState;
   version: string;
+  versionInfo: VersionInfo | null;
+  updateBannerDismissed: boolean;
   busy: boolean;
   subtitleStylePresets: StylePresetCatalog;
   fontCatalog: FontCatalog | null;
@@ -54,6 +57,8 @@ export const appStore = writable<AppSnapshot>({
   activeTab: "translation",
   saveStatus: { tone: "default" },
   version: "0.5.0",
+  versionInfo: null,
+  updateBannerDismissed: false,
   busy: false,
   subtitleStylePresets: {},
   fontCatalog: null,

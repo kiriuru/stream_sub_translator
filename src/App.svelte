@@ -7,6 +7,8 @@
     downloadDiagnostics,
     fetchObsUrl,
     fetchRuntimeStatus,
+    checkUpdates,
+    openExternalUrl,
     fetchVersion,
     loadSettings,
     saveSettings,
@@ -15,6 +17,7 @@
   } from "./lib/api";
   import AppChrome from "./lib/components/AppChrome.svelte";
   import CommandPalette from "./lib/components/CommandPalette.svelte";
+  import UpdateBanner from "./lib/components/UpdateBanner.svelte";
   import CompactShell from "./lib/components/CompactShell.svelte";
   import RuntimeBar from "./lib/components/RuntimeBar.svelte";
   import TabNav from "./lib/components/TabNav.svelte";
@@ -25,13 +28,19 @@
   import { applyUiPaletteToDocument } from "./lib/ui-theme-css";
   import { publishUiConfigSync } from "./lib/ui-config-sync";
   import { getRestartRequiredReasons } from "./lib/config-restart";
+  import {
+    formatTranslationConfigError,
+    getTranslationConfigErrors,
+  } from "./lib/translation-helpers";
   import { formatSaveStatusDisplay } from "./lib/save-status";
   import { normalizeConfigPayload } from "./lib/config-normalize";
   import { mergeFontCatalogPreservingSystem } from "./lib/font-catalog";
   import { mergeStylePresetCatalog } from "./lib/style-presets";
   import { appStore, handleWsEvent, patchApp } from "./lib/stores/app";
   import { EventsSocket } from "./lib/ws";
-  import type { CompactPaneId, ConfigPayload, LocaleCode, TabId } from "./lib/types";
+  import type { CompactPaneId, ConfigPayload, LocaleCode, TabId, VersionInfo } from "./lib/types";
+
+  const UPDATE_BANNER_DISMISS_KEY = "voicesub:update-banner-dismissed";
 
   let snapshot = get(appStore);
   const unsubscribe = appStore.subscribe((value) => {
@@ -100,6 +109,49 @@
     publishUiConfigSync(config);
   }
 
+  function readDismissedVersion(): string {
+    try {
+      return sessionStorage.getItem(UPDATE_BANNER_DISMISS_KEY) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function dismissUpdateBanner(latestVersion: string) {
+    try {
+      sessionStorage.setItem(UPDATE_BANNER_DISMISS_KEY, latestVersion);
+    } catch {
+      // ignore storage errors
+    }
+    patchApp({ updateBannerDismissed: true });
+  }
+
+  function applyVersionInfo(versionInfo: VersionInfo) {
+    const currentVersion =
+      versionInfo.current_version || versionInfo.version || snapshot.version;
+    const latest = versionInfo.sync?.latest_known_version || "";
+    const dismissedFor = readDismissedVersion();
+    patchApp({
+      version: currentVersion,
+      versionInfo,
+      updateBannerDismissed: Boolean(latest) && dismissedFor === latest,
+    });
+  }
+
+  async function refreshUpdateCheck() {
+    try {
+      const versionInfo = await checkUpdates();
+      applyVersionInfo(versionInfo);
+    } catch {
+      try {
+        const versionInfo = await fetchVersion();
+        applyVersionInfo(versionInfo);
+      } catch {
+        // backend may still be starting
+      }
+    }
+  }
+
   async function bootstrap() {
     try {
       const [settings, version, obs, runtime] = await Promise.all([
@@ -110,9 +162,9 @@
       ]);
       const loadedConfig = normalizeConfigPayload(settings.payload);
       lastSavedConfig = structuredClone(loadedConfig);
+      applyVersionInfo(version);
       patchApp({
         config: loadedConfig,
-        version: version.version,
         overlayUrl: obs.overlay_url,
         runtime,
         subtitleStylePresets: settings.subtitle_style_presets || {},
@@ -122,6 +174,7 @@
         saveStatus: { tone: "default" },
       });
       applyUiFromConfig(loadedConfig);
+      void refreshUpdateCheck();
     } catch (err) {
       patchApp({
         saveStatus: {
@@ -163,6 +216,19 @@
   }
 
   async function handleSave() {
+    const validationErrors = getTranslationConfigErrors(snapshot.config);
+    if (validationErrors.length > 0) {
+      patchApp({
+        saveStatus: {
+          tone: "error",
+          message: formatTranslationConfigError(validationErrors[0], (key, vars) =>
+            t(key, vars, loc),
+          ),
+        },
+      });
+      return;
+    }
+
     patchApp({ busy: true, saveStatus: { tone: "busy" } });
     try {
       const res = await saveSettings(normalizeConfigPayload(snapshot.config));
@@ -309,6 +375,19 @@
 </script>
 
 <CommandPalette bind:open={commandPaletteOpen} handlers={commandPaletteHandlers} />
+
+<UpdateBanner
+  versionInfo={snapshot.versionInfo}
+  visible={!snapshot.updateBannerDismissed}
+  onClose={() => {
+    const latest = snapshot.versionInfo?.sync?.latest_known_version || "";
+    if (latest) dismissUpdateBanner(latest);
+    else patchApp({ updateBannerDismissed: true });
+  }}
+  onDownload={(url) => {
+    void openExternalUrl(url);
+  }}
+/>
 
 {#key $locale}
 <main class="app-shell">

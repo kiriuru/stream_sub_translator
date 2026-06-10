@@ -12,7 +12,10 @@ dist/
 dist-worker/
 dist-tts/
 
-# --- TTS embedded runtime (build: bin/modules/tts/build_runtime.bat) ---
+# --- TTS sidecar (frozen): ship prebuilt exe only; sources are local/dev-only ---
+bin/modules/tts/google_tts_fetch.py
+bin/modules/tts/build_runtime.bat
+bin/modules/tts/build_runtime.py
 bin/modules/tts/runtime/**
 !bin/modules/tts/runtime/README.md
 !bin/modules/tts/runtime/.gitkeep

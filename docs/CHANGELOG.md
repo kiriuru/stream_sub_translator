@@ -8,7 +8,47 @@
 
 ## Unreleased
 
-_(пусто)_
+Post-`0.5.0` polish относительно frozen SST `0.4.4`. `PROJECT_VERSION` остаётся **0.5.0** до следующего tagged release.
+
+### Проверка обновлений (GitHub Releases)
+
+- **`voicesub-types::version`**: semver-сравнение, `extract_latest_github_release`, `build_version_info_payload`, `release_url_for`.
+- **`POST /api/updates/check`** + **`GET /api/version`**: live poll GitHub Releases (`updates.github_repo`, channel `stable`/`prerelease`, interval `check_interval_hours`).
+- **Startup:** `spawn_startup_check()` при старте runtime; dashboard вызывает check на bootstrap (`UpdateBanner.svelte`).
+- **Config:** defaults `updates.enabled: true`, `github_repo: kiriuru/stream_sub_translator`; **`normalize_updates_config`** подставляет секцию `[updates]` в legacy `config.toml` без ручного merge.
+- **UI:** баннер «доступна новая версия» (en/ru/ja/ko/zh через `voicesub-locale-overrides.mjs`); **Скачать** → Tauri IPC `open_external_https_url` (системный браузер; `window.open` в WebView2 не работает).
+
+### OBS overlay — TTL и очистка кадра
+
+- **Backend TTL** (Rust lifecycle) без изменений контракта SST; idle `overlay_update` публикуется по расписанию.
+- **Frontend fix:** `hasVisibleRenderedFrame()` в `clearOverlayPresentation` — при idle payload состояние очищалось до `render()`, DOM оставался с последним кадром (текст «висел» в OBS).
+- `disposeRenderContainer` при `result.empty`; cache-bust **`overlay.js?v=20260610b`**.
+- Контракт: `overlay_clears_dom_when_idle_arrives_after_state_already_cleared` в `overlay_contract.rs`.
+
+### Browser worker / Chrome
+
+- Флаги Chrome вынесены в config: `asr.browser.chrome_launch` (`launch_args`, `disabled_features`); `chrome_flags.rs`, `launch_config.rs`.
+- Retry launch без `HIGH_PRIORITY_CLASS` при `ERROR_ACCESS_DENIED` (Windows).
+
+### Dashboard / config / TTS
+
+- **Translation panel:** валидация дубликатов target lang и пустых API keys; gate Save в `App.svelte` (`translation-helpers.ts`).
+- **Twitch TTS:** `TwitchPanel.svelte` — `$effect` sync ignore-users из config; `flushPendingSave` на blur/unmount (не затирает `ignore_users` пустым полем).
+- **cpal:** enum output devices на отдельном thread (`list_output_devices_on_thread`).
+- **a11y:** `focus-visible` в `global.css` и command palette.
+- Удалены устаревшие Python-исходники TTS fetcher из git (`google_tts_fetch.py`, `build_runtime.*`); runtime — embedded `google_tts_fetch.exe` + Nuitka build script вне repo.
+
+### Документация
+
+- `TECHNICAL_ARCHITECTURE*.md` §25 — update check реализован (не stub).
+- `WIKI.*` — баннер обновлений, overlay TTL fix `20260610b`.
+- `README.*` — troubleshooting overlay / updates.
+
+### Тесты
+
+- `voicesub-config`: `normalizes_updates_defaults_for_legacy_configs`
+- `voicesub-types`: version/update payload tests
+- `overlay_contract.rs`, `translation-helpers.validation.test.ts`, `roundtrip_twitch_ignore_users`
 
 ## 0.5.0
 
@@ -59,8 +99,8 @@ Major release. Преемник SST `0.4.4`. `PROJECT_VERSION` в `voicesub-type
 
 - `/ws/events`: replay `runtime_update`, `subtitle_payload_update`, `overlay_update`; stale-guard в dashboard (`src/lib/ws.ts`) и overlay (`bin/overlay/overlay.js`, `ws-stale-guard-logic.js`).
 - Overlay reconnect: exponential backoff 1–10 s; последний кадр сохраняется при disconnect (OBS UX).
-- **Empty overlay cleanup (2026-06-10):** `bin/overlay/overlay.js` вызывает `disposeRenderContainer` при `result.empty` после TTL expiry / Stop / idle payload — parity с dashboard preview (`OverviewSection.svelte`). Cache-bust overlay: `overlay.html` → `overlay.js?v=20260610a`.
-- Контракт: `crates/voicesub-subtitle/tests/overlay_contract.rs` → `overlay_disposes_renderer_when_payload_is_empty`.
+- **Empty overlay cleanup (2026-06-10):** `disposeRenderContainer` при `result.empty`; дополнительный fix idle TTL — см. **Unreleased** (`hasVisibleRenderedFrame`). Cache-bust: `overlay.js?v=20260610b`.
+- Контракт: `crates/voicesub-subtitle/tests/overlay_contract.rs`.
 
 ### TTS-модуль и Twitch
 

@@ -1,4 +1,6 @@
-import type { ConfigPayload, RuntimeStatus } from "./types";
+import type { ConfigPayload, RuntimeStatus, VersionInfo } from "./types";
+
+/** Dashboard HTTP calls hit the embedded Rust Axum server (`/api/*`), not Python. */
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   let res: Response;
@@ -71,8 +73,12 @@ export async function fetchObsUrl(): Promise<{ overlay_url: string }> {
   return jsonFetch("/api/obs/url");
 }
 
-export async function fetchVersion(): Promise<{ version: string; product: string }> {
+export async function fetchVersion(): Promise<VersionInfo> {
   return jsonFetch("/api/version");
+}
+
+export async function checkUpdates(): Promise<VersionInfo> {
+  return jsonFetch("/api/updates/check", { method: "POST" });
 }
 
 export async function fetchHealth(): Promise<Record<string, unknown>> {
@@ -134,6 +140,19 @@ export async function postClientLog(channel: string, message: string, details?: 
 export async function openTtsModule(): Promise<void> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("tts_open_window");
+}
+
+export async function openExternalUrl(url: string): Promise<void> {
+  const trimmed = url.trim();
+  if (!trimmed) {
+    return;
+  }
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("open_external_https_url", { url: trimmed });
+  } catch {
+    window.open(trimmed, "_blank", "noopener,noreferrer");
+  }
 }
 
 export async function listRecommendedOpenAiModels(): Promise<{ models: string[]; recommended?: boolean }> {

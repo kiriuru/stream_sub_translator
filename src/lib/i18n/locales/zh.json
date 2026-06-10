@@ -823,5 +823,8 @@
   "style.preset.desc.comic_burst": "Bangers comic-yellow with chunky black outline and hot-red shadow.",
   "style.preset.desc.cyberpunk_neon": "Orbitron Black hot-magenta with cyan halo on deep navy plate.",
   "style.preset.desc.noir_typewriter": "Special Elite typewriter on deep ink plate — film noir dossier mood.",
-  "style.preset.desc.vlog_pastel": "Poppins on warm pastel pill — cozy lifestyle / vlog look."
+  "style.preset.desc.vlog_pastel": "Poppins on warm pastel pill — cozy lifestyle / vlog look.",
+  "updates.banner.message": "VoiceSub {latest} 已可用（当前 {current}）。",
+  "updates.banner.close": "关闭",
+  "updates.banner.download": "下载"
 }

@@ -30,7 +30,8 @@ Successor to SST Desktop `0.4.4`. Core stack: **Rust + Tauri**, **Svelte dashboa
 ## System requirements
 
 - Windows 10/11 x64
-- **Google Chrome** (or Edge for smoke tests) — system dependency for Web Speech
+- **Microsoft Edge WebView2 Runtime** — required for the VoiceSub desktop shell (dashboard and TTS window). Usually preinstalled on Windows 11; on Windows 10 the NSIS installer can run the WebView2 bootstrapper if it is missing.
+- **Google Chrome** (or Edge for smoke tests) — separate system dependency for the Web Speech worker window
 - Microphone access for the browser worker window
 - Internet for external translation providers (optional)
 - For NSIS install: no Python, Node.js, or CUDA required in core package
@@ -75,7 +76,8 @@ SST `config.json` can be imported on first run or via settings — modes like `l
 | No subtitles at all | Runtime **Start** pressed; worker window open; mic allowed in Chrome |
 | Source text but no translation | Translation enabled; at least one line active; provider credentials |
 | OBS empty | Browser Source URL is `/overlay`; visibility toggles in Subtitles tab; reload source after app update (overlay cache-bust) |
-| OBS text stuck after TTL/Stop | Update to latest build; empty `overlay_update` must clear via `disposeRenderContainer` (fixed in overlay `?v=20260610a`) |
+| OBS text stuck after TTL/Stop | Update to latest build; reload Browser Source (`overlay.js?v=20260610b`, idle TTL DOM clear fix) |
+| Update banner shows raw keys / Download does nothing | Update to latest build (i18n `updates.banner.*`, `open_external_https_url` IPC) |
 | Port conflict | Ensure `8765` is free or change bind (developer build) |
 | Worker dies silently | See Tools & Data → diagnostics; check `logs/core.log` |
 

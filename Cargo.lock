@@ -5068,6 +5068,7 @@ name = "voicesub-runtime"
 version = "0.5.0"
 dependencies = [
  "axum",
+ "chrono",
  "mime_guess",
  "open",
  "reqwest 0.12.28",

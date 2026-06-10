@@ -146,6 +146,33 @@ fn normalize_asr_browser_config(root: &mut Map<String, Value>) {
         launch = "auto".into();
     }
     browser.insert("worker_launch_browser".into(), json!(launch));
+
+    let chrome_defaults = default_config_payload()
+        .get("asr")
+        .and_then(|v| v.get("browser"))
+        .and_then(|v| v.get("chrome_launch"))
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let chrome_value = browser
+        .entry("chrome_launch".to_string())
+        .or_insert(chrome_defaults.clone());
+    if let Some(chrome) = chrome_value.as_object_mut() {
+        if let Some(defaults) = chrome_defaults.as_object() {
+            for (key, value) in defaults {
+                chrome.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
+        if let Some(args) = chrome.get_mut("launch_args") {
+            if args.as_array().is_none_or(|items| items.is_empty()) {
+                *args = chrome_defaults["launch_args"].clone();
+            }
+        }
+        if let Some(features) = chrome.get_mut("disabled_features") {
+            if features.as_array().is_none_or(|items| items.is_empty()) {
+                *features = chrome_defaults["disabled_features"].clone();
+            }
+        }
+    }
 }
 
 fn normalize_translation_section(root: &mut Map<String, Value>) {
@@ -400,6 +427,70 @@ pub fn repair_legacy_keep_completed_false(payload: &mut Value, source_version: i
     }
 }
 
+fn normalize_updates_config(root: &mut Map<String, Value>) {
+    let defaults = default_config_payload()
+        .get("updates")
+        .and_then(|value| value.as_object())
+        .cloned()
+        .unwrap_or_default();
+
+    let updates_value = root
+        .entry("updates".to_string())
+        .or_insert_with(|| json!({}));
+    let updates = as_object_mut(updates_value);
+
+    for (key, default_value) in defaults {
+        match key.as_str() {
+            "latest_known_version" | "last_checked_utc" => {
+                if !updates.contains_key(&key) {
+                    updates.insert(key.clone(), default_value.clone());
+                }
+            }
+            "enabled" => {
+                if updates.get("enabled").and_then(|v| v.as_bool()).is_none() {
+                    updates.insert("enabled".into(), default_value.clone());
+                }
+            }
+            "github_repo" => {
+                let current = updates
+                    .get("github_repo")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim();
+                if current.is_empty() {
+                    updates.insert("github_repo".into(), default_value.clone());
+                }
+            }
+            _ => {
+                if !updates.contains_key(&key) {
+                    updates.insert(key.clone(), default_value.clone());
+                }
+            }
+        }
+    }
+
+    let release_channel = updates
+        .get("release_channel")
+        .and_then(|v| v.as_str())
+        .unwrap_or("stable")
+        .trim()
+        .to_ascii_lowercase();
+    let release_channel = if release_channel == "prerelease" {
+        "prerelease"
+    } else {
+        "stable"
+    };
+    updates.insert("release_channel".into(), json!(release_channel));
+    updates.insert(
+        "check_interval_hours".into(),
+        json!(clamp_i64(
+            int_or(updates.get("check_interval_hours"), 12),
+            1,
+            168
+        )),
+    );
+}
+
 fn normalize_source_text_replacement(root: &mut Map<String, Value>) {
     let section_value = root
         .entry("source_text_replacement".to_string())
@@ -451,6 +542,7 @@ pub fn normalize_config_payload(mut payload: Value) -> Value {
     normalize_asr_browser_config(root);
     normalize_ui_config(root);
     normalize_translation_section(root);
+    normalize_updates_config(root);
     root.insert("logging".into(), logging);
 
     root.insert("config_version".into(), json!(CURRENT_CONFIG_VERSION));
@@ -500,6 +592,32 @@ mod tests {
             out["subtitle_lifecycle"]["keep_completed_translation_during_active_partial"],
             true
         );
+    }
+
+    #[test]
+    fn normalizes_updates_defaults_for_legacy_configs() {
+        let out = normalize_config_payload(json!({
+            "config_version": CURRENT_CONFIG_VERSION,
+            "source_lang": "ru"
+        }));
+        assert_eq!(out["updates"]["enabled"], true);
+        assert_eq!(
+            out["updates"]["github_repo"],
+            "kiriuru/stream_sub_translator"
+        );
+        assert_eq!(out["updates"]["provider"], "github_releases");
+    }
+
+    #[test]
+    fn preserves_explicit_updates_disabled() {
+        let out = normalize_config_payload(json!({
+            "updates": {
+                "enabled": false,
+                "github_repo": "example/repo"
+            }
+        }));
+        assert_eq!(out["updates"]["enabled"], false);
+        assert_eq!(out["updates"]["github_repo"], "example/repo");
     }
 
     #[test]

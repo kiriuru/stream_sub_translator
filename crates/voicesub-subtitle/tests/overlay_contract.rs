@@ -99,6 +99,17 @@ fn overlay_disposes_renderer_when_payload_is_empty() {
 }
 
 #[test]
+fn overlay_clears_dom_when_idle_arrives_after_state_already_cleared() {
+    let source = read_workspace_file("bin/overlay/overlay.js");
+    assert_contains(&source, "hasVisibleRenderedFrame", "rendered frame probe");
+    assert_contains(
+        &source,
+        "isOverlayPresentationEmpty() && !hasVisibleRenderedFrame()",
+        "idle TTL must still tear down DOM",
+    );
+}
+
+#[test]
 fn overlay_subtitle_debug_hook_is_opt_in() {
     let source = read_workspace_file("bin/overlay/overlay.js");
     assert_contains(

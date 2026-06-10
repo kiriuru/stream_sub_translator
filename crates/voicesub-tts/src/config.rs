@@ -168,6 +168,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn roundtrip_twitch_ignore_users() {
+        let dir = std::env::temp_dir().join(format!("voicesub-tts-ignore-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let store = TtsConfigStore::new(&dir);
+        let mut twitch = TwitchTtsSettings::default();
+        twitch.ignore_users = vec!["nightbot".into(), "streamelements".into()];
+        let config = TtsConfig {
+            twitch,
+            ..TtsConfig::default()
+        };
+        store.save(&config).expect("save");
+        let loaded = store.load().expect("load");
+        assert_eq!(
+            loaded.twitch.ignore_users,
+            vec!["nightbot".to_string(), "streamelements".to_string()]
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn roundtrip_config() {
         let dir = std::env::temp_dir().join(format!("voicesub-tts-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);

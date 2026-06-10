@@ -823,5 +823,8 @@
   "style.preset.desc.comic_burst": "Bangers comic-yellow with chunky black outline and hot-red shadow.",
   "style.preset.desc.cyberpunk_neon": "Orbitron Black hot-magenta with cyan halo on deep navy plate.",
   "style.preset.desc.noir_typewriter": "Special Elite typewriter on deep ink plate — film noir dossier mood.",
-  "style.preset.desc.vlog_pastel": "Poppins on warm pastel pill — cozy lifestyle / vlog look."
+  "style.preset.desc.vlog_pastel": "Poppins on warm pastel pill — cozy lifestyle / vlog look.",
+  "updates.banner.message": "VoiceSub {latest}을(를) 사용할 수 있습니다(현재 {current}).",
+  "updates.banner.close": "닫기",
+  "updates.banner.download": "다운로드"
 }

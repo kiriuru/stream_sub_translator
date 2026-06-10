@@ -42,7 +42,30 @@ pub fn default_config_payload() -> Value {
                 "prepare_cycle_before_ms": 15000,
                 "force_final_on_interruption": true,
                 "force_final_min_chars": 3,
-                "force_final_min_stable_ms": 700
+                "force_final_min_stable_ms": 700,
+                "chrome_launch": {
+                    "launch_args": [
+                        "--new-window",
+                        "--no-first-run",
+                        "--no-default-browser-check",
+                        "--disable-default-apps",
+                        "--disable-session-crashed-bubble",
+                        "--disable-backgrounding-occluded-windows",
+                        "--disable-renderer-backgrounding",
+                        "--disable-background-timer-throttling",
+                        "--noerrdialogs",
+                        "--window-size=980,860"
+                    ],
+                    "disabled_features": [
+                        "CalculateNativeWinOcclusion",
+                        "HighEfficiencyModeAvailable",
+                        "HeuristicMemorySaver",
+                        "IntensiveWakeUpThrottling",
+                        "GlobalMediaControls"
+                    ],
+                    "extra_args": [],
+                    "use_high_priority": true
+                }
             }
         },
         "overlay": {
@@ -118,6 +141,15 @@ pub fn default_config_payload() -> Value {
         },
         "logging": {
             "full_enabled": false
+        },
+        "updates": {
+            "enabled": true,
+            "provider": "github_releases",
+            "github_repo": "kiriuru/stream_sub_translator",
+            "release_channel": "stable",
+            "check_interval_hours": 12,
+            "last_checked_utc": "",
+            "latest_known_version": ""
         }
     })
 }

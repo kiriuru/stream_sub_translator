@@ -104,11 +104,13 @@ impl RuntimeOrchestrator {
 
         let base = resolve_base_url(state).await;
         let config_payload = state.config.read().await;
-        let worker_target = worker_url_for_payload(&base, config_payload.payload());
+        let payload = config_payload.payload().clone();
+        let worker_target = worker_url_for_payload(&base, &payload);
+        let chrome_launch = voicesub_browser::chrome_launch_from_config(&payload);
         drop(config_payload);
         let launcher = BrowserWorkerLauncher::new(&state.paths.user_data_dir);
 
-        let launch_result = launcher.launch_worker(&worker_target);
+        let launch_result = launcher.launch_worker(&worker_target, &chrome_launch);
         let mut inner = self.inner.lock().await;
         match launch_result {
             Ok(result) => {

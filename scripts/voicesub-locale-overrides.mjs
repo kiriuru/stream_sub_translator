@@ -86,6 +86,9 @@ export const voicesubNewKeysEn = {
     "Special Elite typewriter on a deep ink plate — 1940s detective / typewritten dossier mood.",
   "style.preset.desc.vlog_pastel":
     "Poppins on a warm pastel pill — cozy lifestyle / vlog look, plays nicely with soft backgrounds.",
+  "updates.banner.message": "VoiceSub {latest} is available — you are on {current}.",
+  "updates.banner.close": "Close",
+  "updates.banner.download": "Download",
 };
 
 const voicesubExtrasLocalized = {
@@ -117,6 +120,9 @@ const voicesubExtrasLocalized = {
       "Эти настройки остаются локальными. После изменения сохрани config или профиль; для проверки сделай Стоп/Старт.",
     "document.title.dashboard": "VoiceSub",
     "header.title": "VoiceSub",
+    "updates.banner.message": "Доступна VoiceSub {latest} — у вас {current}.",
+    "updates.banner.close": "Закрыть",
+    "updates.banner.download": "Скачать",
     "save.status.saved": "Настройки сохранены.",
     "obs.overlay.instructions":
       "Добавьте этот URL как OBS Browser Source. Обновите URL при смене bind-адреса VoiceSub.",
@@ -234,6 +240,9 @@ const voicesubExtrasLocalized = {
       "有効にすると前回以降の新しい音声だけを処理します。無効にすると partial ごとにフレーズ全体を再処理するため、長い発話では負荷が高くなります。",
     "document.title.dashboard": "VoiceSub",
     "header.title": "VoiceSub",
+    "updates.banner.message": "VoiceSub {latest} が利用可能です（現在 {current}）。",
+    "updates.banner.close": "閉じる",
+    "updates.banner.download": "ダウンロード",
     "save.status.saved": "設定を保存しました。",
     "obs.overlay.instructions":
       "この URL を OBS Browser Source として追加してください。VoiceSub の bind アドレスが変わったら URL を更新してください。",
@@ -354,6 +363,9 @@ const voicesubExtrasLocalized = {
       "이 설정은 로컬에 유지됩니다. 변경 후 config 또는 프로필을 저장하고, 비교하려면 중지/시작을 사용하세요.",
     "document.title.dashboard": "VoiceSub",
     "header.title": "VoiceSub",
+    "updates.banner.message": "VoiceSub {latest}을(를) 사용할 수 있습니다(현재 {current}).",
+    "updates.banner.close": "닫기",
+    "updates.banner.download": "다운로드",
     "save.status.saved": "설정을 저장했습니다.",
     "obs.overlay.instructions":
       "이 URL을 OBS Browser Source로 추가하세요. VoiceSub bind 주소가 바뀌면 URL을 업데이트하세요.",
@@ -473,6 +485,9 @@ const voicesubExtrasLocalized = {
       "这些设置保留在本地。更改后保存 config 或配置文件；用停止/启动安全对比行为。",
     "document.title.dashboard": "VoiceSub",
     "header.title": "VoiceSub",
+    "updates.banner.message": "VoiceSub {latest} 已可用（当前 {current}）。",
+    "updates.banner.close": "关闭",
+    "updates.banner.download": "下载",
     "save.status.saved": "设置已保存。",
     "obs.overlay.instructions":
       "将此 URL 添加为 OBS Browser Source。VoiceSub bind 地址变更时请更新 URL。",

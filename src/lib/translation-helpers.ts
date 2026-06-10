@@ -28,6 +28,7 @@ export const REQUIRED_PROVIDER_FIELDS: Partial<Record<ProviderId, readonly strin
   openrouter: ["api_key", "model"],
   lm_studio: ["base_url", "model"],
   ollama: ["base_url", "model"],
+  libretranslate: ["api_url"],
 };
 
 export const PROVIDER_SETTING_LABEL_KEYS: Record<string, string> = {
@@ -255,4 +256,58 @@ export function nextAvailableSlot(config: ConfigPayload): string | null {
     if (!used.has(slotId)) return slotId;
   }
   return null;
+}
+
+export function getDuplicateEnabledTargetLangs(config: ConfigPayload): string[] {
+  const seen = new Map<string, number>();
+  for (const line of getLineCards(config)) {
+    if (!line.enabled) continue;
+    const lang = String(line.target_lang || "")
+      .trim()
+      .toLowerCase();
+    if (!lang) continue;
+    seen.set(lang, (seen.get(lang) || 0) + 1);
+  }
+  return [...seen.entries()].filter(([, count]) => count > 1).map(([lang]) => lang);
+}
+
+export function getTranslationConfigErrors(
+  config: ConfigPayload,
+  defaultProvider = "google_translate_v2",
+): string[] {
+  const errors: string[] = [];
+  if (!config.translation?.enabled) {
+    return errors;
+  }
+  const duplicates = getDuplicateEnabledTargetLangs(config);
+  if (duplicates.length > 0) {
+    errors.push(`duplicate_target:${duplicates.join(",")}`);
+  }
+  const missing = getLinesWithMissingSettings(config, defaultProvider);
+  if (missing.length > 0) {
+    const fields = [
+      ...new Set(
+        missing.flatMap((entry) =>
+          entry.missingFields.map((field) => `${entry.providerName}.${field}`),
+        ),
+      ),
+    ];
+    errors.push(`missing_provider_fields:${fields.join(";")}`);
+  }
+  return errors;
+}
+
+export function formatTranslationConfigError(
+  errorKey: string,
+  translate: (key: string, vars?: Record<string, string | number>) => string,
+): string {
+  if (errorKey.startsWith("duplicate_target:")) {
+    const langs = errorKey.slice("duplicate_target:".length);
+    return translate("translation.validation.duplicate_target", { langs });
+  }
+  if (errorKey.startsWith("missing_provider_fields:")) {
+    const fields = errorKey.slice("missing_provider_fields:".length);
+    return translate("translation.validation.missing_provider_fields", { fields });
+  }
+  return errorKey;
 }

@@ -1,6 +1,7 @@
 //! Chrome supervisor for Browser Speech worker (SST `browser_worker_launcher.py` port).
 
 mod chrome_flags;
+mod launch_config;
 mod ecoqos;
 mod gateway;
 mod launcher;
@@ -10,7 +11,11 @@ mod trace;
 mod webview2_messages;
 mod webview2_runtime;
 
-pub use chrome_flags::{disabled_chrome_features_csv, CHROME_ANTI_THROTTLE_FLAGS};
+pub use chrome_flags::{
+    default_chrome_launch_value, disabled_chrome_features_csv, BrowserChromeLaunchConfig,
+    CHROME_ANTI_THROTTLE_FLAGS,
+};
+pub use launch_config::chrome_launch_from_config;
 pub use launcher::{BrowserLaunchError, BrowserWorkerLauncher, LaunchResult};
 pub use gateway::{BrowserAsrGateway, GatewayDiagnostics};
 pub use operational_fsm::{BrowserAsrOperationalFsm, BrowserOperationalPhase};

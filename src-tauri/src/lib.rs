@@ -1,3 +1,4 @@
+mod shell;
 mod tts;
 
 #[cfg(windows)]
@@ -210,6 +211,7 @@ pub fn run() {
             tts::tts_sync_source_text_replacement,
             tts::tts_open_window,
             tts::tts_open_system_url,
+            shell::open_external_https_url,
         ])
         .setup(move |app| {
             let url = format!("http://{}:{}/", bind_addr.ip(), bind_addr.port());

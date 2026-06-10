@@ -5,6 +5,34 @@ use serde_json::json;
 use voicesub_config::{import_sst_json_value, ConfigStore};
 
 #[test]
+fn patch_updates_metadata_persists_only_updates_section() {
+    let dir = std::env::temp_dir().join(format!("voicesub-cfg-upd-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config.toml");
+
+    let mut store = ConfigStore::new(&path);
+    store.load_or_create().expect("load");
+    let before_lang = store.payload()["ui"]["language"].clone();
+    store
+        .patch_updates_metadata("0.9.9", "2026-06-10T12:00:00+00:00")
+        .expect("patch");
+
+    let mut reloaded = ConfigStore::new(&path);
+    reloaded.load_or_create().expect("reload");
+    assert_eq!(
+        reloaded.payload()["updates"]["latest_known_version"],
+        "0.9.9"
+    );
+    assert_eq!(
+        reloaded.payload()["updates"]["last_checked_utc"],
+        "2026-06-10T12:00:00+00:00"
+    );
+    assert_eq!(reloaded.payload()["ui"]["language"], before_lang);
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn toml_roundtrip_preserves_browser_google_mode() {
     let dir = std::env::temp_dir().join(format!("voicesub-cfg-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

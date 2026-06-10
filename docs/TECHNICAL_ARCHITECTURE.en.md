@@ -132,7 +132,8 @@ Hard boundaries:
 - no cloud backend, accounts, or hosted database;
 - **Node.js forbidden in shipped runtime**; Vite/Node only on dev/build machines;
 - dashboard and worker are Svelte (compile-time bundle); overlay is **vanilla HTML/JS** (no Svelte);
-- Chrome is a system dependency for Web Speech; core installer does not bundle Python/torch/Node.
+- **WebView2 Runtime** — required for the Tauri shell (`VoiceSub.exe`, dashboard, `/tts`); NSIS installer can run the bootstrapper if missing.
+- Chrome is a separate system dependency for the Web Speech worker; core installer does not bundle Python/torch/Node.
 
 ## 2. Technology Stack
 
@@ -360,7 +361,7 @@ Global middleware: CSP header, `Cache-Control: no-store`.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/api/health` | Liveness + WS connections + worker connected |
-| GET | `/api/version` | Product metadata (`VoiceSub`, version stub) |
+| GET | `/api/version` | Product metadata + `sync` (updates config, `update_available`, `latest_known_version`) |
 
 ### Devices / OpenAI helpers
 
@@ -412,7 +413,7 @@ Global middleware: CSP header, `Cache-Control: no-store`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| POST | `/api/updates/check` | Stub: `update_available: false` (deferred) |
+| POST | `/api/updates/check` | Poll GitHub Releases (forced on dashboard bootstrap); persists `updates.latest_known_version`, `last_checked_utc` |
 
 ### HTML pages
 
@@ -518,7 +519,8 @@ Payload enrichment: `event_sequence`, `created_at_ms`, `event_type` (`WsEventPub
 | `tts_twitch_*` | Twitch connect/disconnect/status/settings |
 | `tts_sync_source_text_replacement` | Sync replacement rules |
 | `tts_open_window` | Open/focus `/tts` webview |
-| `tts_open_system_url` | Open validated OAuth URL externally |
+| `tts_open_system_url` | Open validated Twitch OAuth URL externally |
+| `open_external_https_url` | Open GitHub release page (update banner **Download**) in system browser |
 
 **Lifecycle:** main webview → `http://{bind_addr}/` on setup; on close → TTS shutdown → runtime stop.
 
@@ -860,7 +862,7 @@ While runtime is in `idle` phase, the dashboard shows **placeholder preview** (`
 
 **WS:** `ws(s)://{host}/ws/events` — handles `transcript_update`, `overlay_update`.  
 **Reconnect:** exponential backoff 1s → 10s max; last frame preserved on disconnect (OBS UX).  
-**Empty payload:** `disposeRenderContainer(linesContainer)` when render returns `empty: true` (TTL / Stop / idle). Cache-bust: `overlay.html` query `?v=20260610a` on `overlay.js`.
+**Empty payload:** `disposeRenderContainer(linesContainer)` when render returns `empty: true` (TTL / Stop / idle). Idle TTL also requires `hasVisibleRenderedFrame()` so state-only clear does not skip DOM teardown. Cache-bust: `overlay.html` → `overlay.js?v=20260610b`.
 
 ## 22. Frontend: Browser Worker (Svelte)
 
@@ -901,7 +903,9 @@ Active HTTP server does **not** mount `/ws/remote/*`, experimental routes, or in
 - **Single source (interim):** `voicesub-types::PROJECT_VERSION` = `"0.5.0"`
 - Workspace `Cargo.toml` `[workspace.package].version` = `0.5.0`
 - `package.json`, `tauri.conf.json` — aligned `0.5.0`
-- `POST /api/updates/check` — **stub** (GitHub releases deferred per roadmap Q-G1)
+- `GET /api/version`, `POST /api/updates/check` — GitHub Releases poll (`update_service.rs`, `voicesub-types::version`)
+- Config `updates.*` — defaults + `normalize_updates_config` for legacy `config.toml`
+- Dashboard `UpdateBanner.svelte`; **Download** → Tauri `open_external_https_url` (`shell.rs`)
 
 ## 26. Testing
 
@@ -942,7 +946,7 @@ Active HTTP server does **not** mount `/ws/remote/*`, experimental routes, or in
 
 ### 28.1 Current limitations
 
-- GitHub auto-update **not implemented** (stub endpoint)
+- GitHub update **check + dashboard banner** implemented; installer auto-download not implemented (opens release page in system browser)
 - Golden full parity / formal Phase 1 DoD — **deferred** (roadmap §12)
 - `POST /api/openai/models` — static list; live OpenAI model fetch deferred
 - Audio input enumeration empty (by design for browser ASR)

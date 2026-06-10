@@ -26,7 +26,7 @@ use voicesub_config::{
 };
 use voicesub_export::ExportService;
 use crate::http::{
-    build_router, spawn_runtime_heartbeat, HttpState, PartialEmitCoordinator,
+    build_router, spawn_runtime_heartbeat, spawn_startup_check, HttpState, PartialEmitCoordinator,
     RuntimeMetricsCollector, RuntimeStatusBroadcaster, StylePresetsFn,
 };
 use voicesub_config::read_full_logging_enabled;
@@ -541,6 +541,7 @@ impl RuntimeService {
 
         let state = self.http_state();
         let heartbeat_task = spawn_runtime_heartbeat(self.runtime_broadcaster.clone(), state.clone());
+        spawn_startup_check(state.clone());
         let router = Self::router(state);
 
         let listener = tokio::net::TcpListener::bind(addr)
@@ -590,12 +591,13 @@ impl RuntimeService {
         };
 
         let store = self.config_store.read().await;
-
-        let url = worker_url_for_payload(&base, store.payload());
+        let payload = store.payload().clone();
+        let url = worker_url_for_payload(&base, &payload);
+        let chrome_launch = voicesub_browser::chrome_launch_from_config(&payload);
 
         let launcher = BrowserWorkerLauncher::new(&self.paths.user_data_dir);
 
-        launcher.launch_worker(&url)
+        launcher.launch_worker(&url, &chrome_launch)
     }
 }
 

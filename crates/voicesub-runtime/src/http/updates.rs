@@ -1,16 +1,19 @@
+use std::sync::Arc;
+
+use axum::extract::State;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use serde_json::json;
-use voicesub_types::PROJECT_VERSION;
+use serde_json::Value;
 
-/// GitHub release polling is deferred (roadmap Q-G1); returns current local version only.
-pub async fn check_updates() -> Response {
-    Json(json!({
-        "version": PROJECT_VERSION,
-        "product": "VoiceSub",
-        "update_available": false,
-        "latest_known_version": PROJECT_VERSION,
-        "message": "Update check is deferred for VoiceSub 0.5.0."
-    }))
-    .into_response()
+use super::state::HttpState;
+use super::update_service::check_now;
+
+pub async fn check_updates(State(state): State<Arc<HttpState>>) -> Response {
+    Json(check_now(&state, true).await).into_response()
+}
+
+pub async fn version_info(State(state): State<Arc<HttpState>>) -> Response {
+    let config = state.config.read().await.payload().clone();
+    let payload: Value = voicesub_types::build_version_info_payload(Some(&config));
+    Json(payload).into_response()
 }

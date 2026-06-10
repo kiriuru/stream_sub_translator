@@ -13,12 +13,18 @@ Technical architecture: `docs/TECHNICAL_ARCHITECTURE.en.md`. SST `0.4.4` is a fr
 - **SST** `0.4.4` — frozen reference; settings import works, but Parakeet/Remote/Experimental modes are not started in core.
 - **New overlay URL:** `http://127.0.0.1:8765/overlay` — update OBS Browser Source manually.
 
+### Element: system requirements
+- **Windows 10/11 x64**
+- **WebView2 Runtime** — required for `VoiceSub.exe` (Tauri dashboard shell, `/tts` window). The app will not start without it. Usually present on Windows 11; on Windows 10 the installer may offer the bootstrapper.
+- **Google Chrome** — separate dependency for the Web Speech worker window (`/google-asr`); not the same as WebView2.
+- Microphone in the Chrome worker; internet for external translation providers (optional).
+
 ### Element: install and update (NSIS)
 - **What it does:** `VoiceSub_0.5.0_x64-setup.exe` installs `VoiceSub.exe` and bundled static assets (dashboard, overlay, worker, tts).
-- **Why:** single installer without Python/Node in runtime; WebView2 bootstrapper when needed.
+- **Why:** single installer without Python/Node in runtime; downloads WebView2 via bootstrapper when missing (`downloadBootstrapper` in Tauri).
 - **Update:** close app → run new `setup.exe` over existing → `user-data/` and `logs/` persist next to install/project root.
 - **Developers:** `build-release-msi.bat` → `build-release.ps1` → `F:\AI\VoiceSub - release\v{version}\`.
-- **GitHub auto-update:** not implemented yet (stub `/api/updates/check`).
+- **Update check:** on dashboard bootstrap the app polls GitHub Releases (`POST /api/updates/check`). When a newer tag exists, a top banner appears (“VoiceSub X is available — you are on Y”). **Download** opens the release page in the system browser. Config: `user-data/config.toml` → `[updates]` (`enabled`, `github_repo`, `check_interval_hours`). The section is merged automatically when upgrading from SST.
 
 ### Element: local URLs
 | URL | Purpose |
@@ -75,7 +81,7 @@ Technical architecture: `docs/TECHNICAL_ARCHITECTURE.en.md`. SST `0.4.4` is a fr
 - **Subtitles** → source/translation visibility enabled.
 - TTL not too aggressive (text may flash and vanish).
 - On WS disconnect overlay keeps last frame (stale-guard + 1–10 s backoff) — expected.
-- Text **stuck after TTL/Stop** — update the app and reload Browser Source (fix: `disposeRenderContainer` in overlay, `overlay.js?v=20260610a`).
+- Text **stuck after TTL/Stop** — update the app and reload Browser Source (`disposeRenderContainer` + `hasVisibleRenderedFrame`, `overlay.js?v=20260610b`).
 
 ### Scenario: worker keeps dying
 - Check network (Web Speech uses Google endpoints).

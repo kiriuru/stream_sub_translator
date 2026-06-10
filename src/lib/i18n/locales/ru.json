@@ -823,5 +823,8 @@
   "style.preset.desc.comic_burst": "Bangers comic-yellow с толстой чёрной обводкой и hot-red тенью — энергия Marvel SFX.",
   "style.preset.desc.cyberpunk_neon": "Orbitron Black hot-magenta с cyan halo на deep navy plate.",
   "style.preset.desc.noir_typewriter": "Special Elite на deep ink plate — детективное кино / typewritten dossier.",
-  "style.preset.desc.vlog_pastel": "Poppins на warm pastel pill — уютный lifestyle / vlog look."
+  "style.preset.desc.vlog_pastel": "Poppins на warm pastel pill — уютный lifestyle / vlog look.",
+  "updates.banner.message": "Доступна VoiceSub {latest} — у вас {current}.",
+  "updates.banner.close": "Закрыть",
+  "updates.banner.download": "Скачать"
 }

@@ -12,11 +12,15 @@
 
     ensureLine,
 
+    formatTranslationConfigError,
+
     getEnabledProviderNames,
 
     getLineCards,
 
     getLinesWithMissingSettings,
+
+    getTranslationConfigErrors,
 
     getMissingProviderFields,
 
@@ -72,6 +76,8 @@
 
   let modelStatus = "";
 
+  let lineValidationMessage = "";
+
 
 
   $: loc = $locale;
@@ -85,6 +91,8 @@
   $: defaultProvider = normalizeProviderName(translation.provider);
 
   $: lineCards = getLineCards(config);
+
+  $: translationConfigErrors = getTranslationConfigErrors(config, defaultProvider);
 
   $: selectedLine =
 
@@ -218,7 +226,30 @@
 
 
 
+  function targetLangTakenByOther(slotId: string, targetLang: string, draft: ConfigPayload): boolean {
+    const normalized = String(targetLang || "").trim().toLowerCase();
+    if (!normalized) return false;
+    return getLineCards(draft).some(
+      (line) =>
+        line.slot_id !== slotId &&
+        line.enabled &&
+        String(line.target_lang || "").trim().toLowerCase() === normalized,
+    );
+  }
+
+
+
   function updateLine(slotId: string, patch: Partial<TranslationLine>) {
+    if (patch.target_lang) {
+      const draft = structuredClone(config);
+      if (targetLangTakenByOther(slotId, String(patch.target_lang), draft)) {
+        lineValidationMessage = tr("translation.validation.duplicate_target", {
+          langs: String(patch.target_lang).toUpperCase(),
+        });
+        return;
+      }
+    }
+    lineValidationMessage = "";
 
     mutate((draft) => {
 
@@ -295,6 +326,14 @@
     if (!slotId) return;
 
     const targetLang = newTargetLang || "en";
+
+    if (targetLangTakenByOther(slotId, targetLang, config)) {
+      lineValidationMessage = tr("translation.validation.duplicate_target", {
+        langs: targetLang.toUpperCase(),
+      });
+      return;
+    }
+    lineValidationMessage = "";
 
     mutate((draft) => {
 
@@ -575,7 +614,15 @@
 
       <p class="muted translation-lines-note">{tr("translation.lines.note")}</p>
 
-
+      {#if lineValidationMessage}
+        <p class="translation-validation error" role="alert">{lineValidationMessage}</p>
+      {:else if translationConfigErrors.length > 0}
+        <div class="translation-validation warn" role="status">
+          {#each translationConfigErrors as errorKey}
+            <p>{formatTranslationConfigError(errorKey, tr)}</p>
+          {/each}
+        </div>
+      {/if}
 
       <ul class="ordered-list translation-line-list">
 
@@ -1181,6 +1228,31 @@
 
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
 
+  }
+
+  .translation-line-card:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
+  }
+
+  .translation-validation {
+    margin: 0;
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .translation-validation.warn {
+    border: 1px solid color-mix(in srgb, var(--warning, #ffbf57) 45%, transparent);
+    background: color-mix(in srgb, var(--warning, #ffbf57) 10%, transparent);
+    color: var(--text-primary);
+  }
+
+  .translation-validation.error {
+    border: 1px solid color-mix(in srgb, var(--danger, #ff6b6b) 45%, transparent);
+    background: color-mix(in srgb, var(--danger, #ff6b6b) 10%, transparent);
+    color: var(--text-primary);
   }
 
 

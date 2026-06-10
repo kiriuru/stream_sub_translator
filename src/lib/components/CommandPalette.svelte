@@ -232,6 +232,11 @@
     outline: none;
   }
 
+  .command-palette__input:focus-visible {
+    box-shadow: var(--shadow-focus);
+    border-radius: var(--radius-sm);
+  }
+
   .command-palette__results {
     max-height: 360px;
     overflow-y: auto;
@@ -255,8 +260,11 @@
   }
 
   .command-palette__item:hover,
-  .command-palette__item.is-selected {
+  .command-palette__item.is-selected,
+  .command-palette__item:focus-visible {
     background: rgb(var(--ui-accent-rgb) / 0.1);
+    outline: none;
+    box-shadow: var(--shadow-focus);
     border-color: rgb(var(--ui-accent-rgb) / 0.22);
   }
 

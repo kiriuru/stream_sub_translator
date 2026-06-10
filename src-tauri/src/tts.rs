@@ -199,21 +199,11 @@ pub fn tts_stop_channel(state: State<'_, TtsState>, channel: String) -> Result<(
 
 #[tauri::command]
 
-pub fn tts_list_output_devices(
-
-    state: State<'_, TtsState>,
-
-) -> Result<Vec<voicesub_audio::AudioOutputDevice>, String> {
+pub fn tts_list_output_devices() -> Result<Vec<voicesub_audio::AudioOutputDevice>, String> {
 
     debug!(target: "voicesub.tts.ipc", "tts_list_output_devices");
 
-    state
-
-        .service
-
-        .list_output_devices()
-
-        .map_err(|e| e.to_string())
+    voicesub_audio::list_output_devices_on_thread().map_err(|e| e.to_string())
 
 }
 

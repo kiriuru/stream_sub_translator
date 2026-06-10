@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use thiserror::Error;
 use tracing::{info, warn};
 
@@ -122,6 +122,38 @@ impl ConfigStore {
     pub fn apply_save_payload(&mut self, incoming: &Value) -> Result<(), ConfigError> {
         let normalized = normalize_config_payload(incoming.clone());
         self.document.merge_save_request(&normalized);
+        self.save()
+    }
+
+    /// Persist only `updates.latest_known_version` and `updates.last_checked_utc`.
+    pub fn patch_updates_metadata(
+        &mut self,
+        latest_version: &str,
+        checked_utc: &str,
+    ) -> Result<(), ConfigError> {
+        let mut payload = self.document.payload().clone();
+        let root = payload
+            .as_object_mut()
+            .ok_or_else(|| ConfigError::Invalid("config root is not an object".into()))?;
+        let updates = root
+            .entry("updates")
+            .or_insert_with(|| json!({}));
+        let updates_obj = updates
+            .as_object_mut()
+            .ok_or_else(|| ConfigError::Invalid("updates is not an object".into()))?;
+        updates_obj.insert(
+            "latest_known_version".into(),
+            Value::String(latest_version.to_string()),
+        );
+        updates_obj.insert(
+            "last_checked_utc".into(),
+            Value::String(checked_utc.to_string()),
+        );
+        let normalized = normalize_config_payload(payload);
+        self.document = ConfigDocument::from_payload(
+            normalized,
+            self.document.loaded_from().to_string(),
+        );
         self.save()
     }
 

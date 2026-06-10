@@ -180,9 +180,19 @@ button, input, select, textarea {
 }
 
 .control:focus-visible,
-.btn:focus-visible {
+.btn:focus-visible,
+.btn-primary:focus-visible,
+.btn-ghost:focus-visible,
+.tab-btn:focus-visible,
+.compact-bottom-tab:focus-visible,
+[role="button"]:focus-visible {
   outline: none;
   box-shadow: var(--shadow-focus);
+}
+
+.checkbox-row:focus-within {
+  box-shadow: var(--shadow-focus);
+  border-radius: var(--radius-sm);
 }
 
 .checkbox-row {

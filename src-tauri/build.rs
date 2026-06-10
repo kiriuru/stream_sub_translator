@@ -33,6 +33,7 @@ fn main() {
                 "tts_sync_source_text_replacement",
                 "tts_open_window",
                 "tts_open_system_url",
+                "open_external_https_url",
             ]),
         ),
     )

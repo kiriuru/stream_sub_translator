@@ -2,11 +2,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use thiserror::Error;
-use tracing::{info, instrument};
+use tracing::{info, instrument, warn};
 
+use crate::chrome_flags::BrowserChromeLaunchConfig;
 use crate::ecoqos::opt_out_chrome_power_throttling;
-
-use crate::chrome_flags::{disabled_chrome_features_csv, CHROME_ANTI_THROTTLE_FLAGS};
 
 #[derive(Debug, Error)]
 pub enum BrowserLaunchError {
@@ -57,39 +56,21 @@ impl BrowserWorkerLauncher {
             .join(format!("browser-worker-profile-{variant}-{safe_engine}"))
     }
 
-    #[instrument(skip(self))]
-    pub fn launch_worker(&self, worker_url: &str) -> Result<LaunchResult, BrowserLaunchError> {
+    #[instrument(skip(self, chrome_launch))]
+    pub fn launch_worker(
+        &self,
+        worker_url: &str,
+        chrome_launch: &BrowserChromeLaunchConfig,
+    ) -> Result<LaunchResult, BrowserLaunchError> {
         let chrome_path = find_chrome_executable().ok_or(BrowserLaunchError::ChromeNotFound)?;
         let profile_dir = self.profile_dir(worker_url, &chrome_path);
         std::fs::create_dir_all(&profile_dir).map_err(BrowserLaunchError::ProfileDir)?;
 
+        let chrome_args = chrome_launch.launch_args_for_url(&profile_dir, worker_url);
         let mut args = vec![chrome_path.display().to_string()];
-        args.extend(CHROME_ANTI_THROTTLE_FLAGS.iter().map(|s| (*s).to_string()));
-        args.push(format!("--user-data-dir={}", profile_dir.display()));
-        args.push(format!(
-            "--disable-features={}",
-            disabled_chrome_features_csv()
-        ));
-        args.push(worker_url.to_string());
+        args.extend(chrome_args.clone());
 
-        let mut command = Command::new(&chrome_path);
-        command
-            .args(&args[1..])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-            const DETACHED_PROCESS: u32 = 0x00000008;
-            const HIGH_PRIORITY_CLASS: u32 = 0x00000080;
-            command
-                .creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS | HIGH_PRIORITY_CLASS);
-        }
-
-        let child = command.spawn().map_err(BrowserLaunchError::Spawn)?;
+        let child = spawn_chrome_process(&chrome_path, &chrome_args, chrome_launch.use_high_priority)?;
         let pid = child.id();
 
         opt_out_chrome_power_throttling(pid);
@@ -98,6 +79,7 @@ impl BrowserWorkerLauncher {
             chrome = %chrome_path.display(),
             profile = %profile_dir.display(),
             pid,
+            high_priority = chrome_launch.use_high_priority,
             "browser worker launched"
         );
 
@@ -131,6 +113,55 @@ impl BrowserWorkerLauncher {
             false
         }
     }
+}
+
+fn is_access_denied(err: &std::io::Error) -> bool {
+    err.raw_os_error() == Some(5)
+}
+
+fn spawn_chrome_process(
+    chrome_path: &Path,
+    chrome_args: &[String],
+    use_high_priority: bool,
+) -> Result<std::process::Child, BrowserLaunchError> {
+    match try_spawn_chrome(chrome_path, chrome_args, use_high_priority) {
+        Ok(child) => Ok(child),
+        Err(err) if use_high_priority && matches!(&err, BrowserLaunchError::Spawn(io) if is_access_denied(io)) => {
+            warn!(
+                "chrome launch: HIGH_PRIORITY_CLASS denied (ERROR_ACCESS_DENIED); retrying without priority boost"
+            );
+            try_spawn_chrome(chrome_path, chrome_args, false)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn try_spawn_chrome(
+    chrome_path: &Path,
+    chrome_args: &[String],
+    use_high_priority: bool,
+) -> Result<std::process::Child, BrowserLaunchError> {
+    let mut command = Command::new(chrome_path);
+    command
+        .args(chrome_args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+        const HIGH_PRIORITY_CLASS: u32 = 0x00000080;
+        let mut flags = CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS;
+        if use_high_priority {
+            flags |= HIGH_PRIORITY_CLASS;
+        }
+        command.creation_flags(flags);
+    }
+
+    command.spawn().map_err(BrowserLaunchError::Spawn)
 }
 
 fn find_chrome_executable() -> Option<PathBuf> {
@@ -222,6 +253,7 @@ fn is_supported_chrome(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chrome_flags::BrowserChromeLaunchConfig;
 
     #[test]
     fn profile_dir_uses_classic_variant() {
@@ -232,7 +264,16 @@ mod tests {
     }
 
     #[test]
-    fn launch_args_include_anti_throttle_flags() {
-        assert!(CHROME_ANTI_THROTTLE_FLAGS.contains(&"--disable-background-timer-throttling"));
+    fn launch_args_include_configured_flags() {
+        let config = BrowserChromeLaunchConfig::default();
+        assert!(config
+            .launch_args
+            .contains(&"--disable-background-timer-throttling".to_string()));
+    }
+
+    #[test]
+    fn access_denied_detection_matches_win32_code_5() {
+        let err = std::io::Error::from_raw_os_error(5);
+        assert!(is_access_denied(&err));
     }
 }

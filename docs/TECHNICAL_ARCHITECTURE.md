@@ -132,7 +132,8 @@ Tauri dev: embedded HTTP на `http://127.0.0.1:8765`; main webview открыв
 - без cloud backend, accounts, hosted database;
 - **Node.js запрещён в shipped runtime**; Vite/Node — только на машине разработчика/сборки;
 - dashboard и worker — Svelte (compile-time bundle); overlay — **vanilla HTML/JS** (без Svelte);
-- Chrome — system dependency для Web Speech; core installer не тянет Python/torch/Node.
+- **WebView2 Runtime** — обязателен для Tauri shell (`VoiceSub.exe`, dashboard, `/tts`); NSIS installer может поставить bootstrapper.
+- Chrome — отдельная system dependency для Web Speech worker; core installer не тянет Python/torch/Node.
 
 ## 2. Технологический стек
 
@@ -360,7 +361,7 @@ Global middleware: CSP header, `Cache-Control: no-store`.
 | Method | Path | Назначение |
 | --- | --- | --- |
 | GET | `/api/health` | Liveness + WS connections + worker connected |
-| GET | `/api/version` | Product metadata (`VoiceSub`, version stub) |
+| GET | `/api/version` | Product metadata + `sync` (updates config, `update_available`, `latest_known_version`) |
 
 ### Devices / OpenAI helpers
 
@@ -412,7 +413,7 @@ Global middleware: CSP header, `Cache-Control: no-store`.
 
 | Method | Path | Назначение |
 | --- | --- | --- |
-| POST | `/api/updates/check` | Stub: `update_available: false` (deferred) |
+| POST | `/api/updates/check` | Poll GitHub Releases (`force` on dashboard bootstrap); persists `updates.latest_known_version`, `last_checked_utc` |
 
 ### HTML pages
 
@@ -518,7 +519,8 @@ Payload enrichment: `event_sequence`, `created_at_ms`, `event_type` (`WsEventPub
 | `tts_twitch_*` | Twitch connect/disconnect/status/settings |
 | `tts_sync_source_text_replacement` | Sync replacement rules |
 | `tts_open_window` | Open/focus `/tts` webview |
-| `tts_open_system_url` | Open validated OAuth URL externally |
+| `tts_open_system_url` | Open validated Twitch OAuth URL externally |
+| `open_external_https_url` | Open GitHub release page (update banner **Download**) in system browser |
 
 **Lifecycle:** main webview → `http://{bind_addr}/` on setup; on close → TTS shutdown → runtime stop.
 
@@ -860,7 +862,7 @@ Compact layout adds pane `"live"` (overview).
 
 **WS:** `ws(s)://{host}/ws/events` — handles `transcript_update`, `overlay_update`.  
 **Reconnect:** exponential backoff 1s → 10s max; last frame preserved on disconnect (OBS UX).  
-**Empty payload:** `disposeRenderContainer(linesContainer)` when render returns `empty: true` (TTL / Stop / idle). Cache-bust: `overlay.html` query `?v=20260610a` on `overlay.js`.
+**Empty payload:** `disposeRenderContainer(linesContainer)` when render returns `empty: true` (TTL / Stop / idle). Idle TTL также требует `hasVisibleRenderedFrame()` — иначе очистка state без `render()` оставляет последний кадр в OBS. Cache-bust: `overlay.html` → `overlay.js?v=20260610b`.
 
 ## 22. Frontend: browser worker (Svelte)
 
@@ -901,7 +903,9 @@ Active HTTP server **не** поднимает `/ws/remote/*`, experimental rout
 - **Single source (interim):** `voicesub-types::PROJECT_VERSION` = `"0.5.0"`
 - Workspace `Cargo.toml` `[workspace.package].version` = `0.5.0`
 - `package.json`, `tauri.conf.json` — aligned `0.5.0`
-- `POST /api/updates/check` — **stub** (GitHub releases deferred per roadmap Q-G1)
+- `GET /api/version`, `POST /api/updates/check` — GitHub Releases poll (`voicesub-runtime/src/http/update_service.rs`, `voicesub-types::version`)
+- Config `updates.*` — defaults in `voicesub-config::defaults`; legacy configs merge via `normalize_updates_config`
+- Dashboard banner: `UpdateBanner.svelte`; download → Tauri `open_external_https_url` (`src-tauri/src/shell.rs`)
 
 ## 26. Тестирование
 
@@ -942,7 +946,7 @@ Active HTTP server **не** поднимает `/ws/remote/*`, experimental rout
 
 ### 28.1 Текущие ограничения
 
-- GitHub auto-update **не реализован** (stub endpoint)
+- GitHub update **check + dashboard banner** реализованы; авто-скачивание installer — нет (только ссылка на release page)
 - Golden full parity / formal Phase 1 DoD — **deferred** (roadmap §12)
 - `POST /api/openai/models` — static list; live OpenAI model fetch deferred
 - Audio input enumeration empty (by design for browser ASR)

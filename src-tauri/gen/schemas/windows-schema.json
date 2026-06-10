@@ -183,6 +183,12 @@
           "markdownDescription": "Enables the launch_browser_worker command without any pre-configured scope."
         },
         {
+          "description": "Enables the open_external_https_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-external-https-url",
+          "markdownDescription": "Enables the open_external_https_url command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_dashboard_layout command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-dashboard-layout",
@@ -373,6 +379,12 @@
           "type": "string",
           "const": "deny-launch-browser-worker",
           "markdownDescription": "Denies the launch_browser_worker command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_external_https_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-external-https-url",
+          "markdownDescription": "Denies the open_external_https_url command without any pre-configured scope."
         },
         {
           "description": "Denies the set_dashboard_layout command without any pre-configured scope.",

@@ -13,12 +13,18 @@
 - **SST** `0.4.4` — frozen reference; настройки импортируются, но режимы Parakeet/Remote/Experimental в core не поднимаются.
 - **Overlay URL новый:** `http://127.0.0.1:8765/overlay` — обновите Browser Source в OBS вручную.
 
+### Элемент: системные требования
+- **Windows 10/11 x64**
+- **WebView2 Runtime** — обязателен для `VoiceSub.exe` (dashboard в Tauri/WebView2, окно `/tts`). Без WebView2 приложение не запустится. На Win11 чаще уже есть; на Win10 установщик может предложить bootstrapper.
+- **Google Chrome** — отдельно, для окна Web Speech worker (`/google-asr`), не путать с WebView2.
+- Микрофон в Chrome worker; интернет — для внешних провайдеров перевода (опционально).
+
 ### Элемент: установка и обновление (NSIS)
 - **Что делает:** `VoiceSub_0.5.0_x64-setup.exe` ставит `VoiceSub.exe` и статические ресурсы (`bin/dashboard`, overlay, worker, tts).
-- **Для чего:** один установщик без Python/Node в runtime; WebView2 bootstrapper при необходимости.
+- **Для чего:** один установщик без Python/Node в runtime; при отсутствии WebView2 — загрузка через bootstrapper (`downloadBootstrapper` в Tauri).
 - **Обновление:** закройте приложение → запустите новый `setup.exe` поверх → `user-data/` и `logs/` сохраняются рядом с install path / project root.
 - **Разработчикам:** `build-release-msi.bat` → `build-release.ps1` → `F:\AI\VoiceSub - release\v{version}\`.
-- **GitHub auto-update:** пока не реализован (stub `/api/updates/check`).
+- **Проверка обновлений:** при старте dashboard опрашивает GitHub Releases (`POST /api/updates/check`). Если на GitHub версия новее установленной — баннер сверху («Доступна VoiceSub X — у вас Y»). **Скачать** открывает страницу release в системном браузере. Настройки: `user-data/config.toml` → `[updates]` (`enabled`, `github_repo`, `check_interval_hours`). Секция подставляется автоматически при апгрейде со SST.
 
 ### Элемент: локальные URL
 | URL | Назначение |
@@ -75,7 +81,7 @@
 - **Subtitles** → видимость source/translation включена.
 - TTL не слишком короткий (текст может мелькать и исчезать).
 - После reconnect overlay держит последний кадр (stale-guard + backoff 1–10 с) — это нормально.
-- Текст **не исчезает после TTL/Stop** — обновите приложение и перезагрузите Browser Source (fix: `disposeRenderContainer` в overlay, `overlay.js?v=20260610a`).
+- Текст **не исчезает после TTL/Stop** — обновите приложение и перезагрузите Browser Source (`disposeRenderContainer` + `hasVisibleRenderedFrame`, `overlay.js?v=20260610b`).
 
 ### Сценарий: worker отваливается
 - Проверьте сеть (Web Speech идёт через Google).

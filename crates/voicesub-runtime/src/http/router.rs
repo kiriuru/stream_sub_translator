@@ -11,7 +11,6 @@ use axum::{
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
 use voicesub_config::build_project_fonts_stylesheet;
-use voicesub_types::PROJECT_VERSION;
 
 use super::devices::audio_inputs;
 use super::exports::{export_diagnostics, list_exports};
@@ -24,7 +23,7 @@ use super::state::HttpState;
 use super::tts_proxy::google_tts_proxy;
 use super::tts_python::{python_tts_proxy, python_tts_status};
 use super::twitch_oauth::{twitch_oauth_complete, twitch_oauth_open, twitch_oauth_pending};
-use super::updates::check_updates;
+use super::updates::{check_updates, version_info};
 
 pub fn build_router(state: Arc<HttpState>) -> Router {
     let paths = state.paths.clone();
@@ -48,7 +47,7 @@ pub fn build_router(state: Arc<HttpState>) -> Router {
 
     Router::new()
         .route("/api/health", get(health))
-        .route("/api/version", get(version_info))
+        .route("/api/version", get(version_info_route))
         .route("/api/devices/audio-inputs", get(audio_inputs))
         .route("/api/openai/recommended-models", get(recommended_models))
         .route("/api/openai/models", post(list_models))
@@ -105,14 +104,8 @@ async fn health(State(state): State<Arc<HttpState>>) -> impl IntoResponse {
     }))
 }
 
-async fn version_info() -> impl IntoResponse {
-    axum::Json(serde_json::json!({
-        "version": PROJECT_VERSION,
-        "product": "VoiceSub",
-        "update_available": false,
-        "latest_known_version": PROJECT_VERSION,
-        "message": "VoiceSub 0.5.0 local runtime"
-    }))
+async fn version_info_route(State(state): State<Arc<HttpState>>) -> impl IntoResponse {
+    version_info(State(state)).await
 }
 
 async fn dashboard_index(State(state): State<Arc<HttpState>>) -> impl IntoResponse {
@@ -142,6 +135,7 @@ async fn project_fonts_css(State(state): State<Arc<HttpState>>) -> impl IntoResp
     ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], css)
 }
 
+/// OBS overlay HTML is read from `bin/overlay/` (Tauri `bundle.resources`), not `include_str!`.
 async fn overlay_page(State(state): State<Arc<HttpState>>) -> impl IntoResponse {
     serve_html_candidate(
         state.paths.overlay_root.join("overlay.html"),

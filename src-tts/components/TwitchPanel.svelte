@@ -67,7 +67,10 @@
   let busy = $state(false);
   let chatLog = $state<TwitchChatMessage[]>([]);
   let ignoreUsersText = $state("");
-  let enabledLanguagesText = $state((twitch.enabled_languages ?? []).join(", "));
+  let enabledLanguagesText = $state("");
+  let ignoreUsersDirty = $state(false);
+  let enabledLanguagesDirty = $state(false);
+  let ignoreUsersInput: HTMLInputElement | null = null;
 
   const nickPairs = $derived(twitch.nick_replacements ?? []);
 
@@ -108,11 +111,16 @@
     ];
   });
 
-  function syncIgnoreText() {
-    ignoreUsersText = (twitch.ignore_users || []).join(", ");
-  }
-
-  syncIgnoreText();
+  $effect(() => {
+    const users = (twitch.ignore_users || []).join(", ");
+    if (!ignoreUsersDirty && document.activeElement !== ignoreUsersInput) {
+      ignoreUsersText = users;
+    }
+    const langs = (twitch.enabled_languages ?? []).join(", ");
+    if (!enabledLanguagesDirty) {
+      enabledLanguagesText = langs;
+    }
+  });
 
   export function handleConnectionUpdate(next: TwitchConnectionStatus) {
     status = next;
@@ -152,8 +160,16 @@
   function queueSave() {
     if (settingsTimer) clearTimeout(settingsTimer);
     settingsTimer = setTimeout(() => {
+      settingsTimer = null;
       void persistSettings();
     }, 400);
+  }
+
+  function flushPendingSave() {
+    if (!settingsTimer) return;
+    clearTimeout(settingsTimer);
+    settingsTimer = null;
+    void persistSettings();
   }
 
   function stopOAuthPoll() {
@@ -237,11 +253,14 @@
       twitch = next;
       const saved = await updateTwitchSettings(next);
       twitch = saved.twitch ?? next;
+      ignoreUsersDirty = false;
+      enabledLanguagesDirty = false;
       onTwitchConfigSaved?.(twitch);
       ttsTrace("twitch", "settings_saved", {
         channel: next.channel,
         enabled: next.enabled,
         lang: next.language,
+        ignore_users: next.ignore_users.length,
       });
       error = "";
     } catch (err) {
@@ -315,7 +334,7 @@
   $effect(() => {
     void refreshStatus();
     return () => {
-      if (settingsTimer) clearTimeout(settingsTimer);
+      flushPendingSave();
       stopOAuthPoll();
     };
   });
@@ -499,12 +518,15 @@
       <span>{tr("tts.twitch.ignore_users")}</span>
       <input
         class="control"
+        bind:this={ignoreUsersInput}
         placeholder={tr("tts.twitch.ignore_users_placeholder")}
         value={ignoreUsersText}
         oninput={(e) => {
+          ignoreUsersDirty = true;
           ignoreUsersText = (e.currentTarget as HTMLInputElement).value;
           queueSave();
         }}
+        onblur={() => flushPendingSave()}
       />
     </label>
 
@@ -726,9 +748,11 @@
             placeholder={tr("tts.twitch.allowed_languages_placeholder")}
             value={enabledLanguagesText}
             oninput={(e) => {
+              enabledLanguagesDirty = true;
               enabledLanguagesText = (e.currentTarget as HTMLInputElement).value;
               queueSave();
             }}
+            onblur={() => flushPendingSave()}
           />
         </label>
         <label class="stack-field">

@@ -68,6 +68,7 @@ Legacy SST Python tree is **port reference** until Rust parity; do not add featu
 ## Local-First Baseline
 - Default bind `127.0.0.1`; no cloud/SaaS/accounts.
 - OBS overlay: **new URL** documented for 0.5.0; users update Browser Source manually.
+- GitHub update check: `POST /api/updates/check` + dashboard banner; opens release URL via `open_external_https_url` (not `window.open`).
 
 ## Hard Constraints
 - **Do NOT use Node.js** in shipped product runtime or as a dependency inside the installer.
@@ -77,6 +78,7 @@ Legacy SST Python tree is **port reference** until Rust parity; do not add featu
 - Dashboard = Svelte; overlay = **plain HTML/JS** (OBS).
 - Browser worker: **Svelte only** at `/google-asr` (`src-worker/` → `bin/worker/`). Overlay stays vanilla HTML in `bin/overlay/`.
 - Python only in optional `modules/parakeet/` sidecar (Phase 4).
+- **TTS Python sidecar frozen:** ship `bin/modules/tts/runtime/{platform}/google_tts_fetch.exe` only; `google_tts_fetch.py` / `build_runtime.*` are gitignored (local dev artifacts). Release builds must not depend on system Python (`VOICESUB_TTS_ALLOW_SYSTEM_PYTHON` is debug-only).
 - Default mic: Chrome worker `getUserMedia`; WASAPI only in Parakeet module.
 
 ## Runtime Modes (core 0.5.0)
