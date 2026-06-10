@@ -1,58 +1,14 @@
 # Журнал изменений VoiceSub / SST Desktop
 
-Единая история изменений desktop-линии: **VoiceSub** `0.5.0+` (активная разработка) и **SST Desktop** `0.4.4` и ниже (frozen reference в `F:\AI\stream-sub-translator`).
+Единая история изменений desktop-линии: **VoiceSub** `0.5.0` (первый релиз новой линии, baseline — SST `0.4.4`) и **SST Desktop** `0.4.4` и ниже (frozen reference в `F:\AI\stream-sub-translator`).
 
 Этот файл — канонический changelog. Installer delta SST `0.4.1`: [DESKTOP_RELEASE_CHANGELOG_0.4.1.md](./DESKTOP_RELEASE_CHANGELOG_0.4.1.md). Старые per-version delta (`0.3.x`, `0.4.0`) удалены — история только здесь.
 
 **Формат записей (как [GitHub Release v0.2.9.2](https://github.com/kiriuru/stream_sub_translator/releases/tag/v0.2.9.2)):** одно предложение о версии; буллеты «что вошло» — только факты изменений; для desktop-exe / installer — блок «формат release» (структура поставки, без перечисления старых профилей как новинки).
 
-## Unreleased
-
-Post-`0.5.0` polish относительно frozen SST `0.4.4`. `PROJECT_VERSION` остаётся **0.5.0** до следующего tagged release.
-
-### Проверка обновлений (GitHub Releases)
-
-- **`voicesub-types::version`**: semver-сравнение, `extract_latest_github_release`, `build_version_info_payload`, `release_url_for`.
-- **`POST /api/updates/check`** + **`GET /api/version`**: live poll GitHub Releases (`updates.github_repo`, channel `stable`/`prerelease`, interval `check_interval_hours`).
-- **Startup:** `spawn_startup_check()` при старте runtime; dashboard вызывает check на bootstrap (`UpdateBanner.svelte`).
-- **Config:** defaults `updates.enabled: true`, `github_repo: kiriuru/stream_sub_translator`; **`normalize_updates_config`** подставляет секцию `[updates]` в legacy `config.toml` без ручного merge.
-- **UI:** баннер «доступна новая версия» (en/ru/ja/ko/zh через `voicesub-locale-overrides.mjs`); **Скачать** → Tauri IPC `open_external_https_url` (системный браузер; `window.open` в WebView2 не работает).
-
-### OBS overlay — TTL и очистка кадра
-
-- **Backend TTL** (Rust lifecycle) без изменений контракта SST; idle `overlay_update` публикуется по расписанию.
-- **Frontend fix:** `hasVisibleRenderedFrame()` в `clearOverlayPresentation` — при idle payload состояние очищалось до `render()`, DOM оставался с последним кадром (текст «висел» в OBS).
-- `disposeRenderContainer` при `result.empty`; cache-bust **`overlay.js?v=20260610b`**.
-- Контракт: `overlay_clears_dom_when_idle_arrives_after_state_already_cleared` в `overlay_contract.rs`.
-
-### Browser worker / Chrome
-
-- Флаги Chrome вынесены в config: `asr.browser.chrome_launch` (`launch_args`, `disabled_features`); `chrome_flags.rs`, `launch_config.rs`.
-- Retry launch без `HIGH_PRIORITY_CLASS` при `ERROR_ACCESS_DENIED` (Windows).
-
-### Dashboard / config / TTS
-
-- **Translation panel:** валидация дубликатов target lang и пустых API keys; gate Save в `App.svelte` (`translation-helpers.ts`).
-- **Twitch TTS:** `TwitchPanel.svelte` — `$effect` sync ignore-users из config; `flushPendingSave` на blur/unmount (не затирает `ignore_users` пустым полем).
-- **cpal:** enum output devices на отдельном thread (`list_output_devices_on_thread`).
-- **a11y:** `focus-visible` в `global.css` и command palette.
-- Удалены устаревшие Python-исходники TTS fetcher из git (`google_tts_fetch.py`, `build_runtime.*`); runtime — embedded `google_tts_fetch.exe` + Nuitka build script вне repo.
-
-### Документация
-
-- `TECHNICAL_ARCHITECTURE*.md` §25 — update check реализован (не stub).
-- `WIKI.*` — баннер обновлений, overlay TTL fix `20260610b`.
-- `README.*` — troubleshooting overlay / updates.
-
-### Тесты
-
-- `voicesub-config`: `normalizes_updates_defaults_for_legacy_configs`
-- `voicesub-types`: version/update payload tests
-- `overlay_contract.rs`, `translation-helpers.validation.test.ts`, `roundtrip_twitch_ignore_users`
-
 ## 0.5.0
 
-Major release. Преемник SST `0.4.4`. `PROJECT_VERSION` в `voicesub-types::version.rs` — **0.5.0**; `config_version` **8** (`user-data/config.toml`). Продукт переименован в **VoiceSub**; HTTP/WebSocket **контракты сохранены по смыслу** (parity-порт subtitle/translation lifecycle), но **стек и поставка полностью новые**. Публичный GitHub release и formal Phase 1 DoD — **отложены** (roadmap §12).
+Major release. Преемник frozen SST `0.4.4`. Все пункты ниже — **изменения относительно SST `0.4.4`**. `PROJECT_VERSION` в `voicesub-types::version.rs` — **0.5.0**; `config_version` **8** (`user-data/config.toml`). Продукт переименован в **VoiceSub**; HTTP/WebSocket **контракты сохранены по смыслу** (parity-порт subtitle/translation lifecycle), но **стек и поставка полностью новые**. Публичный GitHub release `v0.5.0` и formal Phase 1 DoD — **ещё не опубликованы** (roadmap §12); локальный NSIS installer собирается через `build-release.ps1`.
 
 ### Формат release (NSIS)
 
@@ -86,6 +42,8 @@ Major release. Преемник SST `0.4.4`. `PROJECT_VERSION` в `voicesub-type
 
 - Единственный production-режим core: **`browser_google`** (`/google-asr`).
 - Chrome supervisor: изолированный `--user-data-dir`, visible address bar, anti-throttle flags, EcoQoS opt-out (порт SST `browser_worker_launcher.py`).
+- Флаги Chrome в config: `asr.browser.chrome_launch` (`launch_args`, `disabled_features`); `chrome_flags.rs`, `launch_config.rs`.
+- Retry launch без `HIGH_PRIORITY_CLASS` при `ERROR_ACCESS_DENIED` (Windows).
 - Worker FSM: `src-worker/lib/asr/session-manager.ts`, `socket-bridge.ts`, force-finalization, session rotation (`max_browser_session_age_ms` default 180000).
 - `/api/devices/audio-inputs` — пустой список (микрофон через Chrome `getUserMedia`).
 
@@ -99,14 +57,16 @@ Major release. Преемник SST `0.4.4`. `PROJECT_VERSION` в `voicesub-type
 
 - `/ws/events`: replay `runtime_update`, `subtitle_payload_update`, `overlay_update`; stale-guard в dashboard (`src/lib/ws.ts`) и overlay (`bin/overlay/overlay.js`, `ws-stale-guard-logic.js`).
 - Overlay reconnect: exponential backoff 1–10 s; последний кадр сохраняется при disconnect (OBS UX).
-- **Empty overlay cleanup (2026-06-10):** `disposeRenderContainer` при `result.empty`; дополнительный fix idle TTL — см. **Unreleased** (`hasVisibleRenderedFrame`). Cache-bust: `overlay.js?v=20260610b`.
-- Контракт: `crates/voicesub-subtitle/tests/overlay_contract.rs`.
+- **Empty overlay cleanup:** `disposeRenderContainer` при `result.empty` (TTL / Stop / idle). **`hasVisibleRenderedFrame()`** в `clearOverlayPresentation` — иначе idle payload очищал state до `render()` и текст оставался в OBS. Cache-bust: `overlay.js?v=20260610b`.
+- Контракт: `crates/voicesub-subtitle/tests/overlay_contract.rs` (`overlay_disposes_renderer_when_payload_is_empty`, `overlay_clears_dom_when_idle_arrives_after_state_already_cleared`).
 
 ### TTS-модуль и Twitch
 
 - UI: `src-tts/` → `bin/tts/`, маршрут `/tts`; manifest `bin/modules/tts/module.toml`.
 - Rust: `voicesub-tts`, `voicesub-twitch` — queue, subtitle speech planner, IRC, OAuth bridge.
-- Tauri IPC: `tts_*` commands (`src-tauri/src/tts.rs`); embedded Python sidecar `bin/modules/tts/runtime/` для Google TTS fetch.
+- Tauri IPC: `tts_*` commands (`src-tauri/src/tts.rs`); embedded `google_tts_fetch.exe` в `bin/modules/tts/runtime/` (Python-исходники fetcher вне git).
+- **`TwitchPanel.svelte`:** sync `ignore_users` из config; `flushPendingSave` на blur/unmount.
+- **cpal:** enum output devices на отдельном thread (`list_output_devices_on_thread`).
 - API: `/api/tts/google`, `/api/tts/python`, `/api/tts/twitch/oauth-*`.
 
 ### OBS Closed Captions
@@ -119,12 +79,23 @@ Major release. Преемник SST `0.4.4`. `PROJECT_VERSION` в `voicesub-type
 - `config_version` **8**; SST `config.json` import через `voicesub-config::migrate` (`local` / `remote` / experimental → `browser_google`).
 - Profiles: `user-data/profiles/{name}.toml`.
 - Env aliases: `VOICESUB_*` + совместимость `SST_*` для deep diagnostics.
+- **`normalize_updates_config`:** секция `[updates]` подставляется при загрузке legacy `config.toml` (апгрейд со SST).
+
+### Проверка обновлений (GitHub Releases)
+
+- **`voicesub-types::version`**: semver-сравнение, `extract_latest_github_release`, `build_version_info_payload`, `release_url_for`.
+- **`POST /api/updates/check`** + **`GET /api/version`**: poll GitHub Releases (`updates.github_repo`, channel `stable`/`prerelease`, interval `check_interval_hours`).
+- **Startup:** `spawn_startup_check()`; dashboard — check на bootstrap (`UpdateBanner.svelte`).
+- **Config defaults:** `updates.enabled: true`, `github_repo: kiriuru/stream_sub_translator`.
+- **UI:** баннер «доступна новая версия» (en/ru/ja/ko/zh); **Скачать** → Tauri `open_external_https_url` (системный браузер).
 
 ### Dashboard UI (Svelte)
 
 - Вкладки: Translation, Subtitles, Style, UI Theme, OBS, Word Replace, Tools & Data, Settings, Help.
 - Compact layout: Tauri IPC `set_dashboard_layout` (~390×844).
 - Command palette, idle subtitle preview (`src/lib/preview-payload.ts`) — placeholder до Start.
+- **Translation panel:** валидация дубликатов target lang и пустых API keys; gate Save (`translation-helpers.ts`).
+- **a11y:** `focus-visible` в `global.css` и command palette.
 - i18n: **en, ru, ja, ko, zh** — `src/lib/i18n/locales/*.json` + `tts-*.json`; export `npm run i18n:export`.
 
 ### Документация
@@ -132,7 +103,7 @@ Major release. Преемник SST `0.4.4`. `PROJECT_VERSION` в `voicesub-type
 - `docs/TECHNICAL_ARCHITECTURE.md`, `docs/TECHNICAL_ARCHITECTURE.en.md` — полная перезапись под VoiceSub 0.5.0.
 - `README.md`, `README.ru.md`, `docs/WIKI.en.md`, `docs/WIKI.ru.md` — актуализированы под новый стек.
 - Инженерный контракт: `docs/VOICESUB_ENGINEERING_CONTRACT.ru.md`; roadmap: `docs/plans/voicesub_roadmap.ru.md`.
-- **2026-06-10 sync:** MSI → NSIS installer во всех user/dev docs; overlay empty-state cleanup (`disposeRenderContainer`); `AGENTS.md` phase status; roadmap §12.
+- **2026-06-10 sync:** MSI → NSIS; overlay TTL cleanup; update check (не stub); баннер обновлений; `AGENTS.md`; roadmap §12.
 
 ### Тесты
 
@@ -143,7 +114,8 @@ npm run test:frontend
 ```
 
 - Phase 0 automated soak: `voicesub-http/tests/http_ws_smoke.rs::phase0_soak_checklist_automated`.
-- Golden parity full suite и public GitHub release gate — **deferred** (roadmap §12). Локальный NSIS installer собирается через `build-release.ps1`.
+- `voicesub-config`: `normalizes_updates_defaults_for_legacy_configs`; `voicesub-types`: version/update payload; `overlay_contract.rs`; `translation-helpers.validation.test.ts`; `roundtrip_twitch_ignore_users`.
+- Golden parity full suite — **deferred** (roadmap §12).
 
 ## 0.4.4
 
