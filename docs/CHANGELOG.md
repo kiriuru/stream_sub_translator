@@ -8,7 +8,7 @@
 
 ## 0.5.1
 
-Patch release. `PROJECT_VERSION` в `voicesub-types::version.rs` — **0.5.1**; `config_version` **8** (без изменений). Относительно [v0.5.0](https://github.com/kiriuru/stream_sub_translator/releases/tag/v0.5.0): нативный dual-sink TTS (Rust/cpal), режим Sonic вместо browser HTMLAudio, Twitch multi-channel (до 5 IRC) + hot-apply фильтров, сохранение цифр в чате, стабилизация длинных сессий (ротация логов, WebView2 power/memory, telemetry), умная очередь TTS. HTTP/WebSocket контракты subtitle/translation **не менялись**.
+Patch release. `PROJECT_VERSION` в `voicesub-types::version.rs` — **0.5.1**; `config_version` **8** (без изменений). Относительно [v0.5.0](https://github.com/kiriuru/stream_sub_translator/releases/tag/v0.5.0): нативный dual-sink TTS (Rust/cpal), режим Sonic вместо browser HTMLAudio, Twitch multi-channel (до 5 IRC) + hot-apply фильтров, сохранение цифр в чате, стабилизация длинных сессий (ротация логов, WebView2 power/memory, telemetry), умная очередь TTS. HTTP/WebSocket контракты subtitle/translation **не менялись**. GitHub release: [v0.5.1](https://github.com/kiriuru/stream_sub_translator/releases/tag/v0.5.1).
 
 ### TTS — нативный dual-sink и воспроизведение
 
