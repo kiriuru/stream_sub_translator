@@ -95,7 +95,10 @@ pub fn process_chat_message(
         );
     }
 
-    let spoken_nick = resolve_spoken_nick(settings, login, display_name);
+    let spoken_nick = strip_symbols_for_speech(
+        &resolve_spoken_nick(settings, login, display_name),
+        settings,
+    );
 
     let fallback_lang = settings.language.trim().to_lowercase();
     let language = if settings.detect_language {
@@ -126,6 +129,10 @@ pub fn process_chat_message(
     }
 }
 
+fn strip_symbols_for_speech(text: &str, settings: &TwitchTtsSettings) -> String {
+    crate::symbols::strip_configured_symbols(text, &settings.strip_symbols)
+}
+
 fn build_speak_text(settings: &TwitchTtsSettings, spoken_nick: &str, clean_text: &str) -> String {
     if !settings.include_username {
         return clean_text.to_string();
@@ -149,7 +156,10 @@ fn empty_result(
     speakable: bool,
     skip_reason: Option<&'static str>,
 ) -> ProcessedChatMessage {
-    let spoken_nick = resolve_spoken_nick(settings, login, display_name);
+    let spoken_nick = strip_symbols_for_speech(
+        &resolve_spoken_nick(settings, login, display_name),
+        settings,
+    );
     ProcessedChatMessage {
         clean_text: raw_text.trim().to_string(),
         spoken_nick: spoken_nick.clone(),
@@ -419,7 +429,8 @@ mod tests {
         assert!(out.speakable);
         assert_eq!(out.language, "ru");
         assert_eq!(out.clean_text, "Привет");
-        assert_eq!(out.speak_text, "sasha_12041998. Привет");
+        assert_eq!(out.spoken_nick, "sasha12041998");
+        assert_eq!(out.speak_text, "sasha12041998. Привет");
     }
 
     #[test]
@@ -520,6 +531,28 @@ mod tests {
         );
         assert!(out.speakable);
         assert_eq!(out.clean_text, "pay go");
+    }
+
+    #[test]
+    fn strip_symbols_removes_underscore_from_message_and_nick() {
+        let settings = TwitchTtsSettings {
+            strip_symbols: vec!["@".into(), "&".into(), "$".into(), "_".into()],
+            ..Default::default()
+        };
+        let registry = EmoteRegistry::new();
+        let out = process_chat_message(
+            &settings,
+            &no_replacement(),
+            &registry,
+            "cool_guy",
+            "Cool_Guy",
+            "see you_later",
+            None,
+        );
+        assert!(out.speakable);
+        assert_eq!(out.clean_text, "see youlater");
+        assert_eq!(out.spoken_nick, "CoolGuy");
+        assert_eq!(out.speak_text, "CoolGuy. see youlater");
     }
 
     #[test]

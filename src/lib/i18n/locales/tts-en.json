@@ -128,7 +128,7 @@
   "tts.twitch.ignore_users": "Ignored users",
   "tts.twitch.ignore_users_placeholder": "user1, user2",
   "tts.twitch.strip_symbols": "Symbols not spoken",
-  "tts.twitch.strip_symbols_placeholder": "@, &, $",
+  "tts.twitch.strip_symbols_placeholder": "@, &, $, _",
   "tts.twitch.strip_symbols_hint": "Comma-separated tokens removed before TTS. Leave empty to read all symbols.",
   "tts.twitch.settings_saved": "Settings applied",
   "tts.twitch.settings_saving": "Saving…",

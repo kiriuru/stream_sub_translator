@@ -786,6 +786,12 @@ impl TtsModuleService {
             .map_err(|e| TtsServiceError::InvalidProvider(e.to_string()))
     }
 
+    pub fn queue_force_idle_all(&self) {
+        debug!(target: "voicesub.tts", "queue force idle all channels");
+        trace::trace("queue", "force_idle_all", json!({}));
+        self.queues.force_idle_all();
+    }
+
     /// Deprecated: clears speech channel only.
     pub fn queue_clear(&self) {
         let _ = self.queue_clear_channel(CHANNEL_SPEECH);

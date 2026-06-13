@@ -128,7 +128,7 @@
   "tts.twitch.ignore_users": "無視するユーザー",
   "tts.twitch.ignore_users_placeholder": "user1, user2",
   "tts.twitch.strip_symbols": "読み上げない記号",
-  "tts.twitch.strip_symbols_placeholder": "@, &, $",
+  "tts.twitch.strip_symbols_placeholder": "@, &, $, _",
   "tts.twitch.strip_symbols_hint": "カンマ区切り。空欄ですべての記号を読み上げます。",
   "tts.twitch.settings_saved": "設定を適用しました",
   "tts.twitch.settings_saving": "保存中…",

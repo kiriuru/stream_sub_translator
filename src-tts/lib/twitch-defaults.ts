@@ -14,7 +14,7 @@ export const defaultTwitchSettings = (): TwitchTtsSettings => ({
   max_chars: 200,
   block_commands: true,
   ignore_users: [],
-  strip_symbols: ["@", "&", "$"],
+  strip_symbols: ["@", "&", "$", "_"],
   strip_emotes: true,
   strip_emoji: true,
   strip_links: true,

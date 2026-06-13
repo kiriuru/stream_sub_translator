@@ -148,6 +148,11 @@ export async function channelForceIdle(channel: SpeechChannel): Promise<void> {
   return invoke("tts_channel_force_idle", { channel });
 }
 
+/** Unblock Rust queues left in `Speaking` after an abrupt TTS window close. */
+export async function recoverStuckSpeechQueues(): Promise<void> {
+  await Promise.all([channelForceIdle("speech"), channelForceIdle("twitch")]);
+}
+
 export async function fetchResourceTelemetry(): Promise<ResourceTelemetry> {
   return invoke<ResourceTelemetry>("tts_get_resource_telemetry");
 }

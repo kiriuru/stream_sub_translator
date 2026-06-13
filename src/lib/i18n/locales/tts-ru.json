@@ -128,7 +128,7 @@
   "tts.twitch.ignore_users": "Игнорируемые пользователи",
   "tts.twitch.ignore_users_placeholder": "user1, user2",
   "tts.twitch.strip_symbols": "Не озвучивать символы",
-  "tts.twitch.strip_symbols_placeholder": "@, &, $",
+  "tts.twitch.strip_symbols_placeholder": "@, &, $, _",
   "tts.twitch.strip_symbols_hint": "Токены через запятую удаляются перед TTS. Пусто — озвучивать все символы.",
   "tts.twitch.settings_saved": "Настройки применены",
   "tts.twitch.settings_saving": "Сохранение…",

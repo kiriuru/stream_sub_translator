@@ -19,6 +19,17 @@ use voicesub_twitch::TwitchConnectionStatus;
 
 use crate::webview_memory::{self, SharedWebviewMemoryManager};
 
+/// Stop native playback and unblock Rust speech queues after the TTS WebView closes mid-utterance.
+pub fn recover_tts_after_window_closed(state: &TtsState) {
+    info!(
+        target: "voicesub.tts",
+        "recovering speech queues after TTS module window closed"
+    );
+    let _ = state.playback.stop_channel(CHANNEL_SPEECH);
+    let _ = state.playback.stop_channel(CHANNEL_TWITCH);
+    state.service.queue_force_idle_all();
+}
+
 /// Close the module window when the desktop shell shuts down (same lifecycle as browser worker).
 pub fn close_tts_window(app: &AppHandle) {
     let Some(window) = app.get_webview_window(TTS_WINDOW_LABEL) else {
@@ -616,6 +627,8 @@ pub async fn tts_open_window(
     }
 
 
+
+    recover_tts_after_window_closed(&state);
 
     let url = build_tts_module_url(state.bind_addr);
 

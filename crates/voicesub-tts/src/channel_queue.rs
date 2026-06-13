@@ -92,6 +92,13 @@ impl DualChannelSpeechQueue {
         debug!(target: "voicesub.tts", channel, "channel queue forced idle");
         Ok(())
     }
+
+    /// Reset stuck `Speaking` on both channels without dropping queued items.
+    pub fn force_idle_all(&self) {
+        self.speech.lock().expect("speech queue lock").force_idle();
+        self.twitch.lock().expect("twitch queue lock").force_idle();
+        debug!(target: "voicesub.tts", "all channel queues forced idle");
+    }
 }
 
 #[cfg(test)]
@@ -138,6 +145,44 @@ mod tests {
                 .expect("item")
                 .id,
             "t1"
+        );
+    }
+
+    #[test]
+    fn force_idle_all_unblocks_both_channels() {
+        let queues = DualChannelSpeechQueue::new();
+        queues
+            .enqueue(CHANNEL_SPEECH, item("s1"), 8)
+            .expect("speech enqueue");
+        queues
+            .enqueue(CHANNEL_SPEECH, item("s2"), 8)
+            .expect("speech enqueue");
+        queues
+            .enqueue(CHANNEL_TWITCH, item("t1"), 8)
+            .expect("twitch enqueue");
+        queues
+            .enqueue(CHANNEL_TWITCH, item("t2"), 8)
+            .expect("twitch enqueue");
+        let _ = queues.begin_next(CHANNEL_SPEECH).expect("speech begin");
+        let _ = queues.begin_next(CHANNEL_TWITCH).expect("twitch begin");
+        assert!(queues.begin_next(CHANNEL_SPEECH).expect("blocked").is_none());
+        assert!(queues.begin_next(CHANNEL_TWITCH).expect("blocked").is_none());
+        queues.force_idle_all();
+        assert_eq!(
+            queues
+                .begin_next(CHANNEL_SPEECH)
+                .expect("speech resume")
+                .expect("item")
+                .id,
+            "s2"
+        );
+        assert_eq!(
+            queues
+                .begin_next(CHANNEL_TWITCH)
+                .expect("twitch resume")
+                .expect("item")
+                .id,
+            "t2"
         );
     }
 

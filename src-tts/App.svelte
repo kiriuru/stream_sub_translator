@@ -10,6 +10,7 @@
     loadTtsConfig,
     listRustOutputDevices,
     planSubtitleSpeech,
+    recoverStuckSpeechQueues,
     resetSubtitlePlanner,
     fetchPythonTtsStatus,
     fetchResourceTelemetry,
@@ -581,6 +582,7 @@
     }
 
     try {
+      await recoverStuckSpeechQueues();
       config = await loadTtsConfig();
       ttsTrace("app", "config_loaded", {
         enabled: config.enabled,

@@ -23,7 +23,7 @@ use voicesub_logging::{
     log_shutdown_step, set_config_full_logging_enabled,
 };
 use voicesub_runtime::{RuntimeHandle, RuntimeService};
-use voicesub_tts::{TtsModuleService, TwitchOAuthBridge};
+use voicesub_tts::{TtsModuleService, TTS_WINDOW_LABEL, TwitchOAuthBridge};
 
 use crate::tts::TtsState;
 use crate::webview_memory::{SharedWebviewMemoryManager, WebviewMemoryManager};
@@ -269,6 +269,18 @@ pub fn run() {
                             memory.inner(),
                         );
                     }
+                }
+                WindowEvent::CloseRequested { .. } if window.label() == TTS_WINDOW_LABEL => {
+                    tts::recover_tts_after_window_closed(window.state::<TtsState>().inner());
+                    let memory = window.state::<SharedWebviewMemoryManager>();
+                    if let Ok(mut guard) = memory.lock() {
+                        guard.set_tts_visible(false);
+                        guard.set_tts_focused(false);
+                    }
+                    crate::webview_memory::refresh_from_state(
+                        &window.app_handle(),
+                        memory.inner(),
+                    );
                 }
                 WindowEvent::CloseRequested { api, .. } if window.label() == "main" => {
                     api.prevent_close();

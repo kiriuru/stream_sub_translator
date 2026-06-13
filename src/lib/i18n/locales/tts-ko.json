@@ -128,7 +128,7 @@
   "tts.twitch.ignore_users": "무시할 사용자",
   "tts.twitch.ignore_users_placeholder": "user1, user2",
   "tts.twitch.strip_symbols": "읽지 않을 기호",
-  "tts.twitch.strip_symbols_placeholder": "@, &, $",
+  "tts.twitch.strip_symbols_placeholder": "@, &, $, _",
   "tts.twitch.strip_symbols_hint": "쉼표로 구분합니다. 비우면 모든 기호를 읽습니다.",
   "tts.twitch.settings_saved": "설정 적용됨",
   "tts.twitch.settings_saving": "저장 중…",

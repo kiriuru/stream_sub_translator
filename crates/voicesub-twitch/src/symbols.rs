@@ -41,6 +41,15 @@ mod tests {
     }
 
     #[test]
+    fn strips_underscore_token() {
+        let symbols = vec!["@".into(), "&".into(), "$".into(), "_".into()];
+        assert_eq!(
+            strip_configured_symbols("snake_case @you & me $1", &symbols),
+            "snakecase you me 1"
+        );
+    }
+
+    #[test]
     fn supports_multi_char_tokens() {
         assert_eq!(
             strip_configured_symbols("wait... ok", &["...".into()]),

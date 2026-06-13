@@ -128,7 +128,7 @@
   "tts.twitch.ignore_users": "忽略的用户",
   "tts.twitch.ignore_users_placeholder": "user1, user2",
   "tts.twitch.strip_symbols": "不朗读的符号",
-  "tts.twitch.strip_symbols_placeholder": "@, &, $",
+  "tts.twitch.strip_symbols_placeholder": "@, &, $, _",
   "tts.twitch.strip_symbols_hint": "逗号分隔，朗读前移除。留空则朗读全部符号。",
   "tts.twitch.settings_saved": "设置已应用",
   "tts.twitch.settings_saving": "保存中…",

@@ -160,7 +160,7 @@ fn default_block_commands() -> bool {
 }
 
 fn default_strip_symbols() -> Vec<String> {
-    vec!["@".into(), "&".into(), "$".into()]
+    vec!["@".into(), "&".into(), "$".into(), "_".into()]
 }
 
 fn default_true() -> bool {
