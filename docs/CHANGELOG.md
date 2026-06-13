@@ -8,7 +8,7 @@
 
 ## 0.5.1
 
-Patch release. `PROJECT_VERSION` в `voicesub-types::version.rs` — **0.5.1**; `config_version` **8** (без изменений). Относительно [v0.5.0](https://github.com/kiriuru/voicesub/releases/tag/v0.5.0): нативный dual-sink TTS (Rust/cpal), режим Sonic вместо browser HTMLAudio, Twitch multi-channel (до 5 IRC) + hot-apply фильтров, сохранение цифр в чате, стабилизация длинных сессий (ротация логов, WebView2 power/memory, telemetry), умная очередь TTS. HTTP/WebSocket контракты subtitle/translation **не менялись**. GitHub release: [v0.5.1](https://github.com/kiriuru/voicesub/releases/tag/v0.5.1). Репозиторий: **`kiriuru/voicesub`** (миграция с `stream_sub_translator` при загрузке config).
+Patch release. `PROJECT_VERSION` в `voicesub-types::version.rs` — **0.5.1**; `config_version` **8** (без изменений). Относительно [v0.5.0](https://github.com/kiriuru/VoiceSub/releases/tag/v0.5.0): нативный dual-sink TTS (Rust/cpal), режим Sonic вместо browser HTMLAudio, Twitch multi-channel (до 5 IRC) + hot-apply фильтров, сохранение цифр в чате, стабилизация длинных сессий (ротация логов, WebView2 power/memory, telemetry), умная очередь TTS. HTTP/WebSocket контракты subtitle/translation **не менялись**. GitHub release: [v0.5.1](https://github.com/kiriuru/VoiceSub/releases/tag/v0.5.1). Репозиторий: **`kiriuru/VoiceSub`** (миграция с `stream_sub_translator` при загрузке config).
 
 ### TTS — нативный dual-sink и воспроизведение
 
@@ -218,7 +218,7 @@ Major release. Преемник frozen SST `0.4.4`. Все пункты ниже
 - **`voicesub-types::version`**: semver-сравнение, `extract_latest_github_release`, `build_version_info_payload`, `release_url_for`.
 - **`POST /api/updates/check`** + **`GET /api/version`**: poll GitHub Releases (`updates.github_repo`, channel `stable`/`prerelease`, interval `check_interval_hours`).
 - **Startup:** `spawn_startup_check()`; dashboard — check на bootstrap (`UpdateBanner.svelte`).
-- **Config defaults:** `updates.enabled: true`, `github_repo: kiriuru/voicesub` (legacy `kiriuru/stream_sub_translator` мигрирует при load).
+- **Config defaults:** `updates.enabled: true`, `github_repo: kiriuru/VoiceSub` (legacy `kiriuru/stream_sub_translator` мигрирует при load).
 - **UI:** баннер «доступна новая версия» (en/ru/ja/ko/zh); **Скачать** → Tauri `open_external_https_url` (системный браузер).
 
 ### Dashboard UI (Svelte)

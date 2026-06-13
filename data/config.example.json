@@ -124,7 +124,7 @@
   "updates": {
     "enabled": true,
     "provider": "github_releases",
-    "github_repo": "kiriuru/voicesub",
+    "github_repo": "kiriuru/VoiceSub",
     "release_channel": "stable",
     "check_interval_hours": 12,
     "last_checked_utc": "",

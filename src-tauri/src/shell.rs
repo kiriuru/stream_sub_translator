@@ -77,7 +77,7 @@ mod tests {
     #[test]
     fn allows_github_release_urls() {
         assert!(validate_external_https_url(
-            "https://github.com/kiriuru/voicesub/releases/tag/v0.5.1"
+            "https://github.com/kiriuru/VoiceSub/releases/tag/v0.5.1"
         )
         .is_ok());
     }
