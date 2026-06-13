@@ -1,5 +1,0 @@
-[alias]
-# Fast CI/dev loop: skip Tauri link and xtask; integration tests use isolated temp dirs.
-test-fast = "test --workspace --exclude voicesub-app --exclude xtask -- --test-threads=4"
-# Drop orphaned target/*/incremental/ hashes (safe: keeps newest dir per crate).
-prune-target = "run -p xtask -- prune-target"

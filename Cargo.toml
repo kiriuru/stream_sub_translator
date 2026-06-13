@@ -16,7 +16,6 @@ members = [
     "crates/voicesub-twitch",
     "crates/voicesub-runtime",
     "src-tauri",
-    "xtask",
 ]
 
 [workspace.package]

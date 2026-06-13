@@ -7,7 +7,7 @@
 **Предшественник:** SST `0.4.4` — `F:\AI\stream-sub-translator`  
 **Baseline:** `0.5.0` | **Текущий patch:** `0.5.1` | **Продукт:** VoiceSub  
 
-Политика: `AGENTS.md`. **Инженерный контракт (обязателен):** `docs/VOICESUB_ENGINEERING_CONTRACT.ru.md`. Техническая архитектура — `docs/TECHNICAL_ARCHITECTURE.md` (обновляется по фазам).
+Политика: `AGENTS.md` (локально). Техническая архитектура — `docs/TECHNICAL_ARCHITECTURE.md` (обновляется по фазам).
 
 **Сводка выполнения (2026-06-13):** Фаза 0 закрыта (soak пройден). **NSIS installer pipeline работает** (`VoiceSub_0.5.1_x64-setup.exe`). Patch **0.5.1**: native/Sonic TTS dual-sink, Twitch multi-channel (до 5), hot-apply фильтров, сохранение цифр в чате. Golden parity, formal DoD Фазы 1 и публикация на GitHub — **отложены**. Паритет полей SST dashboard / preview=OBS / выбор default worker UI — **сняты** (свой стек и компоновка UI). Подробнее: §12.
 
@@ -37,7 +37,7 @@
 | GitHub releases | **Отложено** (Q-G1) |
 | Rust layout (Q-P1) | **Cargo workspace + `src-tauri/`** — см. §3.3 |
 | Сроки | **Не фиксируются** |
-| Инженерный приоритет | **Полный перенос SST без поломок** + **структура с day 1** + **тесты и детальные логи сразу** → `docs/VOICESUB_ENGINEERING_CONTRACT.ru.md` |
+| Инженерный приоритет | **Полный перенос SST без поломок** + **структура с day 1** + **тесты и детальные логи сразу** → `docs/TECHNICAL_ARCHITECTURE.md` |
 
 ---
 
@@ -85,7 +85,7 @@ flowchart TB
 
 ### 3.3 Rust workspace layout (Q-P1 — best practice)
 
-**Каноническое дерево, граф зависимостей, тесты и логи:** `docs/VOICESUB_ENGINEERING_CONTRACT.ru.md` §2–§4.
+**Каноническое дерево, граф зависимостей, тесты и логи:** `docs/TECHNICAL_ARCHITECTURE.md`.
 
 Кратко — по [Tauri v2](https://v2.tauri.app/start/project-structure/), [Cargo Workspaces](https://doc.rust-lang.org/book/ch14-03-cargo-workspaces.html), layered monorepo (one-way deps, `voicesub-types` at bottom):
 

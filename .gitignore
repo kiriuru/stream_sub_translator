@@ -60,16 +60,31 @@ user-data/
 .cache/
 .tmp/
 
-# Release scripts output dir — keep only the config file
-build/*
-!build/release.config.json
+# Release scripts output dir (local-only tooling)
+build/
+
+# --- Local-only: not published to Git (dev, installer, internal docs) ---
+AGENTS.md
+docs/VOICESUB_ENGINEERING_CONTRACT.ru.md
+start-voicesub.bat
+build-release.ps1
+build-release-msi.ps1
+build-release-msi.bat
+scripts/validate-nsis-i18n.mjs
+scripts/clean-workspace.ps1
+xtask/
+.cargo/config.toml
+src-tauri/windows/hooks.nsh
+src-tauri/windows/installer.nsi
+legacy/
 
 # --- OS / IDE ---
 .vscode/
 .idea/
+.cursor/
+.codex/
 .DS_Store
 Thumbs.db
-.codex/
 *.swp
 *~
 

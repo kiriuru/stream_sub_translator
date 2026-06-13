@@ -93,8 +93,6 @@ npm run build
 npm run test:frontend
 ```
 
-Политика: `AGENTS.md`, контракт `docs/VOICESUB_ENGINEERING_CONTRACT.ru.md`.
-
 ## Документация
 
 - [Wiki (RU)](./docs/WIKI.ru.md) / [Wiki (EN)](./docs/WIKI.en.md) — пользовательский гайд

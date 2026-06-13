@@ -23,7 +23,7 @@
    - передачи бинарных данных через Tauri IPC;
    - ограничений `rodio` (Send/Sync, lifetime `OutputStream`).
 4. **Не ломать рабочую логику** fetch, planner, Twitch IRC, proxy — менять только playback/routing, если задача не говорит иное.
-5. Следовать **`AGENTS.md`** и **`docs/VOICESUB_ENGINEERING_CONTRACT.ru.md`**: тесты с новым Rust-кодом, `tracing`, без бизнес-логики в `src-tauri`.
+5. Следовать **`AGENTS.md`** (локально): тесты с новым Rust-кодом, `tracing`, без бизнес-логики в `src-tauri`.
 
 ### 0.2 Когда документ и код расходятся
 
@@ -345,7 +345,7 @@ Emit из `src-tauri` после completion callback из `PlaybackHub`.
 | Документ / путь | Зачем |
 | --- | --- |
 | `AGENTS.md` | политика, тесты, структура |
-| `docs/VOICESUB_ENGINEERING_CONTRACT.ru.md` | контракт, слои |
+| `docs/TECHNICAL_ARCHITECTURE.md` | архитектура, слои |
 | `docs/TECHNICAL_ARCHITECTURE.md` §17 | TTS module canon |
 | `src-tts/App.svelte` | текущий enqueue |
 | `src-tts/lib/speech-engine.ts` | очередь, prefetch |

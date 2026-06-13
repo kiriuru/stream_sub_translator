@@ -2,7 +2,7 @@
 
 Valid for the codebase where `voicesub-types::PROJECT_VERSION = "0.5.1"`.
 
-This document describes the actual VoiceSub project layout, HTTP/WebSocket/Tauri IPC contracts, configuration schema, data flow through the Rust runtime, and frontend surfaces. It is the **canonical full technical reference** for active development. README is a short product overview; CHANGELOG is release history; engineering contract is `docs/VOICESUB_ENGINEERING_CONTRACT.ru.md`; roadmap is `docs/plans/voicesub_roadmap.ru.md`.
+This document describes the actual VoiceSub project layout, HTTP/WebSocket/Tauri IPC contracts, configuration schema, data flow through the Rust runtime, and frontend surfaces. It is the **canonical full technical reference** for active development. README is a short product overview; CHANGELOG is release history; roadmap is `docs/plans/voicesub_roadmap.ru.md`.
 
 **Predecessor:** SST Desktop `0.4.4` (`F:\AI\stream-sub-translator`) — read-only reference for parity porting. The SST tech doc is **not updated**; the VoiceSub canon is **this file**.
 
@@ -50,7 +50,7 @@ This document describes the actual VoiceSub project layout, HTTP/WebSocket/Tauri
 | --- | --- |
 | `docs/WIKI.en.md` | User guide (EN) |
 | `docs/WIKI.ru.md` | User guide (RU) |
-| `docs/VOICESUB_ENGINEERING_CONTRACT.ru.md` | Engineering contract (mandatory for agents) |
+| `docs/TECHNICAL_ARCHITECTURE.md` | Technical architecture (this document) |
 | `docs/plans/voicesub_roadmap.ru.md` | Roadmap for 0.5.0+ phases |
 | `docs/CHANGELOG.md` | Change history (SST legacy + VoiceSub) |
 | `AGENTS.md` | Short agent policy |

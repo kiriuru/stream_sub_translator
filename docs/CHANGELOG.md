@@ -234,7 +234,7 @@ Major release. Преемник frozen SST `0.4.4`. Все пункты ниже
 
 - `docs/TECHNICAL_ARCHITECTURE.md`, `docs/TECHNICAL_ARCHITECTURE.en.md` — VoiceSub **0.5.1** (TTS native/Sonic, Twitch pipeline, test harness).
 - `README.md`, `README.ru.md`, `docs/WIKI.en.md`, `docs/WIKI.ru.md` — актуализированы под новый стек.
-- Инженерный контракт: `docs/VOICESUB_ENGINEERING_CONTRACT.ru.md`; roadmap: `docs/plans/voicesub_roadmap.ru.md`.
+- Roadmap: `docs/plans/voicesub_roadmap.ru.md`.
 - **2026-06-10 sync:** MSI → NSIS; overlay TTL cleanup; update check (не stub); баннер обновлений; `AGENTS.md`; roadmap §12.
 
 ### Тесты

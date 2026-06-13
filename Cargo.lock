@@ -6579,16 +6579,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "xtask"
-version = "0.5.1"
-dependencies = [
- "serde",
- "serde_json",
- "voicesub-config",
- "voicesub-types",
-]
-
-[[package]]
 name = "xz2"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
