@@ -78,7 +78,11 @@ export async function fetchVersion(): Promise<VersionInfo> {
 }
 
 export async function checkUpdates(): Promise<VersionInfo> {
-  return jsonFetch("/api/updates/check", { method: "POST" });
+  return jsonFetch("/api/updates/check", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
 }
 
 export async function fetchHealth(): Promise<Record<string, unknown>> {

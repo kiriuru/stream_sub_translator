@@ -526,12 +526,16 @@ async fn updates_check_ok() {
     assert_eq!(body["version"], voicesub_types::PROJECT_VERSION);
     assert_eq!(body["current_version"], voicesub_types::PROJECT_VERSION);
     assert_eq!(body["sync"]["enabled"], true);
-    // Live GitHub latest is v0.5.0 (2026-06); local build is 0.5.2 — no false-positive banner.
-    assert_eq!(body["sync"]["update_available"], false);
     let latest = body["sync"]["latest_known_version"]
         .as_str()
         .unwrap_or("");
     assert!(!latest.is_empty(), "expected cached latest_known_version from GitHub");
+    let update_available = body["sync"]["update_available"].as_bool().unwrap_or(false);
+    assert_eq!(
+        update_available,
+        voicesub_types::is_remote_version_newer(voicesub_types::PROJECT_VERSION, latest),
+        "update_available must track semver vs live GitHub latest ({latest})"
+    );
     handle.shutdown().await;
 }
 

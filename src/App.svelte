@@ -10,6 +10,7 @@
     checkUpdates,
     openExternalUrl,
     fetchVersion,
+    postClientLog,
     loadSettings,
     saveSettings,
     startRuntime,
@@ -145,7 +146,10 @@
     try {
       const versionInfo = await checkUpdates();
       applyVersionInfo(versionInfo);
-    } catch {
+    } catch (err) {
+      void postClientLog("dashboard", "update check failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
       try {
         const versionInfo = await fetchVersion();
         applyVersionInfo(versionInfo);
@@ -177,7 +181,7 @@
         saveStatus: { tone: "default" },
       });
       applyUiFromConfig(loadedConfig);
-      void refreshUpdateCheck();
+      await refreshUpdateCheck();
     } catch (err) {
       patchApp({
         saveStatus: {

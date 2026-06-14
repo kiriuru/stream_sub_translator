@@ -3,8 +3,10 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
+use tracing::info;
 use voicesub_types::{
-    build_version_info_payload, extract_latest_github_release, release_url_for, PROJECT_VERSION,
+    build_version_info_payload, extract_latest_github_release, is_remote_version_newer,
+    release_url_for, PROJECT_VERSION,
 };
 
 use super::state::HttpState;
@@ -95,6 +97,7 @@ pub async fn check_now(state: &Arc<HttpState>, force: bool) -> Value {
 
     let mut payload = build_version_info_payload(Some(&config));
     if !enabled {
+        info!("update check skipped: updates.enabled=false in config");
         payload["sync"]["message"] = json!("Update checks are disabled in settings.");
         return payload;
     }
@@ -104,6 +107,17 @@ pub async fn check_now(state: &Arc<HttpState>, force: bool) -> Value {
         return payload;
     }
 
+    let latest_known = updates
+        .get("latest_known_version")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    // After a local upgrade the cached GitHub latest can lag behind PROJECT_VERSION
+    // (e.g. cache 0.5.1 while running 0.5.2). Do not let the interval gate hide newer tags.
+    let cache_stale = !latest_known.is_empty()
+        && is_remote_version_newer(&latest_known, PROJECT_VERSION);
+
     let last_checked = updates
         .get("last_checked_utc")
         .and_then(Value::as_str)
@@ -112,7 +126,7 @@ pub async fn check_now(state: &Arc<HttpState>, force: bool) -> Value {
     if !force {
         if let Some(last_checked) = last_checked {
             let due_at = last_checked + chrono::Duration::hours(interval_hours);
-            if now < due_at {
+            if now < due_at && !cache_stale {
                 payload["sync"]["message"] = json!("Update check skipped (interval not reached yet).");
                 return payload;
             }
@@ -198,6 +212,17 @@ pub async fn check_now(state: &Arc<HttpState>, force: bool) -> Value {
 
 pub fn spawn_startup_check(state: Arc<HttpState>) {
     tokio::spawn(async move {
-        let _ = check_now(&state, false).await;
+        let _ = check_now(&state, true).await;
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_stale_when_local_version_ahead_of_cached_latest() {
+        assert!(is_remote_version_newer("0.5.1", "0.5.2"));
+        assert!(!is_remote_version_newer("0.5.3", "0.5.2"));
+    }
 }

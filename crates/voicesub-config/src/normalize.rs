@@ -475,6 +475,34 @@ fn normalize_updates_config(root: &mut Map<String, Value>) {
         }
     }
 
+    // SST shipped updates.enabled=false by default; enable VoiceSub release checks when the
+    // section still has virgin metadata (never polled) on the canonical VoiceSub repo.
+    let github_repo = updates
+        .get("github_repo")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let never_checked = updates
+        .get("last_checked_utc")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+        && updates
+            .get("latest_known_version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .is_empty();
+    let voice_sub_repo = github_repo == DEFAULT_GITHUB_REPO || github_repo == LEGACY_GITHUB_REPO;
+    if updates.get("enabled").and_then(|v| v.as_bool()) == Some(false)
+        && never_checked
+        && voice_sub_repo
+    {
+        updates.insert("enabled".into(), json!(true));
+    }
+
     let release_channel = updates
         .get("release_channel")
         .and_then(|v| v.as_str())
@@ -633,6 +661,19 @@ mod tests {
         }));
         assert_eq!(out["updates"]["enabled"], false);
         assert_eq!(out["updates"]["github_repo"], "example/repo");
+    }
+
+    #[test]
+    fn enables_voice_sub_updates_for_sst_default_disabled_state() {
+        let out = normalize_config_payload(json!({
+            "updates": {
+                "enabled": false,
+                "github_repo": DEFAULT_GITHUB_REPO,
+                "last_checked_utc": "",
+                "latest_known_version": ""
+            }
+        }));
+        assert_eq!(out["updates"]["enabled"], true);
     }
 
     #[test]
